@@ -1,0 +1,32 @@
+python main.py --test-solana
+python main.py --wallet-info
+
+# Tester l'analyse sur le token SOL wrappé
+python main.py --test-rugcheck So11111111111111111111111111111111111111112
+
+# Ou tester sur BONK (token populaire)
+python main.py --test-rugcheck DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
+
+python main.py --test-dexscreener DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
+
+python main.py --trending-analysis
+
+python main.py --test-run
+
+python main.py --log-level DEBUG
+python main.py --trending-analysis --continuous
+
+timeout 1800 python main.py
+
+
+get_trending_pairs et
+get_newest_tokens_realtime
+
+python main.py --newest-analysis
+
+
+python main.py --newest-analysis 6 --log-level DEBUG
+
+python main.py --newest-analysis 6
+
+python main.py --test-endpoints
