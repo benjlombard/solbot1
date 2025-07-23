@@ -9,6 +9,31 @@ paths = [
     '''.*\.sqlite.*$''',
     '''\.env$''',           # Exclut .env
     '''\.env\..*$''',       # Exclut .env.local, .env.prod, etc.
+    "data/",
+    "**/*.db",
+    "**/*.db-wal", 
+    "**/*.db-shm",
+    "**/*.sqlite*",
+    ".env",              # Format simple
+    ".env.*",            # Format simple pour .env.local, etc.
+     '''data/.*''',
+    '''.*\.db.*$''',
+    '''.*\.sqlite.*$''',
+    '''^\.env$''',        # ^ = début de ligne, $ = fin de ligne
+    '''^\.env\..*$''',    # Pour .env.local, .env.prod, etc.
+    '''__pycache__/.*''',
+    '''.*\.pyc$''',
+    '''.*\.pyo$''',
+    '''.*\.pyd$''',
+    '''.pytest_cache/.*''',
+    '''\.mypy_cache/.*''',
+    "__pycache__/",
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "**/*.pyo", 
+    "**/*.pyd",
+    ".pytest_cache/",
+    ".mypy_cache/"
 ]
 
 
@@ -17,31 +42,108 @@ paths = [
 id = "password-detection"
 description = "Detect passwords"
 regex = '''(?i)password\s*[:=]\s*["']([^"']{3,})["']'''
+[rules.allowlist]
+paths = ['''^\.env$''', '''^\.env\..*$''']
+regexes = [
+    '''(?i).*your.*''',
+    '''(?i).*example.*''',
+    '''(?i).*getenv.*''',
+    '''(?i).*\.get\(.*''',
+    '''os\.getenv\(''',
+    '''getenv\(''',
+    '''env\.get\(''',
+    '''process\.env\.''',
+    '''config\.get\(''',
+    '''settings\.''',
+    '''environ\.get\(''',
+]
 
 [[rules]]
 id = "secret-detection"  
 description = "Detect secrets and keys"
-regex = '''(?i)(secret|private|key|token|api_key)\s*[:=]\s*["']([^"']{6,})["']'''
+regex = '''(?i)(secret|private|token|api_key)\s*[:=]\s*["']([^"']{6,})["']'''
+[rules.allowlist]
+paths = ['''^\.env$''', '''^\.env\..*$''']
+regexes = [
+    '''(?i).*your.*''',
+    '''(?i).*example.*''',
+    '''(?i).*getenv.*''',
+    '''(?i).*\.get\(.*''',
+    '''os\.getenv\(''',
+    '''getenv\(''',
+    '''env\.get\(''',
+    '''process\.env\.''',
+    '''config\.get\(''',
+    '''settings\.''',
+    '''environ\.get\(''',
+]
 
 [[rules]]
 id = "private-key-detection"
 description = "Detect private keys"
 regex = '''-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----'''
+[rules.allowlist]
+paths = ['''^\.env$''', '''^\.env\..*$''']
+regexes = [
+    '''(?i).*your.*''',
+    '''(?i).*example.*''',
+    '''(?i).*getenv.*''',
+    '''(?i).*\.get\(.*''',
+    '''os\.getenv\(''',
+    '''getenv\(''',
+    '''env\.get\(''',
+    '''process\.env\.''',
+    '''config\.get\(''',
+    '''settings\.''',
+    '''environ\.get\(''',
+]
 
 # NOUVELLE RÈGLE pour les variables d'environnement
 [[rules]]
 id = "env-private-keys"
 description = "Detect environment private keys"
 regex = '''(?i)[A-Z_]*PRIVATE[A-Z_]*\s*[:=]\s*["']([^"']{8,})["']'''
+[rules.allowlist]
+paths = ['''^\.env$''', '''^\.env\..*$''']
+regexes = [
+    '''(?i).*your.*''',
+    '''(?i).*example.*''',
+    '''(?i).*getenv.*''',
+    '''(?i).*\.get\(.*''',
+    '''os\.getenv\(''',
+    '''getenv\(''',
+    '''env\.get\(''',
+    '''process\.env\.''',
+    '''config\.get\(''',
+    '''settings\.''',
+    '''environ\.get\(''',
+]
 
 # RÈGLE SPÉCIFIQUE pour Solana (avec ET sans guillemets)
 [[rules]]
 id = "solana-keys"
 description = "Detect Solana keys"
 regex = '''(?i)SOLANA[A-Z_]*KEY\s*[:=]\s*["']?([^"'\s]{8,})["']?'''
+[rules.allowlist]
+paths = ['''^\.env$''', '''^\.env\..*$''']
+regexes = [
+    '''(?i).*your.*''',
+    '''(?i).*example.*''',
+    '''(?i).*getenv.*''',
+    '''(?i).*\.get\(.*''',
+    '''os\.getenv\(''',
+    '''getenv\(''',
+    '''env\.get\(''',
+    '''process\.env\.''',
+    '''config\.get\(''',
+    '''settings\.''',
+    '''environ\.get\(''',
+]
 
 # RÈGLE GÉNÉRALE pour variables d'environnement (avec ET sans guillemets)
 [[rules]]
 id = "sensitive-env-vars"
 description = "Detect sensitive environment variables"
-regex = '''(?i)(API_KEY|SECRET_KEY|PRIVATE_KEY|ACCESS_TOKEN|AUTH_TOKEN)\s*[:=]\s*["']?([^"'\s]{8,})["']?'''
+regex = '''(?i)^[^#]*(?:export\s+)?([A-Z_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z_]*)\s*[:=]\s*["']?([^"'\s()]{8,})["']?\s*(?:#.*)?$'''
+[rules.allowlist]
+paths = ['''^\.env$''', '''^\.env\..*$''']
