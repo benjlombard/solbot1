@@ -49,7 +49,7 @@ python main.py --newest-analysis 6
 python main.py --newest-analysis 6 --method timestamp
 
 # Mode continu avec méthode timestamp
-python main.py --continuous-newest 12 --scan-interval 1 --method timestamp
+python main.py --continuous-newest 6 --scan-interval 1 --method timestamp
 
 # Comparer les méthodes
 python main.py --newest-analysis 6 --method optimized
