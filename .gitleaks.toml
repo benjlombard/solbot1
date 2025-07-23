@@ -1,0 +1,62 @@
+# .gitleaks.toml
+[extend]
+# Patterns de fichiers à ignorer
+paths = [
+    '''data/.*''',
+    '''.*\.db$''',
+    '''.*\.db-wal$''',
+    '''.*\.db-shm$''',
+    '''.*\.sqlite.*$''',
+    '''\.env$''',           # Exclut .env
+    '''\.env\..*$''',       # Exclut .env.local, .env.prod, etc.
+]
+
+
+# Règles personnalisées restrictives
+[[rules]]
+id = "password-keyword"
+description = "Detect any password-related secrets"
+regex = '''(?i)(password|passwd|pwd)\s*[:=]\s*["']([^"']{3,})["']'''
+keywords = ["password", "passwd", "pwd"]
+
+[[rules]]
+id = "private-keyword"
+description = "Detect any private-related secrets"
+regex = '''(?i)(private|secret|key)\s*[:=]\s*["']([^"']{8,})["']'''
+keywords = ["private", "secret", "key"]
+
+[[rules]]
+id = "api-keys"
+description = "Detect API keys and tokens"
+regex = '''(?i)(api[_-]?key|token|access[_-]?key)\s*[:=]\s*["']([^"']{8,})["']'''
+keywords = ["api", "token", "access"]
+
+[[rules]]
+id = "database-credentials"
+description = "Detect database credentials"
+regex = '''(?i)(db[_-]?password|database[_-]?password|mysql[_-]?password)\s*[:=]\s*["']([^"']{3,})["']'''
+keywords = ["db", "database", "mysql"]
+
+[[rules]]
+id = "private-keys"
+description = "Detect private keys"
+regex = '''-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----'''
+keywords = ["BEGIN", "PRIVATE", "KEY"]
+
+[[rules]]
+id = "aws-keys"
+description = "AWS Access Keys"
+regex = '''AKIA[0-9A-Z]{16}'''
+keywords = ["AKIA"]
+
+[[rules]]
+id = "jwt-tokens"
+description = "JWT tokens"
+regex = '''eyJ[0-9a-zA-Z_-]*\.eyJ[0-9a-zA-Z_-]*\.[0-9a-zA-Z_-]*'''
+keywords = ["eyJ"]
+
+[[rules]]
+id = "generic-secrets"
+description = "Generic secret patterns"
+regex = '''(?i)(secret|password|private|key|token)\s*[:=]\s*["'][^"']{6,}["']'''
+keywords = ["secret", "password", "private", "key", "token"]

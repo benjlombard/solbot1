@@ -1,0 +1,10 @@
+# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks
+        entry: gitleaks
+        language: system
+        args: ['detect', '--source', '.','no-git','.gitleaks.toml']
+        pass_filenames: false

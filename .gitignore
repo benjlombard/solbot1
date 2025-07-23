@@ -1,0 +1,334 @@
+# .gitignore pour Solana Trading Bot
+# ===================================
+
+# === SÉCURITÉ CRITIQUE ===
+# Fichiers contenant des clés privées et secrets
+.env
+.env.local
+.env.production
+*.key
+*.pem
+id.json
+keypair.json
+wallet.json
+
+# Database files
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/trading_bot.db*
+data/
+
+# Fichiers de configuration sensibles
+config_production.py
+config_local.py
+secrets.py
+private_config.py
+
+# === DONNÉES DU BOT ===
+# Base de données et données générées
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Backups
+backups/
+backup_*
+*.backup
+
+# Cache et données temporaires
+cache/
+temp/
+tmp/
+*.cache
+
+# === PYTHON ===
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# === IDE ET ÉDITEURS ===
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# === SYSTÈME D'EXPLOITATION ===
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# === DONNÉES SPÉCIFIQUES AU BOT ===
+# Réponses API sauvegardées
+api_responses/
+*.json.bak
+
+# Données de simulation
+simulation/
+test_data/
+
+# Profiling
+profiling/
+*.prof
+*.profile
+
+# Screenshots et médias
+screenshots/
+*.png
+*.jpg
+*.gif
+*.mp4
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# === CONFIGURATION LOCALE ===
+# Fichiers de configuration locaux
+local_config.py
+dev_config.py
+test_config.py
+
+# Variables d'environnement locales
+.env.development
+.env.testing
+.env.staging
+
+# === TRADING SPÉCIFIQUE ===
+# Historiques de trading
+trading_history/
+portfolio_snapshots/
+performance_reports/
+
+# Données de marché
+market_data/
+price_history/
+
+# Analyses sauvegardées
+analysis_results/
+risk_reports/
+
+# === AUTRES ===
+# Node.js (si utilisé pour des outils)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Lockfiles
+package-lock.json
+yarn.lock
+
+# Certificats SSL
+*.crt
+*.cert
+*.ca-bundle
+
+# Fichiers de sauvegarde
+*.bak
+*.backup
+*.old
+*.orig
+
+# Fichiers temporaires
+*.tmp
+*.temp
+.tmp/
+
+# === COMMENTAIRES ===
+# Ce .gitignore protège:
+# 1. 🔒 Les clés privées et secrets
+# 2. 📊 Les données de trading
+# 3. 📝 Les logs et caches
+# 4. 🐍 Les fichiers Python générés
+# 5. 💻 Les fichiers IDE/OS
+#
+# IMPORTANT: Vérifiez toujours que vos fichiers
+# sensibles ne sont PAS commitées avant de push!
