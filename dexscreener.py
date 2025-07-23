@@ -974,7 +974,7 @@ class DexScreenerAnalyzer:
             unique_tokens.sort(key=lambda x: x.get('age_hours', 999))
             
             # Limiter les résultats
-            final_tokens = unique_tokens[:30]  # Max 30 tokens par cycle
+            final_tokens = unique_tokens[:60]  # Max 30 tokens par cycle
             
             self.logger.info(f"🆕 Found {len(final_tokens)} unique newest tokens using strategy {strategy_cycle + 1}")
             
@@ -1200,9 +1200,9 @@ class DexScreenerAnalyzer:
             
             # Combiner 3 sources différentes avec des quotas
             sources = [
-                ("Token Boosts", lambda: self._get_from_token_boosts(hours_back, cutoff_timestamp), 10),
-                ("Popular Search", lambda: self._search_popular_terms(cutoff_timestamp), 10),
-                ("Recent Pairs", lambda: self._get_recent_pairs_direct(cutoff_timestamp), 10)
+                ("Token Boosts", lambda: self._get_from_token_boosts(hours_back, cutoff_timestamp), 60),
+                ("Popular Search", lambda: self._search_popular_terms(cutoff_timestamp), 60),
+                ("Recent Pairs", lambda: self._get_recent_pairs_direct(cutoff_timestamp), 60)
             ]
             
             for source_name, source_func, quota in sources:
