@@ -1,7 +1,7 @@
 
 gitleaks detect --source . --config .gitleaks.toml --verbose --no-git
-#puis mettre à jour le fichier .secrets.baseline avec un vrai scan : 
-python -m detect_secrets scan --all-files --force-use-all-plugins . > .secrets.baseline
+git add . && git commit -m "add files" && git push origin main
+
 
 #créer un fichier à la racine .pre-commit.yaml et lancer : 
 python -m pre_commit install

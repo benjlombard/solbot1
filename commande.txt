@@ -1,6 +1,8 @@
 python main.py --test-solana
 python main.py --wallet-info
 
+gitleaks detect --source . --config .gitleaks.toml --verbose --no-git
+git add . && git commit -m "add files" && git push origin main
 # Tester l'analyse sur le token SOL wrappé
 python main.py --test-rugcheck So11111111111111111111111111111111111111112
 
