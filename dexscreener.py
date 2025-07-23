@@ -225,7 +225,9 @@ class DexScreenerAnalyzer:
     
     def __init__(self, config: Dict):
         self.config = config.get('dexscreener', {})
+        #self.base_url = self.config.get('api_base_url', 'https://api.dexscreener.com/latest')
         self.base_url = self.config.get('api_base_url', 'https://api.dexscreener.com/latest')
+        self.api_base = 'https://api.dexscreener.com'
         self.logger = logging.getLogger(__name__)
         self.advanced_logger = None  # Will be set by parent
         
@@ -617,7 +619,7 @@ class DexScreenerAnalyzer:
         
         for term in trending_terms[:50]:  # Limit API calls
             try:
-                results = self.search_pairs(term, limit=10)
+                results = self.search_pairs(term, limit=50)
                 if results and results.pairs:
                     for pair in results.pairs:
                         # Filter by chain if specified
@@ -771,30 +773,794 @@ class DexScreenerAnalyzer:
     async def get_newest_tokens_realtime(self, hours_back: int = 2) -> List[Dict]:
         """
         Scanner les tokens créés dans les X dernières heures
-        Utilise l'API officielle DexScreener
+        CORRECTION: Utiliser une approche plus simple et directe
         """
         newest_tokens = []
         
         try:
             from datetime import datetime, timedelta
             
-            # Timestamp pour les dernières heures
             end_time = datetime.now()
             start_time = end_time - timedelta(hours=hours_back)
             
             self.logger.info(f"🔍 Searching for tokens created in last {hours_back}h...")
             
-            # CORRECTION: Utiliser l'endpoint token-boosts/latest/v1 pour avoir les tokens récents
-            # Ou utiliser plusieurs recherches avec des termes populaires
+            # CORRECTION 1: Utiliser différents termes de recherche pour plus de résultats
+            search_terms = [
+                '', 'new', 'token', 'coin', 'gem', 'moon', 'safe', 'baby', 'mini',
+                'doge', 'pepe', 'shib', 'bonk', 'meme', 'ai', 'bot', 'defi'
+            ]
             
-            # Méthode 1: Recherches multiples avec termes récents
-            search_terms = ['', 'new', 'launch', 'token', 'moon', 'gem', 'safe']  # Termes populaires
             all_pairs = []
             seen_addresses = set()
             
-            for term in search_terms[:3]:  # Limiter pour éviter trop d'appels
+            print(f"🔍 Searching across {len(search_terms)} different search terms...")
+            
+            for i, term in enumerate(search_terms, 1):  # Limiter à 8 termes pour éviter trop d'appels
                 try:
-                    # Utiliser l'API search officielle (sans paramètres non supportés)
+                    print(f"   {i}/8 Searching '{term}'...")
+                    
+                    # CORRECTION 2: Utiliser l'API search officielle avec params corrects
+                    if term:
+                        params = {'q': term}
+                    else:
+                        params = {}  # Recherche générale
+                    
+                    response = requests.get(
+                        f"{self.base_url}/dex/search",
+                        params=params,
+                        timeout=15,
+                        headers={
+                            'User-Agent': 'DexScreener-Bot/2.0',
+                            'Accept': 'application/json',
+                        }
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        pairs = data.get('pairs', [])
+                        
+                        if pairs:
+                            print(f"      ✅ Found {len(pairs)} pairs")
+                            
+                            for pair in pairs:
+                                token_address = pair.get('baseToken', {}).get('address')
+                                if token_address and token_address not in seen_addresses:
+                                    # CORRECTION 3: Filtrer par chaîne Solana dès le début
+                                    if pair.get('chainId') == 'solana':
+                                        all_pairs.append(pair)
+                                        seen_addresses.add(token_address)
+                        else:
+                            print(f"      ⚠️ No pairs found for '{term}'")
+                    
+                    elif response.status_code == 429:
+                        print(f"      ⏰ Rate limited, waiting...")
+                        await asyncio.sleep(5)
+                        continue
+                    else:
+                        print(f"      ❌ HTTP {response.status_code}")
+                    
+                    # Délai entre requêtes pour éviter rate limiting
+                    if i < len(search_terms[:8]):  # Pas de délai après la dernière requête
+                        await asyncio.sleep(1)
+                    
+                except Exception as e:
+                    print(f"      ❌ Error in search term '{term}': {e}")
+                    continue
+            
+            print(f"📊 Retrieved {len(all_pairs)} unique Solana pairs total")
+            
+            if not all_pairs:
+                print("❌ No pairs found at all - API might be having issues")
+                return []
+            
+            # CORRECTION 4: Filtrer et analyser par âge
+            for pair in all_pairs:
+                try:
+                    # Vérifier l'âge du token
+                    created_at = pair.get('pairCreatedAt')
+                    if not created_at:
+                        continue
+                    
+                    created_time = datetime.fromtimestamp(created_at / 1000)
+                    age_hours = (end_time - created_time).total_seconds() / 3600
+                    
+                    # CORRECTION 5: Critères d'âge plus flexibles
+                    if age_hours > hours_back * 2:  # Doubler la fenêtre pour plus de résultats
+                        continue
+                    
+                    if age_hours < 0.05:  # Au moins 3 minutes d'existence
+                        continue
+                    
+                    token_address = pair['baseToken']['address']
+                    
+                    # Filtres de qualité de base
+                    liquidity_usd = pair.get('liquidity', {}).get('usd', 0)
+                    volume_24h = pair.get('volume', {}).get('h24', 0)
+                    
+                    # CORRECTION 6: Critères moins stricts pour avoir plus de résultats
+                    if liquidity_usd >= 100:  # Réduire de $1K à $500
+                        
+                        token_data = {
+                            'token_address': token_address,
+                            'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
+                            'name': pair['baseToken'].get('name', 'Unknown'),
+                            'age_hours': age_hours,
+                            'liquidity_usd': liquidity_usd,
+                            'volume_24h': volume_24h,
+                            'price_usd': float(pair.get('priceUsd', 0)) if pair.get('priceUsd') else 0,
+                            'dex_id': pair.get('dexId'),
+                            'pair_address': pair.get('pairAddress'),
+                            'created_timestamp': created_at,
+                            'chain_id': 'solana'
+                        }
+                        
+                        newest_tokens.append(token_data)
+                        
+                except Exception as e:
+                    self.logger.debug(f"Error processing pair for newest tokens: {e}")
+                    continue
+            
+            # Trier par âge (plus récents d'abord)
+            newest_tokens.sort(key=lambda x: x['age_hours'])
+            
+            self.logger.info(f"🆕 Found {len(newest_tokens)} quality newest Solana tokens in last {hours_back}h")
+            
+            # CORRECTION 7: Afficher des exemples même si peu de résultats
+            if newest_tokens:
+                print(f"📋 Sample newest tokens found:")
+                for i, token in enumerate(newest_tokens[:10]):  # Afficher jusqu'à 10
+                    print(f"   {i+1}. {token['symbol']} - {token['age_hours']:.1f}h - ${token['liquidity_usd']:,.0f}")
+            else:
+                print("ℹ️ No newest tokens found matching criteria")
+                print("💡 Try increasing hours_back or check if there are new listings")
+                
+        except Exception as e:
+            self.logger.error(f"Error getting newest tokens: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return newest_tokens
+
+
+    async def get_newest_tokens_by_timestamp(self, hours_back: int = 2) -> List[Dict]:
+        """Récupérer les tokens par timestamp avec diversification des sources"""
+        newest_tokens = []
+        
+        try:
+            from datetime import datetime, timedelta
+            import time
+            
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=hours_back)
+            cutoff_timestamp = int(start_time.timestamp() * 1000)
+            
+            print(f"🔍 Getting diversified newest tokens (last {hours_back}h)...")
+            
+            # SYSTÈME DE ROTATION DES STRATÉGIES
+            # Change de stratégie toutes les 5 minutes pour diversifier
+            strategy_cycle = int(time.time() // 300) % 4  # 4 stratégies, rotation 5min
+            
+            strategy_names = ["Token Boosts", "Varied Search", "DEX Rotation", "Hybrid"]
+            print(f"🔄 Using strategy #{strategy_cycle + 1}: {strategy_names[strategy_cycle]}")
+            
+            if strategy_cycle == 0:
+                # STRATÉGIE 1: TOKEN BOOSTS + PROFILES
+                newest_tokens = await self._get_from_token_boosts(hours_back, cutoff_timestamp)
+                
+            elif strategy_cycle == 1:
+                # STRATÉGIE 2: RECHERCHE PAR TERMES VARIÉS
+                newest_tokens = await self._get_from_varied_search(hours_back, cutoff_timestamp)
+                
+            elif strategy_cycle == 2:
+                # STRATÉGIE 3: ROTATION PAR DEX
+                newest_tokens = await self._get_from_different_dexes(hours_back, cutoff_timestamp)
+                
+            else:
+                # STRATÉGIE 4: APPROCHE HYBRIDE
+                newest_tokens = await self._get_hybrid_approach(hours_back, cutoff_timestamp)
+            
+            # Déduplication finale par adresse
+            seen_addresses = set()
+            unique_tokens = []
+            
+            for token in newest_tokens:
+                token_address = token.get('token_address')
+                if token_address and token_address not in seen_addresses:
+                    seen_addresses.add(token_address)
+                    unique_tokens.append(token)
+            
+            # Trier par âge (plus récents d'abord)
+            unique_tokens.sort(key=lambda x: x.get('age_hours', 999))
+            
+            # Limiter les résultats
+            final_tokens = unique_tokens[:30]  # Max 30 tokens par cycle
+            
+            self.logger.info(f"🆕 Found {len(final_tokens)} unique newest tokens using strategy {strategy_cycle + 1}")
+            
+            if final_tokens:
+                print(f"📋 Sample from strategy '{strategy_names[strategy_cycle]}':")
+                for i, token in enumerate(final_tokens[:8]):
+                    print(f"   {i+1}. {token['symbol']} - {token['age_hours']:.1f}h - ${token['liquidity_usd']:,.0f}")
+            
+            return final_tokens
+            
+        except Exception as e:
+            self.logger.error(f"Error in diversified newest tokens: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    async def _get_from_token_boosts(self, hours_back: int, cutoff_timestamp: int) -> List[Dict]:
+        """STRATÉGIE 1: Récupérer via token-boosts et profiles"""
+        tokens = []
+        
+        try:
+            print("   🚀 Strategy 1: Token Boosts + Profiles")
+            
+            # Endpoint 1: Token Boosts Latest
+            try:
+                response = requests.get(
+                    f"{self.base_url.replace('/latest', '')}/token-boosts/latest/v1",
+                    timeout=15,
+                    headers={'User-Agent': 'DexScreener-Bot/2.0', 'Accept': 'application/json'}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"      ✅ Token boosts: {len(data) if isinstance(data, list) else 'object'}")
+                    
+                    if isinstance(data, list):
+                        for item in data[:20]:  # Limiter à 20
+                            token_address = item.get('tokenAddress') or item.get('address')
+                            if token_address:
+                                token_details = await self._get_token_details_from_pairs(token_address)
+                                if (token_details and 
+                                    token_details.get('created_timestamp', 0) >= cutoff_timestamp):
+                                    tokens.append(token_details)
+                            
+                            await asyncio.sleep(0.1)
+                else:
+                    print(f"      ❌ Token boosts failed: {response.status_code}")
+                    
+            except Exception as e:
+                print(f"      ⚠️ Token boosts error: {e}")
+            
+            # Endpoint 2: Token Profiles (si différent)
+            try:
+                response = requests.get(
+                    f"{self.base_url.replace('/latest', '')}/token-profiles/latest/v1",
+                    timeout=15,
+                    headers={'User-Agent': 'DexScreener-Bot/2.0', 'Accept': 'application/json'}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"      ✅ Token profiles: {len(data) if isinstance(data, list) else 'object'}")
+                    
+                    # Traitement similaire...
+                    if isinstance(data, list):
+                        for item in data[:15]:
+                            token_address = item.get('tokenAddress') or item.get('address')
+                            if token_address:
+                                token_details = await self._get_token_details_from_pairs(token_address)
+                                if (token_details and 
+                                    token_details.get('created_timestamp', 0) >= cutoff_timestamp):
+                                    tokens.append(token_details)
+                            
+                            await asyncio.sleep(0.1)
+                else:
+                    print(f"      ❌ Token profiles failed: {response.status_code}")
+                    
+            except Exception as e:
+                print(f"      ⚠️ Token profiles error: {e}")
+            
+            return tokens
+            
+        except Exception as e:
+            print(f"   ❌ Strategy 1 failed: {e}")
+            return []
+
+    async def _get_from_varied_search(self, hours_back: int, cutoff_timestamp: int) -> List[Dict]:
+        """STRATÉGIE 2: Recherche par termes variés et rotatifs"""
+        tokens = []
+        
+        try:
+            print("   🔍 Strategy 2: Varied Search Terms")
+            
+            # Termes de recherche rotatifs basés sur l'heure actuelle
+            import time
+            hour_of_day = int(time.time() // 3600) % 24
+            
+            # Différentes listes selon l'heure pour diversifier
+            term_sets = [
+                ['', 'pump', 'new', 'fresh'],           # Set 1: 0-5h
+                ['token', 'coin', 'gem', 'moon'],       # Set 2: 6-11h  
+                ['meme', 'dog', 'cat', 'pepe'],         # Set 3: 12-17h
+                ['ai', 'bot', 'defi', 'nft']            # Set 4: 18-23h
+            ]
+            
+            current_set = term_sets[hour_of_day // 6]  # Change toutes les 6h
+            print(f"      📚 Using term set for hour {hour_of_day}: {current_set}")
+            
+            for term in current_set:
+                try:
+                    params = {'q': term} if term else {}
+                    
+                    response = requests.get(
+                        f"{self.base_url}/dex/search",
+                        params=params,
+                        timeout=15,
+                        headers={'User-Agent': 'DexScreener-Bot/2.0', 'Accept': 'application/json'}
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        pairs = data.get('pairs', [])
+                        
+                        print(f"      🔍 '{term}': {len(pairs)} pairs")
+                        
+                        for pair in pairs[:8]:  # Max 8 par terme
+                            if pair.get('chainId') == 'solana':
+                                created_at = pair.get('pairCreatedAt')
+                                if created_at and created_at >= cutoff_timestamp:
+                                    token_data = self._parse_pair_to_token_data(pair)
+                                    if token_data:
+                                        tokens.append(token_data)
+                    
+                    await asyncio.sleep(0.8)  # Délai entre termes
+                    
+                except Exception as e:
+                    print(f"      ⚠️ Term '{term}' failed: {e}")
+                    continue
+            
+            return tokens
+            
+        except Exception as e:
+            print(f"   ❌ Strategy 2 failed: {e}")
+            return []
+
+    async def _get_from_different_dexes(self, hours_back: int, cutoff_timestamp: int) -> List[Dict]:
+        """STRATÉGIE 3: Rotation par DEX différents"""
+        tokens = []
+        
+        try:
+            print("   🏪 Strategy 3: DEX Rotation")
+            
+            # Liste des DEX Solana populaires pour cibler différentes sources
+            target_dexes = ['raydium', 'orca', 'jupiter', 'meteora', 'phoenix']
+            
+            # Rotation basée sur les minutes pour changer régulièrement
+            import time
+            minute_cycle = int(time.time() // 60) % len(target_dexes)
+            primary_dex = target_dexes[minute_cycle]
+            secondary_dex = target_dexes[(minute_cycle + 1) % len(target_dexes)]
+            
+            print(f"      🎯 Targeting DEXes: {primary_dex}, {secondary_dex}")
+            
+            # Recherche générale puis filtrage par DEX
+            response = requests.get(
+                f"{self.base_url}/dex/search",
+                params={'q': 'solana'},
+                timeout=15,
+                headers={'User-Agent': 'DexScreener-Bot/2.0', 'Accept': 'application/json'}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                pairs = data.get('pairs', [])
+                
+                primary_count = 0
+                secondary_count = 0
+                
+                for pair in pairs:
+                    try:
+                        if pair.get('chainId') != 'solana':
+                            continue
+                        
+                        dex_id = pair.get('dexId', '').lower()
+                        created_at = pair.get('pairCreatedAt')
+                        
+                        if not created_at or created_at < cutoff_timestamp:
+                            continue
+                        
+                        # Priorité au DEX principal, puis secondaire
+                        if primary_dex in dex_id and primary_count < 15:
+                            token_data = self._parse_pair_to_token_data(pair)
+                            if token_data:
+                                tokens.append(token_data)
+                                primary_count += 1
+                        
+                        elif secondary_dex in dex_id and secondary_count < 10:
+                            token_data = self._parse_pair_to_token_data(pair)
+                            if token_data:
+                                tokens.append(token_data)
+                                secondary_count += 1
+                        
+                        if primary_count >= 15 and secondary_count >= 10:
+                            break
+                            
+                    except Exception as e:
+                        continue
+                
+                print(f"      📊 Found: {primary_count} from {primary_dex}, {secondary_count} from {secondary_dex}")
+            
+            return tokens
+            
+        except Exception as e:
+            print(f"   ❌ Strategy 3 failed: {e}")
+            return []
+
+    async def _get_hybrid_approach(self, hours_back: int, cutoff_timestamp: int) -> List[Dict]:
+        """STRATÉGIE 4: Approche hybride combinant plusieurs méthodes"""
+        tokens = []
+        
+        try:
+            print("   🔄 Strategy 4: Hybrid Approach")
+            
+            # Combiner 3 sources différentes avec des quotas
+            sources = [
+                ("Token Boosts", lambda: self._get_from_token_boosts(hours_back, cutoff_timestamp), 10),
+                ("Popular Search", lambda: self._search_popular_terms(cutoff_timestamp), 10),
+                ("Recent Pairs", lambda: self._get_recent_pairs_direct(cutoff_timestamp), 10)
+            ]
+            
+            for source_name, source_func, quota in sources:
+                try:
+                    print(f"      📡 Hybrid source: {source_name}")
+                    source_tokens = await source_func()
+                    
+                    # Prendre seulement le quota de chaque source
+                    tokens.extend(source_tokens[:quota])
+                    print(f"      ✅ {source_name}: Added {len(source_tokens[:quota])} tokens")
+                    
+                    await asyncio.sleep(0.5)  # Délai entre sources
+                    
+                except Exception as e:
+                    print(f"      ⚠️ {source_name} failed: {e}")
+                    continue
+            
+            return tokens
+            
+        except Exception as e:
+            print(f"   ❌ Strategy 4 failed: {e}")
+            return []
+
+    async def _search_popular_terms(self, cutoff_timestamp: int) -> List[Dict]:
+        """Recherche avec termes populaires actuels"""
+        tokens = []
+        popular_terms = ['pump', 'moon', 'gem']  # Termes courts et populaires
+        
+        for term in popular_terms:
+            try:
+                response = requests.get(
+                    f"{self.base_url}/dex/search",
+                    params={'q': term},
+                    timeout=10,
+                    headers={'User-Agent': 'DexScreener-Bot/2.0', 'Accept': 'application/json'}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    pairs = data.get('pairs', [])
+                    
+                    for pair in pairs[:5]:  # Max 5 par terme
+                        if (pair.get('chainId') == 'solana' and 
+                            pair.get('pairCreatedAt', 0) >= cutoff_timestamp):
+                            token_data = self._parse_pair_to_token_data(pair)
+                            if token_data:
+                                tokens.append(token_data)
+                
+                await asyncio.sleep(0.3)
+                
+            except Exception as e:
+                continue
+        
+        return tokens
+
+    async def _get_recent_pairs_direct(self, cutoff_timestamp: int) -> List[Dict]:
+        """Récupération directe des paires récentes"""
+        tokens = []
+        
+        try:
+            # Recherche très générale pour avoir un large éventail
+            response = requests.get(
+                f"{self.base_url}/dex/search",
+                params={'q': ''},  # Recherche vide
+                timeout=15,
+                headers={'User-Agent': 'DexScreener-Bot/2.0', 'Accept': 'application/json'}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                pairs = data.get('pairs', [])
+                
+                recent_pairs = []
+                for pair in pairs:
+                    if (pair.get('chainId') == 'solana' and 
+                        pair.get('pairCreatedAt', 0) >= cutoff_timestamp):
+                        recent_pairs.append(pair)
+                
+                # Trier par date de création (plus récents d'abord)
+                recent_pairs.sort(key=lambda p: p.get('pairCreatedAt', 0), reverse=True)
+                
+                # Prendre les 15 plus récents
+                for pair in recent_pairs[:15]:
+                    token_data = self._parse_pair_to_token_data(pair)
+                    if token_data:
+                        tokens.append(token_data)
+        
+        except Exception as e:
+            pass
+        
+        return tokens
+
+    def _parse_pair_to_token_data(self, pair: Dict) -> Optional[Dict]:
+        """Convertir une paire DexScreener in format token_data standard"""
+        try:
+            from datetime import datetime
+            
+            created_at = pair.get('pairCreatedAt')
+            if not created_at:
+                return None
+            
+            created_time = datetime.fromtimestamp(created_at / 1000)
+            age_hours = (datetime.now() - created_time).total_seconds() / 3600
+            
+            liquidity_usd = pair.get('liquidity', {}).get('usd', 0)
+            volume_24h = pair.get('volume', {}).get('h24', 0)
+            
+            # Filtres de qualité minimum
+            if liquidity_usd < 100 or age_hours < 0.05:  # Au moins $100 et 3 minutes
+                return None
+            
+            token_address = pair['baseToken']['address']
+            
+            return {
+                'token_address': token_address,
+                'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
+                'name': pair['baseToken'].get('name', 'Unknown'),
+                'age_hours': age_hours,
+                'liquidity_usd': liquidity_usd,
+                'volume_24h': volume_24h,
+                'price_usd': float(pair.get('priceUsd', 0)) if pair.get('priceUsd') else 0,
+                'dex_id': pair.get('dexId'),
+                'pair_address': pair.get('pairAddress'),
+                'created_timestamp': created_at,
+                'chain_id': 'solana'
+            }
+            
+        except Exception as e:
+            self.logger.debug(f"Error parsing pair to token data: {e}")
+            return None
+
+    async def get_newest_tokens_by_timestamp_old(self, hours_back: int = 2) -> List[Dict]:
+        """Récupérer les tokens par timestamp de création - utilise la vraie API"""
+        newest_tokens = []
+        
+        try:
+            from datetime import datetime, timedelta
+            
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=hours_back)
+            cutoff_timestamp = int(start_time.timestamp() * 1000)
+            
+            print(f"🔍 Getting newest tokens via token-boosts API (last {hours_back}h)...")
+            
+            # MÉTHODE 1: Utiliser l'endpoint token-boosts/latest/v1 (selon la doc)
+            try:
+                response = requests.get(
+                    f"{self.base_url.replace('/latest', '')}/token-boosts/latest/v1",
+                    timeout=20,
+                    headers={
+                        'User-Agent': 'DexScreener-Bot/2.0',
+                        'Accept': 'application/json',
+                    }
+                )
+                
+                if response.status_code == 200:
+                    boosts_data = response.json()
+                    print(f"📊 Got {len(boosts_data) if isinstance(boosts_data, list) else 'object'} from token-boosts")
+                    
+                    # Traiter les données des boosts
+                    if isinstance(boosts_data, list):
+                        for boost_item in boosts_data[:50]:  # Limiter à 50
+                            try:
+                                # Extraire l'adresse du token depuis les boosts
+                                token_address = boost_item.get('tokenAddress') or boost_item.get('address')
+                                if not token_address:
+                                    continue
+                                
+                                # Récupérer les détails du token via token-pairs API
+                                token_details = await self._get_token_details_from_pairs(token_address)
+                                if token_details and token_details.get('age_hours', 0) <= hours_back:
+                                    newest_tokens.append(token_details)
+                                
+                                await asyncio.sleep(0.1)  # Rate limiting
+                                
+                            except Exception as e:
+                                self.logger.debug(f"Error processing boost item: {e}")
+                                continue
+                    
+                    if newest_tokens:
+                        print(f"✅ Found {len(newest_tokens)} tokens via token-boosts method")
+                        return newest_tokens
+                else:
+                    print(f"⚠️ Token-boosts API returned {response.status_code}")
+                    
+            except Exception as e:
+                print(f"⚠️ Token-boosts method failed: {e}")
+            
+            # MÉTHODE 2: Fallback - utiliser search avec requête vide (mais sans paramètres invalides)
+            print("🔄 Trying fallback with basic search...")
+            
+            response = requests.get(
+                f"{self.base_url}/dex/search",
+                params={'q': 'solana'},  # Recherche simple
+                timeout=20,
+                headers={
+                    'User-Agent': 'DexScreener-Bot/2.0',
+                    'Accept': 'application/json',
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                all_pairs = data.get('pairs', [])
+                
+                print(f"📊 Got {len(all_pairs)} pairs from fallback search, filtering by timestamp...")
+                
+                for pair in all_pairs:
+                    try:
+                        if pair.get('chainId') != 'solana':
+                            continue
+                            
+                        created_at = pair.get('pairCreatedAt')
+                        if not created_at:
+                            continue
+                        
+                        # Filtrer par timestamp
+                        if created_at >= cutoff_timestamp:
+                            created_time = datetime.fromtimestamp(created_at / 1000)
+                            age_hours = (end_time - created_time).total_seconds() / 3600
+                            
+                            liquidity_usd = pair.get('liquidity', {}).get('usd', 0)
+                            volume_24h = pair.get('volume', {}).get('h24', 0)
+                            
+                            if liquidity_usd >= 100 and age_hours >= 0.05:
+                                token_address = pair['baseToken']['address']
+                                
+                                token_data = {
+                                    'token_address': token_address,
+                                    'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
+                                    'name': pair['baseToken'].get('name', 'Unknown'),
+                                    'age_hours': age_hours,
+                                    'liquidity_usd': liquidity_usd,
+                                    'volume_24h': volume_24h,
+                                    'price_usd': float(pair.get('priceUsd', 0)) if pair.get('priceUsd') else 0,
+                                    'dex_id': pair.get('dexId'),
+                                    'pair_address': pair.get('pairAddress'),
+                                    'created_timestamp': created_at,
+                                    'chain_id': 'solana'
+                                }
+                                
+                                newest_tokens.append(token_data)
+                                
+                    except Exception as e:
+                        continue
+            
+            # Trier et limiter
+            newest_tokens.sort(key=lambda x: x['age_hours'])
+            newest_tokens = newest_tokens[:100]  # Limiter à 50 résultats
+            
+            self.logger.info(f"🆕 Found {len(newest_tokens)} newest Solana tokens")
+            
+            if newest_tokens:
+                print(f"📋 Sample newest tokens found:")
+                for i, token in enumerate(newest_tokens[:10]):
+                    print(f"   {i+1}. {token['symbol']} - {token['age_hours']:.1f}h - ${token['liquidity_usd']:,.0f}")
+            else:
+                print("ℹ️ No newest tokens found matching criteria")
+                
+        except Exception as e:
+            self.logger.error(f"Error getting newest tokens by timestamp: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return newest_tokens
+
+    async def _get_token_details_from_pairs(self, token_address: str) -> Optional[Dict]:
+        """Récupérer les détails d'un token via l'API token-pairs"""
+        try:
+            # Utiliser l'endpoint token-pairs selon la documentation
+            response = requests.get(
+                f"{self.base_url.replace('/latest', '')}/token-pairs/v1/solana/{token_address}",
+                timeout=15,
+                headers={
+                    'User-Agent': 'DexScreener-Bot/2.0',
+                    'Accept': 'application/json',
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, list) and len(data) > 0:
+                    pair = data[0]  # Prendre la première paire
+                    
+                    from datetime import datetime
+                    created_at = pair.get('pairCreatedAt')
+                    age_hours = 0
+                    
+                    if created_at:
+                        created_time = datetime.fromtimestamp(created_at / 1000)
+                        age_hours = (datetime.now() - created_time).total_seconds() / 3600
+                    
+                    return {
+                        'token_address': token_address,
+                        'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
+                        'name': pair['baseToken'].get('name', 'Unknown'),
+                        'age_hours': age_hours,
+                        'liquidity_usd': pair.get('liquidity', {}).get('usd', 0),
+                        'volume_24h': pair.get('volume', {}).get('h24', 0),
+                        'price_usd': float(pair.get('priceUsd', 0)) if pair.get('priceUsd') else 0,
+                        'dex_id': pair.get('dexId'),
+                        'pair_address': pair.get('pairAddress'),
+                        'created_timestamp': created_at,
+                        'chain_id': 'solana'
+                    }
+            
+            return None
+            
+        except Exception as e:
+            self.logger.debug(f"Error getting token details for {token_address}: {e}")
+            return None
+
+    async def get_newest_tokens_optimized(self, hours_back: int = 2) -> List[Dict]:
+        """Méthode optimisée utilisant les vrais endpoints de l'API"""
+        newest_tokens = []
+        
+        try:
+            print(f"🚀 Using optimized method with real API endpoints...")
+            
+            # Stratégie 1: Utiliser token-boosts/latest/v1
+            try:
+                response = requests.get(
+                    f"{self.base_url.replace('/latest', '')}/token-boosts/latest/v1",
+                    timeout=15,
+                    headers={
+                        'User-Agent': 'DexScreener-Bot/2.0',
+                        'Accept': 'application/json',
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"✅ Token-boosts endpoint successful")
+                    
+                    if isinstance(data, list):
+                        for item in data[:30]:  # Limiter à 30 pour éviter trop d'appels
+                            token_address = item.get('tokenAddress') or item.get('address')
+                            if token_address:
+                                token_details = await self._get_token_details_from_pairs(token_address)
+                                if token_details and token_details.get('age_hours', 999) <= hours_back:
+                                    newest_tokens.append(token_details)
+                            
+                            await asyncio.sleep(0.1)
+                    
+                    if newest_tokens:
+                        print(f"✅ Found {len(newest_tokens)} tokens via token-boosts")
+                        return newest_tokens
+                
+            except Exception as e:
+                print(f"⚠️ Token-boosts method failed: {e}")
+            
+            # Stratégie 2: Utiliser search simple
+            print("🔄 Trying basic search method...")
+            
+            search_terms = ['', 'new', 'token', 'gem']
+            
+            for term in search_terms[:3]:  # Limiter à 3 termes
+                try:
                     params = {'q': term} if term else {}
                     
                     response = requests.get(
@@ -811,88 +1577,220 @@ class DexScreenerAnalyzer:
                         data = response.json()
                         pairs = data.get('pairs', [])
                         
-                        for pair in pairs:
-                            token_address = pair.get('baseToken', {}).get('address')
-                            if token_address and token_address not in seen_addresses:
-                                all_pairs.append(pair)
-                                seen_addresses.add(token_address)
-                    
-                    # Délai entre requêtes pour éviter rate limiting
-                    await asyncio.sleep(0.5)
+                        # Traiter les paires comme dans la méthode timestamp
+                        # [Code de traitement similaire]
+                        
+                    await asyncio.sleep(1)  # Rate limiting
                     
                 except Exception as e:
-                    self.logger.debug(f"Error in search term '{term}': {e}")
                     continue
             
-            self.logger.info(f"📊 Retrieved {len(all_pairs)} unique pairs from search")
+            return newest_tokens
             
-            # Filtrer par âge et qualité
-            for pair in all_pairs:
-                try:
-                    # Vérifier l'âge du token
-                    created_at = pair.get('pairCreatedAt')
-                    if not created_at:
+        except Exception as e:
+            self.logger.error(f"Error in optimized method: {e}")
+            return []
+
+    
+
+    async def get_newest_tokens_paginated(self, hours_back: int = 2) -> List[Dict]:
+        """Parcourir les pages de résultats au lieu de chercher par termes"""
+        newest_tokens = []
+        page_size = 50
+        max_pages = 20  # Limite pour éviter trop d'appels API
+        
+        for page in range(max_pages):
+            try:
+                # Utiliser l'offset pour paginer
+                params = {
+                    'limit': page_size,
+                    'offset': page * page_size
+                }
+                
+                response = requests.get(
+                    f"{self.base_url}/dex/pairs",  # Endpoint différent
+                    params=params,
+                    timeout=15
+                )
+                
+                if response.status_code == 200:
+                    pairs = response.json()
+                    if not pairs:
+                        break  # Plus de résultats
+                        
+                    # Traiter les paires de cette page...
+                    
+                await asyncio.sleep(0.5)  # Rate limiting
+                
+            except Exception as e:
+                continue
+
+    async def get_newest_tokens_sorted(self, hours_back: int = 2) -> List[Dict]:
+        """Utiliser le tri par date de création"""
+        newest_tokens = []
+        
+        try:
+            from datetime import datetime, timedelta
+            
+            end_time = datetime.now()
+            start_time = end_time - timedelta(hours=hours_back)
+            cutoff_timestamp = int(start_time.timestamp() * 1000)
+            
+            print(f"🔍 Getting tokens sorted by creation date (last {hours_back}h)...")
+            
+            # Requête avec tri par date
+            params = {
+                'sort': 'pairCreatedAt',
+                'order': 'desc',
+                'limit': 100,
+                'chainId': 'solana'
+            }
+            
+            response = requests.get(
+                f"{self.base_url}/dex/search",
+                params=params,
+                timeout=15,
+                headers={
+                    'User-Agent': 'DexScreener-Bot/2.0',
+                    'Accept': 'application/json',
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                pairs = data.get('pairs', [])
+                
+                print(f"📊 Got {len(pairs)} pairs sorted by creation date")
+                
+                # Filtrer par âge et traiter les données
+                for pair in pairs:
+                    try:
+                        created_at = pair.get('pairCreatedAt')
+                        if not created_at:
+                            continue
+                        
+                        # Vérifier si le token est dans la fenêtre temporelle
+                        if created_at >= cutoff_timestamp:
+                            created_time = datetime.fromtimestamp(created_at / 1000)
+                            age_hours = (end_time - created_time).total_seconds() / 3600
+                            
+                            # Filtres de qualité
+                            liquidity_usd = pair.get('liquidity', {}).get('usd', 0)
+                            volume_24h = pair.get('volume', {}).get('h24', 0)
+                            
+                            if liquidity_usd >= 100 and age_hours >= 0.05:
+                                token_address = pair['baseToken']['address']
+                                
+                                token_data = {
+                                    'token_address': token_address,
+                                    'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
+                                    'name': pair['baseToken'].get('name', 'Unknown'),
+                                    'age_hours': age_hours,
+                                    'liquidity_usd': liquidity_usd,
+                                    'volume_24h': volume_24h,
+                                    'price_usd': float(pair.get('priceUsd', 0)) if pair.get('priceUsd') else 0,
+                                    'dex_id': pair.get('dexId'),
+                                    'pair_address': pair.get('pairAddress'),
+                                    'created_timestamp': created_at,
+                                    'chain_id': 'solana'
+                                }
+                                
+                                newest_tokens.append(token_data)
+                        else:
+                            # Comme c'est trié par date desc, on peut s'arrêter ici
+                            break
+                            
+                    except Exception as e:
+                        self.logger.debug(f"Error processing sorted pair: {e}")
                         continue
-                    
-                    created_time = datetime.fromtimestamp(created_at / 1000)
-                    age_hours = (end_time - created_time).total_seconds() / 3600
-                    
-                    # Filtrer par âge
-                    if age_hours > hours_back or age_hours < 0.1:  # Entre 6min et X heures
-                        continue
-                    
-                    token_address = pair['baseToken']['address']
-                    
-                    # Filtres de qualité de base
-                    liquidity_usd = pair.get('liquidity', {}).get('usd', 0)
-                    volume_24h = pair.get('volume', {}).get('h24', 0)
-                    
-                    # Critères minimums pour éviter les tokens poubelle
-                    if liquidity_usd >= 1000:  # Au moins $1K de liquidité
-                        
-                        token_data = {
-                            'token_address': token_address,
-                            'symbol': pair['baseToken'].get('symbol', 'UNKNOWN'),
-                            'name': pair['baseToken'].get('name', 'Unknown'),
-                            'age_hours': age_hours,
-                            'liquidity_usd': liquidity_usd,
-                            'volume_24h': volume_24h,
-                            'price_usd': float(pair.get('priceUsd', 0)) if pair.get('priceUsd') else 0,
-                            'dex_id': pair.get('dexId'),
-                            'pair_address': pair.get('pairAddress'),
-                            'created_timestamp': created_at,
-                            'chain_id': pair.get('chainId', 'solana')
-                        }
-                        
-                        newest_tokens.append(token_data)
-                        
-                except Exception as e:
-                    self.logger.debug(f"Error processing pair for newest tokens: {e}")
-                    continue
-            
-            # Trier par âge (plus récents d'abord)
-            newest_tokens.sort(key=lambda x: x['age_hours'])
-            
-            # Filtrer pour ne garder que Solana
-            newest_tokens = [t for t in newest_tokens if t.get('chain_id') == 'solana']
-            
-            self.logger.info(f"🆕 Found {len(newest_tokens)} quality Solana tokens created in last {hours_back}h")
-            
-            # Debug: Afficher quelques exemples
-            if newest_tokens:
-                self.logger.info("📋 Sample newest tokens found:")
-                for i, token in enumerate(newest_tokens[:5]):
-                    self.logger.info(f"   {i+1}. {token['symbol']} - {token['age_hours']:.1f}h - ${token['liquidity_usd']:,.0f}")
+                
+                self.logger.info(f"🆕 Found {len(newest_tokens)} tokens using sorted method")
+                
+            elif response.status_code == 429:
+                print("⏰ Rate limited by API")
+                self.logger.warning("Rate limited by DexScreener API in sorted method")
+                
             else:
-                self.logger.info("ℹ️ No tokens found matching criteria")
+                print(f"❌ API returned status {response.status_code}")
+                self.logger.warning(f"DexScreener API returned status {response.status_code} in sorted method")
+                
+            # Afficher des exemples
+            if newest_tokens:
+                print(f"📋 Sample tokens from sorted method:")
+                for i, token in enumerate(newest_tokens[:5]):
+                    print(f"   {i+1}. {token['symbol']} - {token['age_hours']:.1f}h - ${token['liquidity_usd']:,.0f}")
+            else:
+                print("ℹ️ No tokens found with sorted method")
                 
         except Exception as e:
-            self.logger.error(f"Error getting newest tokens: {e}")
+            self.logger.error(f"Error in sorted tokens method: {e}")
+            print(f"❌ Sorted method failed: {e}")
             import traceback
             traceback.print_exc()
         
         return newest_tokens
 
+
+    async def get_newest_tokens_optimized(self, hours_back: int = 2) -> List[Dict]:
+        """Méthode optimisée sans dépendance aux termes de recherche"""
+        newest_tokens = []
+        
+        try:
+            # Stratégie 1: Essayer l'endpoint "latest" s'il existe
+            endpoints_to_try = [
+                '/dex/pairs/latest',
+                '/dex/pairs/new', 
+                '/dex/search?sort=newest',
+                '/dex/search'  # Fallback
+            ]
+            
+            for endpoint in endpoints_to_try:
+                try:
+                    url = f"{self.base_url.rstrip('/')}{endpoint}"
+                    response = requests.get(url, timeout=10)
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        pairs = data.get('pairs', data if isinstance(data, list) else [])
+                        
+                        if pairs:
+                            print(f"✅ Success with endpoint: {endpoint}")
+                            print(f"📊 Found {len(pairs)} pairs")
+                            
+                            # Filtrer par âge directement
+                            filtered_pairs = self._filter_pairs_by_age(pairs, hours_back)
+                            return filtered_pairs
+                            
+                except Exception as e:
+                    continue
+            
+            print("⚠️ All optimized methods failed, using fallback...")
+            return []
+            
+        except Exception as e:
+            self.logger.error(f"Optimized method failed: {e}")
+            return []
+
+    def _filter_pairs_by_age(self, pairs: List, hours_back: int) -> List[Dict]:
+        """Filtrer les paires par âge uniquement"""
+        from datetime import datetime, timedelta
+        
+        cutoff_time = datetime.now() - timedelta(hours=hours_back)
+        cutoff_timestamp = int(cutoff_time.timestamp() * 1000)
+        
+        filtered = []
+        
+        for pair in pairs:
+            try:
+                created_at = pair.get('pairCreatedAt')
+                if created_at and created_at >= cutoff_timestamp:
+                    if pair.get('chainId') == 'solana':
+                        # Traitement du token...
+                        filtered.append(self._process_pair_data(pair))
+            except:
+                continue
+        
+        return filtered
 
     async def get_newest_tokens_via_boosts(self, limit: int = 50) -> List[Dict]:
         """

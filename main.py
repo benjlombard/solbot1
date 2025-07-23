@@ -24,6 +24,7 @@ import argparse
 import os
 import sys
 import signal
+import json
 import time
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -77,7 +78,11 @@ class SolanaTradingBot:
         
         # Load and validate configuration
         self.config = get_config()
-        
+        # Système de déduplication
+        self.processed_tokens = set()  # Tokens déjà traités
+        self.processed_tokens_timestamps = {}  # Horodatage des tokens traités
+        self.last_cycle_tokens = set()  # Tokens du dernier cycle
+
         # Validate configuration
         config_errors = validate_config()
         if config_errors:
@@ -290,18 +295,29 @@ class SolanaTradingBot:
         print(f"  Max Slippage: {self.trading_config['max_slippage']}%")
         print("="*60)
 
+    def set_analysis_method(self, method: str):
+        """Définir la méthode d'analyse par défaut"""
+        self.analysis_method = method
+        self.logger.info(f"🔧 Analysis method set to: {method}")
 
-    async def analyze_newest_tokens(self, hours_back: int = 2, limit: int = 10) -> List[Dict]:
-        """Analyser spécifiquement les tokens les plus récents"""
-        self.logger.info(f"🆕 Analyzing newest tokens from last {hours_back}h...")
-        
+    async def analyze_newest_tokens(self, hours_back: int = 2, limit: int = 10, method: str = 'timestamp') -> List[Dict]:
+        """Analyser spécifiquement les tokens les plus récents avec choix de méthode"""
+        self.logger.info(f"🆕 Analyzing newest tokens from last {hours_back}h using {method} method...")
+    
         if not self.dexscreener_analyzer:
             self.logger.warning("DexScreener not available for newest token analysis")
             return []
-        
+    
         try:
-            # Récupérer les nouveaux tokens
-            newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_realtime(hours_back)
+            # Choisir la méthode selon le paramètre
+            if method == 'timestamp':
+                newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_by_timestamp(hours_back)
+            elif method == 'optimized':
+                newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_optimized(hours_back)
+            elif method == 'sorted':
+                newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_sorted(hours_back)
+            else:  # terms (fallback)
+                newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_realtime(hours_back)
 
             self.logger.info(f"🔍 Found {len(newest_tokens)} newest tokens to analyze")
 
@@ -311,7 +327,7 @@ class SolanaTradingBot:
 
             analyzed_tokens = []
             
-            for token_data in newest_tokens[:limit]:
+            for token_data in newest_tokens:
                 # Filtres de pré-qualification
                 if (token_data['liquidity_usd'] < 5000 or 
                     token_data['age_hours'] < 0.1):  # Au moins 6 minutes
@@ -351,6 +367,163 @@ class SolanaTradingBot:
             import traceback
             traceback.print_exc()
             return []
+
+    def _cleanup_processed_tokens(self):
+        """Nettoyer les tokens traités il y a plus de 2h"""
+        from datetime import timedelta
+        
+        cutoff_time = datetime.now() - timedelta(hours=2)
+        tokens_to_remove = [
+            token for token, timestamp in self.processed_tokens_timestamps.items()
+            if timestamp < cutoff_time
+        ]
+        
+        for token in tokens_to_remove:
+            self.processed_tokens.discard(token)
+            self.processed_tokens_timestamps.pop(token, None)
+        
+        if tokens_to_remove:
+            self.logger.debug(f"🧹 Cleaned {len(tokens_to_remove)} old tokens from memory")
+
+    async def run_continuous_newest_analysis(self, hours_back: int = 6, interval_minutes: int = 10, method: str = 'timestamp'):
+        """Analyse continue des nouveaux tokens avec logging séparé"""
+        
+        # Setup des loggers séparés
+        good_tokens_logger = self._setup_specialized_logger('good_tokens', 'good_tokens.log')
+        bad_tokens_logger = self._setup_specialized_logger('bad_tokens', 'bad_tokens.log')
+        
+        self.logger.info(f"🔄 Starting continuous newest tokens analysis (every {interval_minutes}m)")
+        self.is_running = True
+        
+        cycle_count = 0
+        
+        try:
+            while self.is_running:
+                cycle_count += 1
+                cycle_start = datetime.now()
+                
+                print(f"\n{'='*80}")
+                print(f"🔄 CYCLE #{cycle_count} - {cycle_start.strftime('%H:%M:%S')}")
+                print(f"{'='*80}")
+                
+                # Analyser les nouveaux tokens
+                newest_tokens = await self.analyze_newest_tokens(hours_back, limit=50, method=method)  # Augmenter la limite
+                
+                if newest_tokens:
+                    good_count = 0
+                    bad_count = 0
+                    new_tokens_count = 0
+                    duplicate_count = 0
+                    
+                    # Nettoyer les anciens tokens (plus de 2h)
+                    self._cleanup_processed_tokens()
+                    
+                    current_cycle_tokens = set()
+                    
+                    for token_data in newest_tokens:
+                        token_address = token_data['token_address']
+                        
+                        # Éviter les doublons dans le même cycle
+                        if token_address in current_cycle_tokens:
+                            duplicate_count += 1
+                            continue
+                        
+                        current_cycle_tokens.add(token_address)
+                        
+                        # Éviter les tokens déjà traités récemment
+                        if token_address in self.processed_tokens:
+                            duplicate_count += 1
+                            continue
+                        
+                        # Marquer comme traité
+                        self.processed_tokens.add(token_address)
+                        self.processed_tokens_timestamps[token_address] = datetime.now()
+                        new_tokens_count += 1
+                        
+                        analysis = token_data.get('analysis', {})
+                        passed_checks = analysis.get('passed_all_checks', False)
+                        trading_rec = analysis.get('trading_recommendation', {})
+                        
+                        # Log dans les fichiers appropriés
+                        if passed_checks and trading_rec.get('action') == 'BUY':
+                            self._log_good_token(good_tokens_logger, token_data)
+                            good_count += 1
+                        else:
+                            self._log_bad_token(bad_tokens_logger, token_data)
+                            bad_count += 1
+                    
+                    print(f"📊 Cycle summary: {new_tokens_count} new, {good_count} good, {bad_count} rejected, {duplicate_count} duplicates")
+                    
+                    # Sauvegarder les tokens de ce cycle
+                    self.last_cycle_tokens = current_cycle_tokens
+
+                # Délai avant le prochain cycle
+                print(f"\n⏰ Next scan in {interval_minutes} minutes...")
+                await asyncio.sleep(interval_minutes * 60)
+                
+        except KeyboardInterrupt:
+            self.logger.info("🛑 Continuous analysis stopped by user")
+            print("\n🛑 Continuous analysis stopped")
+        except Exception as e:
+            self.logger.error(f"❌ Error in continuous analysis: {e}")
+            raise
+
+
+    def _setup_specialized_logger(self, name: str, filename: str):
+        """Setup d'un logger spécialisé pour les tokens"""
+        import logging  # Import local
+        from logging.handlers import RotatingFileHandler
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.INFO)
+        
+        # Éviter les doublons de handlers
+        if not logger.handlers:
+            handler = logging.FileHandler(
+                self.config['logging']['log_file_path'].replace('trading_bot.log', filename),
+                encoding='utf-8'
+            )
+            formatter = logging.Formatter('%(asctime)s - %(message)s')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            
+        return logger
+
+    def _log_good_token(self, logger, token_data):
+        """Log un bon token dans le fichier des bons tokens"""
+        analysis = token_data.get('analysis', {})
+        trading_rec = analysis.get('trading_recommendation', {})
+        
+        log_entry = {
+            'symbol': token_data.get('symbol', 'UNKNOWN'),
+            'address': token_data['token_address'],
+            'age_hours': token_data.get('age_hours', 0),
+            'liquidity_usd': token_data.get('liquidity_usd', 0),
+            'volume_24h': token_data.get('volume_24h', 0),
+            'price_usd': token_data.get('price_usd', 0),
+            'action': trading_rec.get('action', 'UNKNOWN'),
+            'confidence': trading_rec.get('confidence', 0),
+            'freshness_score': token_data.get('freshness_score', 0)
+        }
+        
+        logger.info(f"GOOD_TOKEN: {json.dumps(log_entry)}")
+
+    def _log_bad_token(self, logger, token_data):
+        """Log un mauvais token dans le fichier des mauvais tokens"""
+        analysis = token_data.get('analysis', {})
+        risk_assessment = analysis.get('risk_assessment', {})
+        alerts = analysis.get('alerts', [])
+        
+        log_entry = {
+            'symbol': token_data.get('symbol', 'UNKNOWN'),
+            'address': token_data['token_address'],
+            'age_hours': token_data.get('age_hours', 0),
+            'liquidity_usd': token_data.get('liquidity_usd', 0),
+            'risk_level': risk_assessment.get('overall_risk', 'UNKNOWN'),
+            'alerts_count': len(alerts),
+            'main_alerts': [alert['type'] for alert in alerts[:3]]  # Top 3 alerts
+        }
+        
+        logger.info(f"BAD_TOKEN: {json.dumps(log_entry)}")
 
     def _calculate_freshness_score(self, token_data: Dict, analysis_result: Dict) -> float:
         """Calculer un score de fraîcheur pour les nouveaux tokens"""
@@ -1487,8 +1660,10 @@ class SolanaTradingBot:
             if self.dexscreener_analyzer and len(demo_tokens) < 5:
                 try:
                     # Utiliser la méthode get_newest_tokens_realtime
-                    newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_realtime(hours_back=3)
-                    
+                    #newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_realtime(hours_back=3)
+
+                    #nouvelle méthode pas basée sur des mots-clés mais sur des timestamps
+                    newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_by_timestamp(hours_back)
                     if newest_tokens:
                         print(f"\n🆕 NOUVEAUX TOKENS (dernières 3h):")
                         for i, token in enumerate(newest_tokens[:3], 1):
@@ -1912,6 +2087,11 @@ class SolanaTradingBot:
         liquidity = market_data.get('liquidity_usd')
         volume_24h = market_data.get('volume_24h')
     
+        # NOUVEAU: Afficher les seuils et scores pour debug
+        strategy_config = get_strategy_config()
+        min_safety_required = strategy_config['min_safety_score']
+        max_bundle_allowed = strategy_config['max_bundle_confidence']
+
         # Format du message selon le résultat
         if passed and action == 'BUY' and confidence > 0.7:
             # 🎯 TOKEN EXCELLENT - Messages très visibles
@@ -1971,30 +2151,47 @@ class SolanaTradingBot:
         self.logger.info("🔄 Initiating graceful shutdown...")
         self.is_running = False
         
-        # Close database connections
-        if hasattr(self, 'database_manager'):
-            self.database_manager.close()
-            self.logger.info("🗄️ Database connections closed")
-        
-        # Clear DexScreener caches
-        if self.dexscreener_analyzer:
-            try:
+        try:
+            # Close database connections
+            if hasattr(self, 'database_manager'):
+                self.database_manager.close()
+                self.logger.info("🗄️ Database connections closed")
+        except Exception as e:
+            self.logger.warning(f"Error closing database: {e}")
+    
+        try:
+            # Clear DexScreener caches
+            if self.dexscreener_analyzer:
                 if hasattr(self.dexscreener_analyzer, 'clear_cache'):
                     self.dexscreener_analyzer.clear_cache()
                     self.logger.info("📊 DexScreener cache cleared")
-            except Exception as e:
-                self.logger.warning(f"Error clearing DexScreener cache: {e}")
+        except Exception as e:
+            self.logger.warning(f"Error clearing DexScreener cache: {e}")
 
-        # Close Solana client
-        if hasattr(self, 'solana_client') and self.solana_client:
-            try:
-                asyncio.create_task(self.solana_client.close())
+        try:
+            # Close Solana client - CORRECTION: ne pas créer de nouvelle tâche asyncio
+            if hasattr(self, 'solana_client') and self.solana_client:
+                # Si on est déjà dans un contexte async, utiliser await
+                # Sinon, utiliser run_until_complete
+                try:
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Dans un contexte async, programmer la fermeture
+                        loop.create_task(self.solana_client.close())
+                    else:
+                        # Dans un contexte sync, exécuter directement
+                        loop.run_until_complete(self.solana_client.close())
+                except Exception:
+                    # Fallback: fermeture simple
+                    pass
                 self.logger.info("🚀 Solana client connections closed")
-            except Exception as e:
-                self.logger.warning(f"Error closing Solana client: {e}")
+        except Exception as e:
+            self.logger.warning(f"Error closing Solana client: {e}")
 
         # Export final statistics
         try:
+            # Export final statistics
             stats = self.get_comprehensive_statistics()
             stats_file = f'final_stats_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
             
@@ -2003,11 +2200,14 @@ class SolanaTradingBot:
                 json.dump(stats, f, indent=2, default=str)
             
             self.logger.info(f"📊 Final enhanced statistics exported to {stats_file}")
-            
+        
         except Exception as e:
             self.logger.error(f"Error exporting final stats: {e}")
         
         self.logger.info("✅ Enhanced Shutdown complete")
+        # CORRECTION: Forcer la sortie propre
+        import sys
+        sys.exit(0)
 
 
 def main():
@@ -2038,6 +2238,18 @@ Examples:
         """
     )
     
+    parser.add_argument('--test-methods', action='store_true',
+                   help='Test all newest token methods and compare results')
+
+    parser.add_argument('--method', choices=['timestamp', 'terms', 'optimized'], 
+                   default='timestamp',
+                   help='Method to find newest tokens (default: timestamp)')
+
+    parser.add_argument('--continuous-newest', metavar='HOURS', type=int, nargs='?', 
+                   const=6, help='Continuous analysis of newest tokens (default: 6h lookback)')
+    parser.add_argument('--scan-interval', metavar='MINUTES', type=int, default=10,
+                   help='Interval between scans in minutes (default: 10)')
+
     # Configuration options
     parser.add_argument('--config', help='Configuration override (not used with config.py)')
     
@@ -2211,11 +2423,59 @@ Examples:
             asyncio.run(run_maintenance())
             return 0
 
+        elif args.test_methods:
+            # Tester toutes les méthodes
+            print("🧪 Testing all newest token methods...")
+            
+            async def test_all_methods():
+                methods = ['timestamp', 'optimized', 'terms']
+                results = {}
+                
+                for method in methods:
+                    print(f"\n🔧 Testing method: {method}")
+                    try:
+                        tokens = await bot.analyze_newest_tokens(hours_back=6, limit=20)
+                        results[method] = len(tokens)
+                        print(f"✅ {method}: Found {len(tokens)} tokens")
+                    except Exception as e:
+                        results[method] = f"Error: {e}"
+                        print(f"❌ {method}: {e}")
+                
+                print(f"\n📊 RESULTS SUMMARY:")
+                for method, result in results.items():
+                    print(f"   {method}: {result}")
+            
+            asyncio.run(test_all_methods())
+            return 0
+
         elif args.test_endpoints:
             async def test_endpoints():
                 await bot.test_dexscreener_endpoints()
             
             asyncio.run(test_endpoints())
+            return 0
+
+        elif args.continuous_newest:
+            # Analyse continue des nouveaux tokens
+            hours = args.continuous_newest
+            interval = args.scan_interval
+            print(f"🔄 Starting continuous newest tokens analysis...")
+            print(f"📊 Lookback: {hours}h | Interval: {interval}m")
+            print(f"📁 Logs: good_tokens.log & bad_tokens.log")
+            print("Press Ctrl+C to stop")
+            
+            async def continuous_newest():
+                try:
+                    await bot.run_continuous_newest_analysis(
+                        hours_back=hours, 
+                        interval_minutes=interval, 
+                        method=args.method
+                    )
+
+                except Exception as e:
+                    print(f"❌ Continuous analysis failed: {e}")
+            
+            asyncio.run(continuous_newest())
             return 0
 
         elif args.test_rugcheck:
@@ -2413,7 +2673,18 @@ Examples:
             
             async def analyze_newest():
                 try:
-                    newest_tokens = await bot.analyze_newest_tokens(hours_back=hours, limit=15)
+                    print(f"🔧 Using method: {args.method}")
+                    
+                    # Choisir la méthode selon l'argument
+                    if args.method == 'timestamp':
+                        method_name = 'get_newest_tokens_by_timestamp'
+                    elif args.method == 'optimized':
+                        method_name = 'get_newest_tokens_optimized'
+                    else:  # terms
+                        method_name = 'get_newest_tokens_realtime'
+                    
+                    print(f"📡 Method selected: {method_name}")
+                    newest_tokens = await bot.analyze_newest_tokens(hours_back=hours, limit=50)
                     
                     if not newest_tokens:
                         print("❌ No new tokens found or analyzed")

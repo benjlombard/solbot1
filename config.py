@@ -13,6 +13,57 @@ Ce fichier contient toute la configuration du bot de trading :
 import os
 from pathlib import Path
 
+
+def load_env_file():
+    """Charge automatiquement le fichier .env s'il existe"""
+    env_file = Path(__file__).parent / '.env'
+    
+    if env_file.exists():
+        print(f"📁 Loading environment from: {env_file}")
+        
+        try:
+            # Méthode 1: Essayer avec python-dotenv si disponible
+            from dotenv import load_dotenv
+            load_dotenv(env_file)
+            print("✅ Environment loaded with python-dotenv")
+            return True
+        except ImportError:
+            # Méthode 2: Chargement manuel si python-dotenv n'est pas installé
+            print("⚠️ python-dotenv not found, loading manually...")
+            
+            try:
+                with open(env_file, 'r', encoding='utf-8') as f:
+                    for line_num, line in enumerate(f, 1):
+                        line = line.strip()
+                        
+                        # Ignorer les commentaires et lignes vides
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip()
+                            
+                            # Enlever les guillemets si présents
+                            if (value.startswith('"') and value.endswith('"')) or \
+                               (value.startswith("'") and value.endswith("'")):
+                                value = value[1:-1]
+                            
+                            os.environ[key] = value
+                            print(f"   ✅ {key}={'*' * min(len(value), 8) if 'KEY' in key else value}")
+                
+                print("✅ Environment loaded manually")
+                return True
+                
+            except Exception as e:
+                print(f"❌ Error loading .env manually: {e}")
+                return False
+    else:
+        print(f"⚠️ No .env file found at: {env_file}")
+        print("💡 Create one with: SOLANA_PRIVATE_KEY=your_key_here")
+        return False
+
+# Charger automatiquement au démarrage du module
+load_env_file()
+
 # === CHEMINS ET RÉPERTOIRES ===
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
@@ -322,11 +373,11 @@ CONFIG = {
         #'min_liquidity_multiplier': 2.0,
         #'trade_amount_multiplier': 0.5,
         'conservative': {
-            'min_safety_score': 0.5,           # Au lieu de 0.8 - permet tokens moyennement sûrs
+            'min_safety_score': 0.3,           # Au lieu de 0.8 - permet tokens moyennement sûrs
             'max_bundle_confidence': 0.7,      # Au lieu de 0.2 - permet bundles modérés
-            'min_liquidity_multiplier': 1.0,   # Au lieu de 2.0 - liquidité moins stricte
-            'trade_amount_multiplier': 0.3,    # Montants plus petits pour compenser
-            'stop_loss_percentage': 10.0,
+            'min_liquidity_multiplier': 0.5,   # Au lieu de 2.0 - liquidité moins stricte
+            'trade_amount_multiplier': 0.1,    # Montants plus petits pour compenser
+            'stop_loss_percentage': 5.0,
             'take_profit_percentage': 15.0,
             'max_position_time_hours': 24
         },

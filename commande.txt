@@ -6,7 +6,6 @@ python main.py --test-rugcheck So11111111111111111111111111111111111111112
 
 # Ou tester sur BONK (token populaire)
 python main.py --test-rugcheck DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
-
 python main.py --test-dexscreener DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
 
 python main.py --trending-analysis
@@ -30,3 +29,26 @@ python main.py --newest-analysis 6 --log-level DEBUG
 python main.py --newest-analysis 6
 
 python main.py --test-endpoints
+
+# Analyse continue (défaut 6h lookback, scan toutes les 10 minutes)
+python main.py --continuous-newest
+
+# Avec paramètres personnalisés
+python main.py --continuous-newest 12 --scan-interval 1
+
+# Analyse unique avec tous les résultats
+python main.py --newest-analysis 6
+
+
+# Méthode timestamp (par défaut)
+python main.py --newest-analysis 6
+
+# Méthode explicite
+python main.py --newest-analysis 6 --method timestamp
+
+# Mode continu avec méthode timestamp
+python main.py --continuous-newest 12 --scan-interval 1 --method timestamp
+
+# Comparer les méthodes
+python main.py --newest-analysis 6 --method optimized
+python main.py --newest-analysis 6 --method terms
