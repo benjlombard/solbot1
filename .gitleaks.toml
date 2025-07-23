@@ -14,49 +14,34 @@ paths = [
 
 # Règles personnalisées restrictives
 [[rules]]
-id = "password-keyword"
-description = "Detect any password-related secrets"
-regex = '''(?i)(password|passwd|pwd)\s*[:=]\s*["']([^"']{3,})["']'''
-keywords = ["password", "passwd", "pwd"]
+id = "password-detection"
+description = "Detect passwords"
+regex = '''(?i)password\s*[:=]\s*["']([^"']{3,})["']'''
 
 [[rules]]
-id = "private-keyword"
-description = "Detect any private-related secrets"
-regex = '''(?i)(private|secret|key)\s*[:=]\s*["']([^"']{8,})["']'''
-keywords = ["private", "secret", "key"]
+id = "secret-detection"  
+description = "Detect secrets and keys"
+regex = '''(?i)(secret|private|key|token|api_key)\s*[:=]\s*["']([^"']{6,})["']'''
 
 [[rules]]
-id = "api-keys"
-description = "Detect API keys and tokens"
-regex = '''(?i)(api[_-]?key|token|access[_-]?key)\s*[:=]\s*["']([^"']{8,})["']'''
-keywords = ["api", "token", "access"]
-
-[[rules]]
-id = "database-credentials"
-description = "Detect database credentials"
-regex = '''(?i)(db[_-]?password|database[_-]?password|mysql[_-]?password)\s*[:=]\s*["']([^"']{3,})["']'''
-keywords = ["db", "database", "mysql"]
-
-[[rules]]
-id = "private-keys"
+id = "private-key-detection"
 description = "Detect private keys"
 regex = '''-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----'''
-keywords = ["BEGIN", "PRIVATE", "KEY"]
 
+# NOUVELLE RÈGLE pour les variables d'environnement
 [[rules]]
-id = "aws-keys"
-description = "AWS Access Keys"
-regex = '''AKIA[0-9A-Z]{16}'''
-keywords = ["AKIA"]
+id = "env-private-keys"
+description = "Detect environment private keys"
+regex = '''(?i)[A-Z_]*PRIVATE[A-Z_]*\s*[:=]\s*["']([^"']{8,})["']'''
 
+# RÈGLE SPÉCIFIQUE pour Solana (avec ET sans guillemets)
 [[rules]]
-id = "jwt-tokens"
-description = "JWT tokens"
-regex = '''eyJ[0-9a-zA-Z_-]*\.eyJ[0-9a-zA-Z_-]*\.[0-9a-zA-Z_-]*'''
-keywords = ["eyJ"]
+id = "solana-keys"
+description = "Detect Solana keys"
+regex = '''(?i)SOLANA[A-Z_]*KEY\s*[:=]\s*["']?([^"'\s]{8,})["']?'''
 
+# RÈGLE GÉNÉRALE pour variables d'environnement (avec ET sans guillemets)
 [[rules]]
-id = "generic-secrets"
-description = "Generic secret patterns"
-regex = '''(?i)(secret|password|private|key|token)\s*[:=]\s*["'][^"']{6,}["']'''
-keywords = ["secret", "password", "private", "key", "token"]
+id = "sensitive-env-vars"
+description = "Detect sensitive environment variables"
+regex = '''(?i)(API_KEY|SECRET_KEY|PRIVATE_KEY|ACCESS_TOKEN|AUTH_TOKEN)\s*[:=]\s*["']?([^"'\s]{8,})["']?'''

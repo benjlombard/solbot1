@@ -6,5 +6,5 @@ repos:
         name: gitleaks
         entry: gitleaks
         language: system
-        args: ['detect', '--source', '.','no-git','.gitleaks.toml']
+        args: ['detect', '--source', '.','--config','.gitleaks.toml','--verbose','no-git']
         pass_filenames: false
