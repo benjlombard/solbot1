@@ -320,7 +320,7 @@ CONFIG = {
             'webhook_url': os.getenv('DISCORD_WEBHOOK_URL', ''),
             'username': 'Solana Trading Bot',
             'avatar_url': '',
-            'mention_role_id': '',  # ID du rôle à mentionner pour les alertes critiques
+            'mention_role_id': ''  # ID du rôle à mentionner pour les alertes critiques
         },
         
         # Telegram (optionnel)
@@ -347,7 +347,7 @@ CONFIG = {
             'notify_excellent_immediately': True,
             'notify_good_with_delay': 60,      # Délai pour bonnes découvertes (secondes)
             'batch_regular_discoveries': True   # Grouper découvertes normales
-        }
+        },
         
         # Niveaux de notification
         'notify_on': {
