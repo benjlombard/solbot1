@@ -330,6 +330,7 @@ class SolanaTradingBot:
             'Database Manager': '✅ Ready',
             'RugCheck Analyzer': '✅ Ready',
             'DexScreener Analyzer': '✅ Ready' if self.dexscreener_analyzer else '❌ Failed',
+            'Birdeye Analyzer': '✅ Ready' if self.birdeye_analyzer else '❌ Failed',
             'DEX Listings Scanner': '✅ Ready' if self.scanner_enabled else '⏸️ Disabled',
             'Portfolio Manager': '✅ Ready (Basic)',
             'Trading Engine': '✅ Configured',
