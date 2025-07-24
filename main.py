@@ -2682,7 +2682,19 @@ Examples:
 
         """
     )
-    
+
+    parser.add_argument('--birdeye-new', metavar='HOURS', type=int, nargs='?',
+                   const=24, help='Get new tokens from Birdeye (max age in hours, default: 24)')
+    parser.add_argument('--birdeye-trending', metavar='TIMEFRAME', nargs='?',
+                       const='24h', help='Get trending tokens from Birdeye (1h, 24h, 7d)')
+    parser.add_argument('--multi-source', nargs='+', 
+                       choices=['birdeye', 'dexscreener', 'trending_birdeye', 'trending_dexscreener'],
+                       help='Get tokens from multiple sources')
+    parser.add_argument('--max-age', metavar='HOURS', type=int, default=24,
+                       help='Maximum age of tokens in hours (default: 24)')
+    parser.add_argument('--token-limit', metavar='COUNT', type=int, default=50,
+                       help='Maximum number of tokens to retrieve (default: 50)')
+
     parser.add_argument('--quick-test', action='store_true',
                    help='Quick 30-second scanner test')
 
@@ -2988,6 +3000,164 @@ Examples:
             asyncio.run(run_maintenance())
             return 0
 
+        elif args.birdeye_new:
+            # Test Birdeye new tokens
+            max_age = args.birdeye_new
+            print(f"🐦 Getting new tokens from Birdeye (max age: {max_age}h)")
+            
+            async def test_birdeye_new():
+                try:
+                    if not bot.birdeye_analyzer:
+                        print("❌ Birdeye not available")
+                        return
+                    
+                    tokens = await bot.get_newest_tokens_birdeye(max_age, args.token_limit)
+                    
+                    if not tokens:
+                        print("❌ No new tokens found")
+                        return
+                    
+                    print(f"\n🐦 BIRDEYE NEW TOKENS ({len(tokens)} found):")
+                    print("="*80)
+                    
+                    for i, token in enumerate(tokens, 1):
+                        print(f"\n{i}. {token['symbol']} - {token['name']}")
+                        print(f"   Address: {token['token_address'][:8]}...{token['token_address'][-8:]}")
+                        print(f"   Age: {token['age_hours']:.1f} hours")
+                        print(f"   Price: ${token['price_usd']:.8f}")
+                        print(f"   24h Change: {token.get('price_change_24h', 0):+.2f}%")
+                        print(f"   Liquidity: ${token['liquidity_usd']:,.0f}")
+                        print(f"   Volume 24h: ${token['volume_24h']:,.0f}")
+                        print("-" * 40)
+                        
+                except Exception as e:
+                    print(f"❌ Birdeye new tokens failed: {e}")
+            
+            asyncio.run(test_birdeye_new())
+            return 0
+
+    elif args.birdeye_trending:
+        # Test Birdeye trending tokens
+        timeframe = args.birdeye_trending
+        print(f"🐦 Getting trending tokens from Birdeye ({timeframe})")
+        
+        async def test_birdeye_trending():
+            try:
+                if not bot.birdeye_analyzer:
+                    print("❌ Birdeye not available")
+                    return
+                
+                tokens = await bot.get_trending_tokens_birdeye(timeframe, args.token_limit)
+                
+                if not tokens:
+                    print("❌ No trending tokens found")
+                    return
+                
+                print(f"\n🐦 BIRDEYE TRENDING TOKENS ({len(tokens)} found):")
+                print("="*80)
+                
+                for i, token in enumerate(tokens, 1):
+                    print(f"\n{i}. {token['symbol']} - {token['name']}")
+                    print(f"   Address: {token['token_address'][:8]}...{token['token_address'][-8:]}")
+                    print(f"   Price: ${token['price_usd']:.8f}")
+                    print(f"   24h Change: {token.get('price_change_24h', 0):+.2f}%")
+                    print(f"   Volume 24h: ${token['volume_24h']:,.0f}")
+                    print(f"   Market Cap: ${token.get('market_cap', 0):,.0f}")
+                    print("-" * 40)
+                    
+            except Exception as e:
+                print(f"❌ Birdeye trending tokens failed: {e}")
+        
+        asyncio.run(test_birdeye_trending())
+        return 0
+
+    elif args.multi_source:
+        # Multi-source token analysis
+        sources = args.multi_source
+        max_age = args.max_age
+        limit = args.token_limit
+        
+        print(f"🔍 Multi-source token analysis:")
+        print(f"   Sources: {', '.join(sources)}")
+        print(f"   Max Age: {max_age}h")
+        print(f"   Limit: {limit}")
+        
+        async def test_multi_source():
+            try:
+                tokens = await bot.analyze_newest_tokens_multi_source(sources, max_age, limit)
+                
+                if not tokens:
+                    print("❌ No tokens found from any source")
+                    return
+                
+                print(f"\n🎯 MULTI-SOURCE TOKENS ({len(tokens)} found):")
+                print("="*80)
+                
+                # Group by source
+                by_source = {}
+                for token in tokens:
+                    source = token.get('source', 'unknown')
+                    if source not in by_source:
+                        by_source[source] = []
+                    by_source[source].append(token)
+                
+                for source, source_tokens in by_source.items():
+                    print(f"\n📊 {source.upper()} ({len(source_tokens)} tokens):")
+                    for i, token in enumerate(source_tokens[:5], 1):  # Show top 5 per source
+                        print(f"  {i}. {token['symbol']} - Age: {token['age_hours']:.1f}h - ${token['price_usd']:.8f}")
+           
+                   print(f"\n🔬 Starting comprehensive analysis of top {min(10, len(tokens))} tokens...")
+                   
+                   analyzed_count = 0
+                   excellent_tokens = []
+                   
+                   for token_data in tokens[:10]:  # Analyze top 10
+                       try:
+                           print(f"\n🔍 Analyzing {token_data['symbol']} ({token_data['token_address'][:8]}...)")
+                           
+                           analysis_result = await bot.analyze_token_comprehensive(token_data['token_address'])
+                           
+                           # Check if it's an excellent token
+                           if analysis_result.get('passed_all_checks', False):
+                               trading_rec = analysis_result.get('trading_recommendation', {})
+                               if trading_rec.get('action') == 'BUY' and trading_rec.get('confidence', 0) > 0.7:
+                                   excellent_tokens.append({
+                                       'token_data': token_data,
+                                       'analysis': analysis_result,
+                                       'source': token_data.get('source', 'unknown')
+                                   })
+                           
+                           analyzed_count += 1
+                           
+                       except Exception as e:
+                           print(f"❌ Error analyzing {token_data['symbol']}: {e}")
+                           continue
+                   
+                   print(f"\n📊 ANALYSIS SUMMARY:")
+                   print(f"   Tokens analyzed: {analyzed_count}")
+                   print(f"   Excellent tokens found: {len(excellent_tokens)}")
+                   
+                   if excellent_tokens:
+                       print(f"\n🎯 EXCELLENT TOKENS FOUND:")
+                       for i, excellent in enumerate(excellent_tokens, 1):
+                           token = excellent['token_data']
+                           analysis = excellent['analysis']
+                           trading_rec = analysis.get('trading_recommendation', {})
+                           
+                           print(f"  {i}. 🎯 {token['symbol']} (Source: {excellent['source']})")
+                           print(f"     Address: {token['token_address'][:8]}...{token['token_address'][-8:]}")
+                           print(f"     Age: {token['age_hours']:.1f}h")
+                           print(f"     Confidence: {trading_rec.get('confidence', 0):.1%}")
+                           print(f"     Action: {trading_rec.get('action', 'UNKNOWN')}")
+                   
+               except Exception as e:
+                   print(f"❌ Multi-source analysis failed: {e}")
+                   import traceback
+                   traceback.print_exc()
+           
+           asyncio.run(test_multi_source())
+           return 0
+                    
         elif args.test_methods:
             # Tester toutes les méthodes
             print("🧪 Testing all newest token methods...")
