@@ -20,7 +20,7 @@ import logging
 import time
 import requests
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Callable
+from typing import Dict, List, Optional, Set, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import threading

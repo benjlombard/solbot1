@@ -485,8 +485,7 @@ CONFIG = {
         }
     },
     
-    # === MODIFICATIONS DE LA SECTION TRADING ===
-    'trading': {
+
         # === PARAMÈTRES DE TRADING ===
     'trading': {
         # Montants de trading
@@ -866,7 +865,7 @@ def get_scanner_performance_config():
             'orca': CONFIG['scanner']['orca'].get('rate_limit_delay', 2)
         }
     }
-    
+
 # === FONCTIONS UTILITAIRES ===
 def get_config():
     """Retourne la configuration complète"""

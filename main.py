@@ -83,8 +83,22 @@ class SolanaTradingBot:
         # Load and validate configuration
         self.config = get_config()
 
-        # 🆕 NOUVEAU: Ajouter la configuration du scanner
-        self.config = add_scanner_to_config(get_config())
+        # 🆕 FIXÉ: Ajouter la configuration du scanner à la config existante
+        if 'scanner' not in self.config:
+            scanner_config = {
+                'enabled': True,
+                'min_liquidity_sol': 5.0,
+                'max_age_minutes': 60,
+                'enabled_dexs': ['raydium', 'orca'],
+                'scan_interval_seconds': 30,
+                'filters': {
+                    'require_sol_pair': True,
+                    'min_symbol_length': 2,
+                    'max_symbol_length': 15,
+                    'exclude_keywords': ['test', 'fake', 'scam']
+                }
+            }
+            self.config['scanner'] = scanner_config
 
         # Système de déduplication
         self.processed_tokens = set()  # Tokens déjà traités
@@ -285,7 +299,7 @@ class SolanaTradingBot:
         else:
             print("⏸️ DEX Scanner disabled in configuration")
             self.scanner_stats = {'enabled': False}
-            
+
         # Load and display component status
         self._display_component_status()
 
@@ -1550,9 +1564,10 @@ class SolanaTradingBot:
                         })
                 
 
-            # 🎯 AJOUT: Compter les bundles détectés
-            if analysis_results.get('rugcheck_analysis', {}).get('bundle_detected', False):
-                bundle_detected_count += 1
+                # 🎯 AJOUT: Compter les bundles détectés
+                if analysis_results.get('rugcheck_analysis', {}).get('bundle_detected', False):
+                    bundle_detected_count += 1
+
                 # Store results in database (create a basic token record)
                 try:
                     rugcheck_data = analysis_results.get('rugcheck_analysis', {})
@@ -1704,11 +1719,11 @@ class SolanaTradingBot:
                 try:
                     # Utiliser la méthode get_newest_tokens_realtime
                     #newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_realtime(hours_back=3)
-
+                    hours_back = 3
                     #nouvelle méthode pas basée sur des mots-clés mais sur des timestamps
                     newest_tokens = await self.dexscreener_analyzer.get_newest_tokens_by_timestamp(hours_back)
                     if newest_tokens:
-                        print(f"\n🆕 NOUVEAUX TOKENS (dernières 3h):")
+                        print(f"\n🆕 NOUVEAUX TOKENS (dernières {hours_back}h):")
                         for i, token in enumerate(newest_tokens[:3], 1):
                             # Filtres de qualité avant d'ajouter
                             if (token['liquidity_usd'] >= 5000 and 
@@ -1791,11 +1806,18 @@ class SolanaTradingBot:
                             'symbol': token_symbol,
                             'confidence': confidence
                         })
+                    elif trading_rec.get('action') == 'BUY' and confidence > 0.6:
+                        good_tokens.append({
+                            'address': token_address,
+                            'symbol': token_symbol,
+                            'confidence': confidence
+                        })
                 
 
-            # 🎯 AJOUT: Compter les bundles détectés
-            if analysis_results.get('rugcheck_analysis', {}).get('bundle_detected', False):
-                bundle_detected_count += 1
+                # 🎯 AJOUT: Compter les bundles détectés
+                if analysis_results.get('rugcheck_analysis', {}).get('bundle_detected', False):
+                    bundle_detected_count += 1
+
                 # Store results in database (create a basic token record)
                 try:
                     rugcheck_data = analysis_results.get('rugcheck_analysis', {})
@@ -1838,7 +1860,8 @@ class SolanaTradingBot:
                     try:
                         token_addr = opp['token_address']
                         confidence = opp['recommendation']['confidence']
-                        suggested_amount = recommendation.get('suggested_amount', 0)
+                        recommendation = opp['recommendation']
+                        suggested_amount = trading_rec.get('suggested_amount', 0)
                         self.logger.info(f"  📈 {token_addr[:8]}... - Confidence: {confidence:.1%}")
 
                         if suggested_amount > 0:
@@ -2436,23 +2459,15 @@ class SolanaTradingBot:
             self.logger.warning(f"Error clearing DexScreener cache: {e}")
 
         try:
-            # Close Solana client - CORRECTION: ne pas créer de nouvelle tâche asyncio
+            # Close Solana client
             if hasattr(self, 'solana_client') and self.solana_client:
                 # Si on est déjà dans un contexte async, utiliser await
                 # Sinon, utiliser run_until_complete
                 try:
-                    import asyncio
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # Dans un contexte async, programmer la fermeture
-                        loop.create_task(self.solana_client.close())
-                    else:
-                        # Dans un contexte sync, exécuter directement
-                        loop.run_until_complete(self.solana_client.close())
+                    self.logger.info("🚀 Solana client will be closed automatically")
                 except Exception:
                     # Fallback: fermeture simple
                     pass
-                self.logger.info("🚀 Solana client connections closed")
         except Exception as e:
             self.logger.warning(f"Error closing Solana client: {e}")
 
