@@ -1,6 +1,6 @@
 python main.py --test-solana
 python main.py --wallet-info
-
+python utils/jupiter_api/jupiter_db_scanner_kimi_2.py --interval 1 --limit 15 --database tokens.db --early --social --holders-growth
 gitleaks detect --source . --config .gitleaks.toml --verbose --no-git
 git add . && git commit -m "add files" && git push origin main
 # Tester l'analyse sur le token SOL wrappé
@@ -105,3 +105,8 @@ python main.py --multi-source birdeye dexscreener --max-age 6 --token-limit 20
 
 # Analyse combinée trending + nouveaux
 python main.py --multi-source trending_birdeye birdeye --max-age 24
+
+
+python utils/jupiter_api/jupiter_db_scanner_1.py --single-scan --limit 5 --database tokens.db
+
+
