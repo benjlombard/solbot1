@@ -58,6 +58,8 @@ from solana_client import (
     InsufficientFundsError, SlippageExceededError
 )
 
+from birdeye import BirdeyeAnalyzer, create_birdeye_analyzer, get_newest_birdeye_tokens, BirdeyeToken
+
 # from notifications import NotificationManager  # À créer
 # from portfolio import PortfolioManager  # À créer
 # from trading_bot import TradingBot  # À créer
