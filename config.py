@@ -148,10 +148,10 @@ CONFIG = {
     # === CONFIGURATION RUGCHECK ===
     'rugcheck': {
         'api_base_url': 'https://api.rugcheck.xyz/v1',
-        'api_timeout': 30,
-        'retry_attempts': 3,
-        'retry_delay': 2,
-        'rate_limit_delay': 5,
+        'api_timeout': 60,
+        'retry_attempts': 5,
+        'retry_delay': 5,
+        'rate_limit_delay': 10,
         
         # Seuils de détection
         'bundle_detection_threshold': 0.6,
@@ -209,8 +209,8 @@ CONFIG = {
             'metrics_retention_hours': 24,
             'alert_thresholds': {
                 'error_rate_threshold': 0.1,
-                'response_time_threshold': 10.0,
-                'cache_hit_rate_threshold': 0.7
+                'response_time_threshold': 30.0,
+                'cache_hit_rate_threshold': 0.2
             }
         }
     },
@@ -218,10 +218,10 @@ CONFIG = {
     # === CONFIGURATION DEXSCREENER ===
     'dexscreener': {
         'api_base_url': 'https://api.dexscreener.com/latest',
-        'api_timeout': 20,
+        'api_timeout': 45,
         'retry_attempts': 3,
-        'retry_delay': 1,
-        'rate_limit_delay': 1,
+        'retry_delay': 3,
+        'rate_limit_delay': 3,
         
         # Cache
         'cache_duration_minutes': 5,

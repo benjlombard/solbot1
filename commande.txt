@@ -69,3 +69,12 @@ python main.py --test-scanner
 
 # Statistiques
 python main.py --scanner-stats
+
+
+python main.py --quick-test
+
+# Test complet mais patient (5 minutes)
+python main.py --test-scanner
+
+# Voir les stats sans lancer le scanner
+python main.py --scanner-stats

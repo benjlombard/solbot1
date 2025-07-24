@@ -82,6 +82,10 @@ class SolanaTradingBot:
         
         # Load and validate configuration
         self.config = get_config()
+        
+        
+        # 🆕 NOUVEAU: Mode de scan
+        self.scanner_enabled = self.config.get('scanner', {}).get('enabled', True)
 
         # 🆕 FIXÉ: Ajouter la configuration du scanner à la config existante
         if 'scanner' not in self.config:
@@ -136,11 +140,6 @@ class SolanaTradingBot:
         # Setup signal handlers for graceful shutdown
         self._setup_signal_handlers()
         
-        # 🆕 NOUVEAU: Initialiser le scanner (après les autres composants)
-        self.dex_scanner = None  # Sera initialisé plus tard
-        
-        # 🆕 NOUVEAU: Mode de scan
-        self.scanner_enabled = self.config.get('scanner', {}).get('enabled', True)
 
         # Runtime state
         self.is_running = False
@@ -148,6 +147,9 @@ class SolanaTradingBot:
         self.cycles_completed = 0
         self.total_trades = 0
         
+        # 🆕 NOUVEAU: Initialiser le scanner (après les autres composants)
+        self.dex_scanner = None  # Sera initialisé plus tard
+
         print("✅ Solana Trading Bot initialized successfully!")
         self.logger.info("Solana Trading Bot initialized successfully!")
 
@@ -2526,6 +2528,9 @@ Examples:
         """
     )
     
+    parser.add_argument('--quick-test', action='store_true',
+                   help='Quick 30-second scanner test')
+
     parser.add_argument('--test-methods', action='store_true',
                    help='Test all newest token methods and compare results')
 
@@ -2731,6 +2736,24 @@ Examples:
             
             return 0
         
+        elif args.quick_test:
+            # Test rapide de 30 secondes
+            print("⚡ Quick 30-second scanner test...")
+            
+            async def quick_test():
+                scanner = await bot.initialize_dex_scanner()
+                if scanner:
+                    print("✅ Scanner started, monitoring for 30 seconds...")
+                    await asyncio.sleep(30)
+                    scanner.stop_scanning()
+                    
+                    stats = scanner.get_stats()
+                    print(f"📊 Quick Test Results: {stats['valid_new_pairs']} discoveries")
+                else:
+                    print("❌ Failed to start scanner")
+            
+            asyncio.run(quick_test())
+            return 0
 
         # 🆕 NOUVEAU: Scanner-specific commands
         elif args.scanner_stats:
@@ -2758,19 +2781,28 @@ Examples:
         elif args.test_scanner:
             # Test du scanner pendant 5 minutes
             print("🧪 Testing DEX Scanner for 5 minutes...")
-            
+            print("⚠️ Note: APIs might be slow, please wait...")
             async def test_scanner():
                 scanner = await bot.initialize_dex_scanner()
                 if scanner:
                     print("✅ Scanner started, monitoring for 5 minutes...")
-                    await asyncio.sleep(300)  # 5 minutes
+                    print("📊 Monitoring new token discoveries...")
+                    print("🕒 Running for 5 minutes (be patient with slow APIs)...")
+                    # Afficher des stats intermédiaires
+                    for minute in range(5):
+                        await asyncio.sleep(60)  # 1 minute
+                        stats = scanner.get_stats()
+                        print(f"   Minute {minute+1}: {stats['valid_new_pairs']} discoveries, "
+                            f"{stats['duplicate_pairs']} duplicates")
+
                     scanner.stop_scanning()
                     
                     stats = scanner.get_stats()
-                    print(f"\n📊 Test Results:")
-                    print(f"   Discoveries: {stats['valid_new_pairs']}")
-                    print(f"   Duplicates: {stats['duplicate_pairs']}")
-                    print(f"   Filtered: {stats['filtered_pairs']}")
+                    print(f"\n📊 Final Test Results:")
+                    print(f"   ✅ Valid Discoveries: {stats['valid_new_pairs']}")
+                    print(f"   🔄 Duplicates: {stats['duplicate_pairs']}")
+                    print(f"   🚫 Filtered: {stats['filtered_pairs']}")
+                    print(f"   ⏱️ Uptime: {stats['uptime_hours']:.2f}h")
                 else:
                     print("❌ Failed to start scanner")
             
