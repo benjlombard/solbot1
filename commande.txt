@@ -78,3 +78,18 @@ python main.py --test-scanner
 
 # Voir les stats sans lancer le scanner
 python main.py --scanner-stats
+
+
+
+#birdeye
+# Nouveaux tokens Birdeye (dernières 12 heures)
+python main.py --birdeye-new 12
+
+# Tokens trending Birdeye
+python main.py --birdeye-trending 24h
+
+# Multi-sources avec filtrage par âge
+python main.py --multi-source birdeye dexscreener --max-age 6 --token-limit 20
+
+# Analyse combinée trending + nouveaux
+python main.py --multi-source trending_birdeye birdeye --max-age 24
