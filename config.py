@@ -291,7 +291,22 @@ CONFIG = {
         'log_trades': True,
         'log_api_calls': True,
         'log_performance': True,
-        'log_cache_operations': False
+        'log_cache_operations': False,
+
+        # Logs spécialisés pour le scanner
+        'scanner_logs': {
+            'discoveries_log': str(LOGS_DIR / 'scanner_discoveries.log'),
+            'filtered_log': str(LOGS_DIR / 'scanner_filtered.log'),
+            'stats_log': str(LOGS_DIR / 'scanner_stats.log'),
+            'errors_log': str(LOGS_DIR / 'scanner_errors.log'),
+            'performance_log': str(LOGS_DIR / 'scanner_performance.log')
+        },
+        
+        # Format de log pour le scanner
+        'scanner_log_format': '%(asctime)s - SCANNER - %(levelname)s - %(message)s',
+        'scanner_log_level': 'INFO',
+        'scanner_detailed_logging': True
+
     },
     
     # === NOTIFICATIONS ===
@@ -315,6 +330,24 @@ CONFIG = {
             'chat_id': os.getenv('TELEGRAM_CHAT_ID', ''),
             'parse_mode': 'HTML'
         },
+
+        'scanner_notifications': {
+            'new_discovery': True,              # Nouvelles découvertes
+            'excellent_discovery': True,        # Découvertes excellentes
+            'scanner_stats': True,             # Statistiques périodiques
+            'scanner_errors': True,            # Erreurs du scanner
+            'first_discovery_of_day': True,    # Première découverte du jour
+            'discovery_analysis_complete': True # Analyse terminée
+        },
+        
+        # Niveaux de notification pour découvertes
+        'discovery_levels': {
+            'excellent_threshold': 0.85,       # Seuil découverte excellente
+            'good_threshold': 0.7,             # Seuil bonne découverte
+            'notify_excellent_immediately': True,
+            'notify_good_with_delay': 60,      # Délai pour bonnes découvertes (secondes)
+            'batch_regular_discoveries': True   # Grouper découvertes normales
+        }
         
         # Niveaux de notification
         'notify_on': {
@@ -364,9 +397,152 @@ CONFIG = {
         ]
     },
     
+    # === NOUVELLE SECTION: DEX LISTINGS SCANNER ===
+    'scanner': {
+        # Activation du scanner
+        'enabled': True,
+        
+        # Configuration des DEXs à surveiller
+        'enabled_dexs': ['raydium', 'orca'],  # meteora bientôt disponible
+        
+        # Filtres de qualité
+        'min_liquidity_sol': 5.0,           # Liquidité minimum en SOL
+        'max_age_minutes': 60,              # Âge maximum des paires à considérer
+        'scan_interval_seconds': 30,        # Intervalle entre scans
+        
+        # Filtres de tokens
+        'filters': {
+            'require_sol_pair': True,       # Uniquement paires SOL/TOKEN
+            'min_symbol_length': 2,         # Longueur minimum du symbole
+            'max_symbol_length': 15,        # Longueur maximum du symbole
+            'exclude_keywords': [           # Mots-clés à exclure
+                'test', 'fake', 'scam', 'rugpull', 'honeypot',
+                'demo', 'sample', 'example', 'placeholder'
+            ],
+            'min_initial_price': 0.000001,  # Prix minimum USD
+            'max_initial_price': 1000.0     # Prix maximum USD
+        },
+        
+        # Configuration performance
+        'max_concurrent_scans': 3,          # Nombre max de DEXs scannés en parallèle
+        'cache_size_limit': 5000,           # Taille max du cache de paires vues
+        'cleanup_interval_minutes': 10,     # Nettoyage du cache
+        
+        # Configuration notifications
+        'notifications': {
+            'enabled': True,
+            'log_discoveries': True,        # Logger les découvertes
+            'log_filtered': False,          # Logger les paires filtrées
+            'notify_excellent_finds': True, # Notification pour excellentes trouvailles
+            'min_confidence_notify': 0.8   # Confiance minimum pour notification
+        },
+        
+        # Configuration Raydium spécifique
+        'raydium': {
+            'enabled': True,
+            'api_endpoint': 'https://api.raydium.io/v2/main/pairs',
+            'min_liquidity_usd': 5000,     # Liquidité minimum en USD
+            'rate_limit_delay': 2,          # Délai entre requêtes (secondes)
+            'timeout_seconds': 10
+        },
+        
+        # Configuration Orca spécifique
+        'orca': {
+            'enabled': True,
+            'api_endpoint': 'https://api.orca.so/v1/whirlpool/list',
+            'min_tvl_usd': 5000,           # TVL minimum en USD
+            'rate_limit_delay': 2,
+            'timeout_seconds': 10
+        },
+        
+        # Configuration Meteora (en développement)
+        'meteora': {
+            'enabled': False,               # Pas encore d'API publique
+            'program_id': 'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB',
+            'websocket_url': None,          # À implémenter avec WebSocket RPC
+            'min_liquidity_sol': 5.0
+        },
+        
+        # Statistiques et monitoring
+        'monitoring': {
+            'enable_stats': True,
+            'stats_interval_minutes': 5,   # Affichage stats toutes les 5min
+            'log_performance': True,
+            'track_discovery_rate': True,
+            'alert_on_no_discoveries': True,
+            'no_discovery_alert_minutes': 30  # Alerte si pas de découverte en 30min
+        },
+        
+        # Mode développement
+        'development': {
+            'debug_mode': False,
+            'save_raw_responses': False,
+            'mock_mode': False,             # Mode simulation pour tests
+            'test_tokens': [                # Tokens de test
+                'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',  # Bonk
+                'So11111111111111111111111111111111111111112'    # SOL
+            ]
+        }
+    },
+    
+    # === MODIFICATIONS DE LA SECTION TRADING ===
+    'trading': {
+        # === PARAMÈTRES DE TRADING ===
+    'trading': {
+        # Montants de trading
+        'default_trade_amount': 0.1,  # SOL
+        'min_trade_amount': 0.01,     # SOL
+        'max_trade_amount': 1.0,      # SOL
+        'max_daily_trades': 50,
+        'max_position_size': 5.0,     # SOL
+        
+        # Gestion des risques
+        'stop_loss_percentage': 15.0,    # %
+        'take_profit_percentage': 25.0,  # %
+        'max_slippage': 5.0,            # %
+        'min_liquidity_usd': 10000,     # USD
+        
+        # Timing
+        'trade_interval_seconds': 30,
+        'analysis_interval_seconds': 60,
+        'price_update_interval': 15,
+        
+        # Filtres de trading
+        'min_market_cap': 100000,      # USD
+        'max_market_cap': 10000000,    # USD
+        'min_volume_24h': 50000,       # USD
+        'max_token_age_hours': 168,    # 7 jours
+        
+        # Diversification
+        'max_simultaneous_positions': 10,
+        'max_allocation_per_token': 0.2,  # 20% du portefeuille max
+        
+        # Mode de trading
+        'paper_trading': True,  # Mode simulation
+        'auto_trading': False,  # Trading automatique
+        'debug_mode': True,
+        
+        # Nouvelles options pour le scanner
+        'scanner_integration': {
+            'auto_analyze_discoveries': True,    # Analyser automatiquement les découvertes
+            'priority_analysis': True,          # Priorité aux découvertes du scanner
+            'max_concurrent_analysis': 3,       # Max d'analyses simultanées
+            'discovery_analysis_timeout': 120   # Timeout pour analyse de découverte
+        },
+        
+        # Mode de trading avec scanner
+        'scanner_trading_mode': {
+            'enabled': True,
+            'immediate_analysis': True,         # Analyse immédiate des découvertes
+            'bypass_trending_analysis': False,  # Garder l'analyse trending aussi
+            'discovery_trade_multiplier': 1.2, # Multiplicateur pour découvertes scanner
+            'max_discovery_trades_per_hour': 5  # Limite de trades par découverte/heure
+        }
+    },
+
     # === STRATÉGIES DE TRADING ===
     'strategies': {
-        'default_strategy': 'conservative',
+        'default_strategy': 'scanner_enhanced',
         #ANCIENS SEUILS (très stricts)
         #'min_safety_score': 0.8,
         #'max_bundle_confidence': 0.2,
@@ -400,6 +576,31 @@ CONFIG = {
             'stop_loss_percentage': 25.0,
             'take_profit_percentage': 40.0,
             'max_position_time_hours': 12
+        },
+        # Nouvelle stratégie optimisée pour le scanner
+        'scanner_enhanced': {
+            'min_safety_score': 0.4,           # Plus permissif pour nouveaux tokens
+            'max_bundle_confidence': 0.6,      # Tolérance bundle plus élevée
+            'min_liquidity_multiplier': 0.8,   # Liquidité moins stricte
+            'trade_amount_multiplier': 0.15,   # Montants plus petits
+            'stop_loss_percentage': 8.0,       # Stop loss plus serré
+            'take_profit_percentage': 20.0,    # Take profit plus conservateur
+            'max_position_time_hours': 12,     # Positions plus courtes
+            'discovery_bonus': 0.1,            # Bonus pour découvertes scanner
+            'freshness_factor': True           # Favoriser les tokens très récents
+        },
+        
+        # Stratégie ultra-rapide pour découvertes immédiates
+        'discovery_sniper': {
+            'min_safety_score': 0.2,           # Très permissif
+            'max_bundle_confidence': 0.8,      # Accepte bundles modérés
+            'min_liquidity_multiplier': 0.3,   # Liquidité très flexible
+            'trade_amount_multiplier': 0.05,   # Très petits montants
+            'stop_loss_percentage': 5.0,       # Stop loss très serré
+            'take_profit_percentage': 15.0,    # Take profit rapide
+            'max_position_time_hours': 2,      # Positions très courtes
+            'immediate_entry': True,           # Entrée immédiate
+            'max_age_minutes': 10              # Seulement tokens < 10 min
         }
     },
     
@@ -490,12 +691,23 @@ if ENVIRONMENT == 'production':
     CONFIG['development']['verbose_logging'] = False
     CONFIG['rugcheck']['max_concurrent_requests'] = 10
     CONFIG['database']['max_connections'] = 20
+    CONFIG['scanner']['enabled'] = True
+    CONFIG['scanner']['scan_interval_seconds'] = 30
+    CONFIG['scanner']['min_liquidity_sol'] = 10.0      # Plus strict en prod
+    CONFIG['scanner']['filters']['require_sol_pair'] = True
+    CONFIG['scanner']['development']['debug_mode'] = False
+    CONFIG['strategies']['default_strategy'] = 'scanner_enhanced'
 
 elif ENVIRONMENT == 'staging':
     CONFIG['trading']['paper_trading'] = True
     CONFIG['trading']['debug_mode'] = True
     CONFIG['logging']['level'] = 'DEBUG'
     CONFIG['development']['debug_mode'] = True
+    CONFIG['scanner']['enabled'] = True
+    CONFIG['scanner']['scan_interval_seconds'] = 60
+    CONFIG['scanner']['min_liquidity_sol'] = 5.0
+    CONFIG['scanner']['development']['debug_mode'] = True
+    CONFIG['scanner']['development']['save_raw_responses'] = True
 
 else:  # development
     CONFIG['trading']['paper_trading'] = True
@@ -503,6 +715,49 @@ else:  # development
     CONFIG['logging']['level'] = 'DEBUG'
     CONFIG['development']['debug_mode'] = True
     CONFIG['development']['verbose_logging'] = True
+    CONFIG['scanner']['enabled'] = True
+    CONFIG['scanner']['scan_interval_seconds'] = 60
+    CONFIG['scanner']['min_liquidity_sol'] = 1.0       # Moins strict en dev
+    CONFIG['scanner']['development']['debug_mode'] = True
+    CONFIG['scanner']['development']['save_raw_responses'] = True
+    CONFIG['scanner']['development']['mock_mode'] = False
+
+
+# ===== NOUVELLES FONCTIONS UTILITAIRES =====
+def get_scanner_config():
+    """Retourne uniquement la configuration du scanner"""
+    return CONFIG['scanner'].copy()
+
+def is_scanner_enabled():
+    """Vérifie si le scanner est activé"""
+    return CONFIG['scanner'].get('enabled', False)
+
+def get_enabled_dexs():
+    """Retourne la liste des DEXs activés"""
+    return CONFIG['scanner'].get('enabled_dexs', [])
+
+def update_scanner_config(key: str, value):
+    """Met à jour une valeur de configuration du scanner"""
+    if key in CONFIG['scanner']:
+        CONFIG['scanner'][key] = value
+        return True
+    return False
+
+def enable_scanner():
+    """Active le scanner"""
+    CONFIG['scanner']['enabled'] = True
+
+def disable_scanner():
+    """Désactive le scanner"""
+    CONFIG['scanner']['enabled'] = False
+
+def get_discovery_strategy_config():
+    """Retourne la configuration de la stratégie de découverte"""
+    strategy_name = CONFIG['strategies'].get('default_strategy', 'conservative')
+    if 'scanner' in strategy_name or 'discovery' in strategy_name:
+        return CONFIG['strategies'].get(strategy_name, CONFIG['strategies']['scanner_enhanced'])
+    return CONFIG['strategies']['scanner_enhanced']
+
 
 # === VALIDATION DE LA CONFIGURATION ===
 def validate_config():
@@ -540,8 +795,78 @@ def validate_config():
             except Exception as e:
                 errors.append(f"Impossible de créer le répertoire {directory}: {e}")
     
+    # Validation du scanner
+    scanner_config = CONFIG.get('scanner', {})
+    
+    if scanner_config.get('enabled', False):
+        # Vérifier DEXs activés
+        enabled_dexs = scanner_config.get('enabled_dexs', [])
+        if not enabled_dexs:
+            errors.append("Scanner activé mais aucun DEX configuré")
+        
+        valid_dexs = ['raydium', 'orca', 'meteora', 'phoenix', 'openbook']
+        for dex in enabled_dexs:
+            if dex not in valid_dexs:
+                errors.append(f"DEX non supporté: {dex}")
+        
+        # Vérifier paramètres de liquidité
+        min_liquidity = scanner_config.get('min_liquidity_sol', 0)
+        if min_liquidity < 0:
+            errors.append("min_liquidity_sol doit être >= 0")
+        
+        # Vérifier intervalles
+        scan_interval = scanner_config.get('scan_interval_seconds', 30)
+        if scan_interval < 10:
+            errors.append("scan_interval_seconds doit être >= 10")
+        
+        # Vérifier filtres
+        filters = scanner_config.get('filters', {})
+        min_symbol_len = filters.get('min_symbol_length', 2)
+        max_symbol_len = filters.get('max_symbol_length', 15)
+        
+        if min_symbol_len >= max_symbol_len:
+            errors.append("min_symbol_length doit être < max_symbol_length")
+        
+        # Vérifier configuration des DEXs individuels
+        for dex in enabled_dexs:
+            dex_config = scanner_config.get(dex, {})
+            if dex_config.get('enabled', True):
+                if dex in ['raydium', 'orca']:
+                    if not dex_config.get('api_endpoint'):
+                        errors.append(f"api_endpoint manquant pour {dex}")
+
     return errors
 
+
+# ===== FONCTIONS D'AIDE POUR L'INTÉGRATION =====
+
+def get_scanner_integration_config():
+    """Configuration spécifique pour l'intégration du scanner"""
+    return {
+        'scanner': get_scanner_config(),
+        'trading_integration': CONFIG['trading'].get('scanner_integration', {}),
+        'strategy': get_discovery_strategy_config(),
+        'notifications': CONFIG['notifications'].get('scanner_notifications', {}),
+        'logging': CONFIG['logging'].get('scanner_logs', {})
+    }
+
+def is_discovery_strategy_active():
+    """Vérifie si une stratégie de découverte est active"""
+    strategy = CONFIG['strategies'].get('default_strategy', '')
+    return 'scanner' in strategy or 'discovery' in strategy
+
+def get_scanner_performance_config():
+    """Configuration de performance pour le scanner"""
+    return {
+        'max_concurrent_scans': CONFIG['scanner'].get('max_concurrent_scans', 3),
+        'cache_size_limit': CONFIG['scanner'].get('cache_size_limit', 5000),
+        'cleanup_interval_minutes': CONFIG['scanner'].get('cleanup_interval_minutes', 10),
+        'rate_limits': {
+            'raydium': CONFIG['scanner']['raydium'].get('rate_limit_delay', 2),
+            'orca': CONFIG['scanner']['orca'].get('rate_limit_delay', 2)
+        }
+    }
+    
 # === FONCTIONS UTILITAIRES ===
 def get_config():
     """Retourne la configuration complète"""

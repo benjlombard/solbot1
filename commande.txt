@@ -54,3 +54,18 @@ python main.py --continuous-newest 6 --scan-interval 1 --method timestamp
 # Comparer les méthodes
 python main.py --newest-analysis 6 --method optimized
 python main.py --newest-analysis 6 --method terms
+
+
+
+########### SCANNER #####################
+# Mode scanner seul (surveillance pure)
+python main.py --scanner-mode
+
+# Mode hybride (recommandé : scanner + cycles traditionnels)
+python main.py --hybrid-mode
+
+# Test du scanner
+python main.py --test-scanner
+
+# Statistiques
+python main.py --scanner-stats

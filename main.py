@@ -47,6 +47,10 @@ from dexscreener import (
     ChainId, MarketAnalysis
 )
 
+from dex_scanner import (
+    DEXListingsScanner, NewPairEvent, DEXProtocol, 
+    create_dex_scanner_integration, add_scanner_to_config
+)
 
 from solana_client import (
     create_solana_client, SolanaClient, TransactionResult, 
@@ -78,6 +82,10 @@ class SolanaTradingBot:
         
         # Load and validate configuration
         self.config = get_config()
+
+        # 🆕 NOUVEAU: Ajouter la configuration du scanner
+        self.config = add_scanner_to_config(get_config())
+
         # Système de déduplication
         self.processed_tokens = set()  # Tokens déjà traités
         self.processed_tokens_timestamps = {}  # Horodatage des tokens traités
@@ -114,6 +122,12 @@ class SolanaTradingBot:
         # Setup signal handlers for graceful shutdown
         self._setup_signal_handlers()
         
+        # 🆕 NOUVEAU: Initialiser le scanner (après les autres composants)
+        self.dex_scanner = None  # Sera initialisé plus tard
+        
+        # 🆕 NOUVEAU: Mode de scan
+        self.scanner_enabled = self.config.get('scanner', {}).get('enabled', True)
+
         # Runtime state
         self.is_running = False
         self.start_time = datetime.now()
@@ -253,6 +267,25 @@ class SolanaTradingBot:
         self.trading_config = get_trading_config()
         self.security_config = get_security_config()
         
+        # 🆕 NOUVEAU: 7. DEX Listings Scanner
+        if self.scanner_enabled:
+            print("🔍 Initializing DEX Listings Scanner...")
+            self.logger.info("Initializing DEX Listings Scanner...")
+            try:
+                # Le scanner sera créé de manière asynchrone
+                self.logger.info("DEX Scanner will be started with monitoring")
+                self.scanner_stats = {
+                    'enabled': True,
+                    'status': 'pending_start'
+                }
+            except Exception as e:
+                self.logger.error(f"❌ Failed to prepare DEX scanner: {e}")
+                self.scanner_enabled = False
+                print("⚠️ DEX Scanner disabled")
+        else:
+            print("⏸️ DEX Scanner disabled in configuration")
+            self.scanner_stats = {'enabled': False}
+            
         # Load and display component status
         self._display_component_status()
 
@@ -262,6 +295,7 @@ class SolanaTradingBot:
             'Database Manager': '✅ Ready',
             'RugCheck Analyzer': '✅ Ready',
             'DexScreener Analyzer': '✅ Ready' if self.dexscreener_analyzer else '❌ Failed',
+            'DEX Listings Scanner': '✅ Ready' if self.scanner_enabled else '⏸️ Disabled',
             'Portfolio Manager': '✅ Ready (Basic)',
             'Trading Engine': '✅ Configured',
             'Solana Client': '✅ Ready' if self.solana_client else '❌ Failed',
@@ -294,6 +328,15 @@ class SolanaTradingBot:
         print(f"  Min Liquidity: ${self.trading_config['min_liquidity_usd']:,}")
         print(f"  Max Slippage: {self.trading_config['max_slippage']}%")
         print("="*60)
+
+        # 🆕 NOUVEAU: Ajouter info sur le scanner
+        if self.scanner_enabled:
+            enabled_dexs = self.config.get('scanner', {}).get('enabled_dexs', [])
+            min_liquidity = self.config.get('scanner', {}).get('min_liquidity_sol', 5.0)
+            print(f"\n🔍 DEX SCANNER SETTINGS:")
+            print(f"  Enabled DEXs: {', '.join(enabled_dexs)}")
+            print(f"  Min Liquidity: {min_liquidity} SOL")
+            print(f"  Real-time Monitoring: Enabled")
 
     def set_analysis_method(self, method: str):
         """Définir la méthode d'analyse par défaut"""
@@ -1934,7 +1977,188 @@ class SolanaTradingBot:
         
         return trending_tokens
 
+    async def initialize_dex_scanner(self):
+        """Initialiser le scanner de manière asynchrone"""
+        if not self.scanner_enabled:
+            return None
+        
+        try:
+            self.logger.info("🔍 Starting DEX Listings Scanner...")
+            
+            # Créer le scanner avec intégration
+            self.dex_scanner = await create_dex_scanner_integration(
+                self.config,
+                self.database_manager,
+                self.rugcheck_analyzer,
+                self.analyze_token_comprehensive  # Callback pour analyse complète
+            )
+            
+            # Démarrer le scanner en arrière-plan
+            self.scanner_task = asyncio.create_task(
+                self.dex_scanner.start_scanning(),
+                name="dex_scanner"
+            )
+            
+            self.logger.info("✅ DEX Listings Scanner started successfully")
+            self.scanner_stats['status'] = 'running'
+            
+            return self.dex_scanner
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to start DEX scanner: {e}")
+            self.scanner_enabled = False
+            self.scanner_stats['status'] = 'failed'
+            return None
+
+    async def run_scanner_mode(self):
+        """Mode scanner uniquement - écoute continue des nouvelles paires"""
+        print("\n🔍 STARTING DEX LISTINGS SCANNER MODE")
+        print("=" * 60)
+        print("🎯 Real-time monitoring of new token listings")
+        print("🔄 Automatic analysis and filtering")
+        print("💾 Database storage of discoveries")
+        print("=" * 60)
+        
+        self.is_running = True
+        
+        try:
+            # Initialiser le scanner
+            scanner = await self.initialize_dex_scanner()
+            if not scanner:
+                print("❌ Failed to start scanner")
+                return
+            
+            # Afficher les statistiques périodiquement
+            async def show_stats():
+                while self.is_running:
+                    await asyncio.sleep(300)  # Toutes les 5 minutes
+                    if scanner:
+                        stats = scanner.get_stats()
+                        self.logger.info(
+                            f"📊 SCANNER STATS: "
+                            f"{stats['valid_new_pairs']} new pairs, "
+                            f"{stats['duplicate_pairs']} duplicates, "
+                            f"{stats['filtered_pairs']} filtered, "
+                            f"Uptime: {stats['uptime_hours']:.1f}h"
+                        )
+            
+            # Démarrer l'affichage des stats
+            stats_task = asyncio.create_task(show_stats())
+            
+            print("🔍 Scanner is running... Press Ctrl+C to stop")
+            print("📊 Statistics will be shown every 5 minutes")
+            
+            # Attendre jusqu'à l'arrêt
+            await asyncio.gather(
+                self.scanner_task,
+                stats_task,
+                return_exceptions=True
+            )
+            
+        except KeyboardInterrupt:
+            print("\n🛑 Scanner stopped by user")
+        except Exception as e:
+            self.logger.error(f"❌ Scanner error: {e}")
+        finally:
+            if scanner:
+                scanner.stop_scanning()
+            self.is_running = False
+
+    async def run_hybrid_mode(self, interval_minutes=None):
+        """Mode hybride - scanner + cycles d'analyse traditionnels"""
+        if interval_minutes is None:
+            interval_minutes = self.trading_config['analysis_interval_seconds'] // 60
+            
+        print("\n🔄 STARTING HYBRID MODE (Scanner + Traditional Cycles)")
+        print("=" * 70)
+        print("🔍 Real-time DEX listings monitoring")
+        print("🔄 Periodic trending token analysis")
+        print("💎 Combined discovery and analysis")
+        print("=" * 70)
+        
+        self.is_running = True
+        
+        try:
+            # Démarrer le scanner
+            scanner = await self.initialize_dex_scanner()
+            
+            # Démarrer les cycles traditionnels
+            async def traditional_cycles():
+                while self.is_running:
+                    try:
+                        self.logger.info("🔄 Running traditional analysis cycle...")
+                        cycle_results = await self.run_monitoring_cycle()
+                        
+                        # Afficher les résultats combinés
+                        scanner_stats = scanner.get_stats() if scanner else {}
+                        print(f"📊 Hybrid Cycle: "
+                              f"Traditional: {cycle_results['processed_count']} tokens, "
+                              f"Scanner: {scanner_stats.get('valid_new_pairs', 0)} discoveries")
+                        
+                        await asyncio.sleep(interval_minutes * 60)
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error in traditional cycle: {e}")
+                        await asyncio.sleep(60)
+            
+            # Lancer les deux modes en parallèle
+            traditional_task = asyncio.create_task(traditional_cycles())
+            
+            tasks = [traditional_task]
+            if scanner:
+                tasks.append(self.scanner_task)
+            
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+        except KeyboardInterrupt:
+            print("\n🛑 Hybrid mode stopped by user")
+        except Exception as e:
+            self.logger.error(f"❌ Hybrid mode error: {e}")
+        finally:
+            if scanner:
+                scanner.stop_scanning()
+            self.is_running = False
+
     async def run_continuous_monitoring(self, interval_minutes=None):
+        """Version améliorée avec support du scanner"""
+        if interval_minutes is None:
+            interval_minutes = self.trading_config['analysis_interval_seconds'] // 60
+            
+        # Déterminer le mode basé sur la configuration
+        if self.scanner_enabled:
+            mode = "HYBRID"
+            description = f"Scanner + Traditional Cycles (every {interval_minutes}m)"
+        else:
+            mode = "TRADITIONAL"
+            description = f"Traditional Cycles Only (every {interval_minutes}m)"
+        
+        print(f"\n🤖 Enhanced Bot Started - {mode} MODE")
+        print(f"📊 {description}")
+        print(f"📊 Paper Trading: {'Enabled' if self.trading_config['paper_trading'] else 'Disabled'}")
+        print(f"🎯 Strategy: {self.config['strategies']['default_strategy']}")
+        print(f"📈 DexScreener: {'Enabled' if self.dexscreener_analyzer else 'Disabled'}")
+        if self.scanner_enabled:
+            enabled_dexs = self.config.get('scanner', {}).get('enabled_dexs', [])
+            print(f"🔍 Scanner DEXs: {', '.join(enabled_dexs)}")
+        print("Press Ctrl+C to stop")
+        print("=" * 80)
+        
+        try:
+            if self.scanner_enabled:
+                await self.run_hybrid_mode(interval_minutes)
+            else:
+                # Mode traditionnel existant
+                await self.run_continuous_monitoring_traditional(interval_minutes)
+                
+        except KeyboardInterrupt:
+            self.logger.info("🛑 Enhanced Monitoring stopped by user")
+            print("\n🛑 Enhanced Bot Stopped by user")
+        except Exception as e:
+            self.logger.error(f"❌ Error in enhanced continuous monitoring: {e}")
+            print(f"\n❌ Enhanced Bot Error: {e}")
+            raise
+
+    async def run_continuous_monitoring_traditional(self, interval_minutes=None):
         """Run continuous monitoring with specified interval"""
         if interval_minutes is None:
             interval_minutes = self.trading_config['analysis_interval_seconds'] // 60
@@ -2058,6 +2282,33 @@ class SolanaTradingBot:
         if hasattr(self.rugcheck_analyzer, 'get_analysis_stats'):
             stats['rugcheck'] = self.rugcheck_analyzer.get_analysis_stats()
         
+        # 🆕 NOUVEAU: Ajouter les stats du scanner
+        if self.scanner_enabled and hasattr(self, 'dex_scanner') and self.dex_scanner:
+            try:
+                scanner_stats = self.dex_scanner.get_stats()
+                stats['dex_scanner'] = {
+                    'enabled': True,
+                    'status': 'running' if self.is_running else 'stopped',
+                    'total_discoveries': scanner_stats['valid_new_pairs'],
+                    'filtered_pairs': scanner_stats['filtered_pairs'],
+                    'duplicate_pairs': scanner_stats['duplicate_pairs'],
+                    'uptime_hours': scanner_stats['uptime_hours'],
+                    'enabled_dexs': scanner_stats['enabled_dexs'],
+                    'cache_size': scanner_stats['cache_size'],
+                    'last_discovery': scanner_stats['last_pair_time']
+                }
+            except Exception as e:
+                stats['dex_scanner'] = {
+                    'enabled': True,
+                    'status': 'error',
+                    'error': str(e)
+                }
+        else:
+            stats['dex_scanner'] = {
+                'enabled': False,
+                'status': 'disabled'
+            }
+
         return stats
 
     def _log_token_result_summary(self, analysis_results: Dict):
@@ -2151,6 +2402,22 @@ class SolanaTradingBot:
         self.logger.info("🔄 Initiating graceful shutdown...")
         self.is_running = False
         
+        # Arrêter le scanner
+        if hasattr(self, 'dex_scanner') and self.dex_scanner:
+            try:
+                self.dex_scanner.stop_scanning()
+                self.logger.info("🔍 DEX Scanner stopped")
+            except Exception as e:
+                self.logger.warning(f"Error stopping scanner: {e}")
+        
+        # Annuler la tâche du scanner
+        if hasattr(self, 'scanner_task') and self.scanner_task:
+            try:
+                self.scanner_task.cancel()
+                self.logger.info("🔍 Scanner task cancelled")
+            except Exception as e:
+                self.logger.warning(f"Error cancelling scanner task: {e}")
+
         try:
             # Close database connections
             if hasattr(self, 'database_manager'):
@@ -2234,6 +2501,12 @@ Examples:
 
     # Test DexScreener integration
     python main.py --test-dexscreener So11111111111111111111111111111111111111112
+    
+    # 🆕 NOUVEAU: Scanner modes
+    python main.py --scanner-mode
+    python main.py --hybrid-mode
+    python main.py --test-scanner
+    python main.py --scanner-stats
 
         """
     )
@@ -2299,6 +2572,18 @@ Examples:
     parser.add_argument('--backup-db', action='store_true',
                        help='Create database backup and exit')
     
+    # 🆕 NOUVEAUX ARGUMENTS
+    parser.add_argument('--scanner-mode', action='store_true',
+                       help='Run in scanner-only mode (real-time DEX listings monitoring)')
+    parser.add_argument('--hybrid-mode', action='store_true',
+                       help='Run in hybrid mode (scanner + traditional cycles)')
+    parser.add_argument('--disable-scanner', action='store_true',
+                       help='Disable DEX listings scanner')
+    parser.add_argument('--scanner-stats', action='store_true',
+                       help='Show DEX scanner statistics and exit')
+    parser.add_argument('--test-scanner', action='store_true',
+                       help='Test DEX scanner for 5 minutes')
+
     args = parser.parse_args()
     
     # Handle configuration validation
@@ -2351,6 +2636,12 @@ Examples:
             update_config('trading', 'paper_trading', True)
             print("📊 Paper trading mode ENABLED via command line")
         
+        # 🆕 NOUVEAU: Override scanner settings
+        if args.disable_scanner:
+            from config import update_config
+            update_config('scanner', 'enabled', False)
+            print("🔍 DEX Scanner DISABLED via command line")
+
         bot = SolanaTradingBot(
             config_path=args.config,
             log_level=args.log_level,
@@ -2379,6 +2670,19 @@ Examples:
             print(f"   Paper Trading: {'Yes' if system['paper_trading'] else 'No'}")
             print(f"   Cycles Completed: {system['cycles_completed']}")
             
+            # 🆕 NOUVEAU: Scanner stats
+            scanner_stats = stats.get('dex_scanner', {})
+            print(f"\n🔍 DEX SCANNER:")
+            if scanner_stats.get('enabled', False):
+                print(f"   Status: {scanner_stats.get('status', 'Unknown')}")
+                print(f"   Discoveries: {scanner_stats.get('total_discoveries', 0)}")
+                print(f"   Filtered: {scanner_stats.get('filtered_pairs', 0)}")
+                print(f"   Duplicates: {scanner_stats.get('duplicate_pairs', 0)}")
+                print(f"   Uptime: {scanner_stats.get('uptime_hours', 0):.1f}h")
+                print(f"   DEXs: {', '.join(scanner_stats.get('enabled_dexs', []))}")
+            else:
+                print("   Status: Disabled")
+
             # Database stats
             db_stats = stats['database']
             print(f"\n🗄️ DATABASE:")
@@ -2411,7 +2715,66 @@ Examples:
                 print(f"   Average Safety Score: {rugcheck.get('average_safety_score', 0):.3f}")
             
             return 0
+        
+
+        # 🆕 NOUVEAU: Scanner-specific commands
+        elif args.scanner_stats:
+            # Afficher les statistiques du scanner
+            stats = bot.get_comprehensive_statistics()
+            scanner_stats = stats.get('dex_scanner', {})
             
+            print("\n" + "="*60)
+            print("DEX SCANNER STATISTICS")
+            print("="*60)
+            
+            if scanner_stats.get('enabled', False):
+                print(f"Status: {scanner_stats.get('status', 'Unknown')}")
+                print(f"Total Discoveries: {scanner_stats.get('total_discoveries', 0)}")
+                print(f"Filtered Pairs: {scanner_stats.get('filtered_pairs', 0)}")
+                print(f"Duplicate Pairs: {scanner_stats.get('duplicate_pairs', 0)}")
+                print(f"Uptime: {scanner_stats.get('uptime_hours', 0):.2f}h")
+                print(f"Enabled DEXs: {', '.join(scanner_stats.get('enabled_dexs', []))}")
+                print(f"Last Discovery: {scanner_stats.get('last_discovery', 'Never')}")
+            else:
+                print("Scanner is disabled")
+            
+            return 0
+
+        elif args.test_scanner:
+            # Test du scanner pendant 5 minutes
+            print("🧪 Testing DEX Scanner for 5 minutes...")
+            
+            async def test_scanner():
+                scanner = await bot.initialize_dex_scanner()
+                if scanner:
+                    print("✅ Scanner started, monitoring for 5 minutes...")
+                    await asyncio.sleep(300)  # 5 minutes
+                    scanner.stop_scanning()
+                    
+                    stats = scanner.get_stats()
+                    print(f"\n📊 Test Results:")
+                    print(f"   Discoveries: {stats['valid_new_pairs']}")
+                    print(f"   Duplicates: {stats['duplicate_pairs']}")
+                    print(f"   Filtered: {stats['filtered_pairs']}")
+                else:
+                    print("❌ Failed to start scanner")
+            
+            asyncio.run(test_scanner())
+            return 0
+
+        elif args.scanner_mode:
+            # Mode scanner uniquement
+            print("🔍 Starting DEX Scanner Mode...")
+            asyncio.run(bot.run_scanner_mode())
+            return 0
+
+        elif args.hybrid_mode:
+            # Mode hybride
+            print("🔄 Starting Hybrid Mode...")
+            interval_minutes = bot.trading_config['analysis_interval_seconds'] // 60
+            asyncio.run(bot.run_hybrid_mode(interval_minutes))
+            return 0
+
         elif args.maintenance:
             # Run maintenance tasks
             print("🔧 Running maintenance tasks...")
@@ -2855,6 +3218,27 @@ Examples:
             print(f"💰 Default Trade Amount: {trading_config['default_trade_amount']} SOL")
             print(f"🔄 Analysis Interval: {trading_config['analysis_interval_seconds']}s")
             
+            # 🆕 NOUVEAU: Affichage du mode scanner
+            if bot.scanner_enabled:
+                enabled_dexs = bot.config.get('scanner', {}).get('enabled_dexs', [])
+                min_liquidity = bot.config.get('scanner', {}).get('min_liquidity_sol', 5.0)
+                scan_interval = bot.config.get('scanner', {}).get('scan_interval_seconds', 30)
+                
+                print(f"\n🔍 DEX SCANNER FEATURES:")
+                print(f"  ✅ Real-time listings monitoring")
+                print(f"  ✅ Automatic duplicate filtering")
+                print(f"  ✅ Instant analysis pipeline")
+                print(f"  ✅ Multi-DEX support")
+                print(f"  📊 Monitoring: {', '.join(enabled_dexs)}")
+                print(f"  💧 Min Liquidity: {min_liquidity} SOL")
+                print(f"  ⏱️ Scan Interval: {scan_interval}s")
+                
+                # Déterminer le mode
+                mode = "HYBRID MODE (Scanner + Traditional Cycles)"
+            else:
+                print(f"\n🔍 DEX SCANNER: Disabled")
+                mode = "TRADITIONAL MODE (Cycles Only)"
+
             # Security features
             print(f"\n🛡️ Active Security Features:")
             print(f"  ✅ RugCheck Security Analysis")
