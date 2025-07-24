@@ -2458,6 +2458,28 @@ class SolanaTradingBot:
                 'note': 'Use --wallet-info for detailed balance information'
             }
 
+        # Birdeye stats
+        if self.birdeye_analyzer:
+            try:
+                birdeye_stats = self.birdeye_analyzer.get_stats()
+                stats['birdeye'] = {
+                    'enabled': True,
+                    'api_key_configured': birdeye_stats['api_key_configured'],
+                    'base_url': birdeye_stats['base_url'],
+                    'rate_limit_delay': birdeye_stats['rate_limit_delay']
+                }
+            except Exception as e:
+                stats['birdeye'] = {
+                    'enabled': True,
+                    'status': 'error',
+                    'error': str(e)
+                }
+        else:
+            stats['birdeye'] = {
+                'enabled': False,
+                'status': 'disabled'
+            }
+    
         # Get RugCheck stats if available
         if hasattr(self.rugcheck_analyzer, 'get_analysis_stats'):
             stats['rugcheck'] = self.rugcheck_analyzer.get_analysis_stats()
