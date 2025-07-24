@@ -81,6 +81,18 @@ python main.py --scanner-stats
 
 
 
+# Scanner continu (toutes les 10min, 15 tokens max)
+python utils/jupiter_api/jupiter_db_scanner.py --interval 10 --limit 15
+
+# Scan unique pour test
+python utils/jupiter_api/jupiter_db_scanner.py --single-scan --limit 10
+
+# Voir les statistiques de la DB
+python utils/jupiter_api/jupiter_db_scanner.py --stats
+
+# Personnaliser la base de données
+python utils/jupiter_api/jupiter_db_scanner.py --database my_tokens.db --interval 5 --limit 20
+
 #birdeye
 # Nouveaux tokens Birdeye (dernières 12 heures)
 python main.py --birdeye-new 12
