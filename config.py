@@ -241,6 +241,30 @@ CONFIG = {
         'max_pairs_per_request': 50,
         'default_limit': 20
     },
+
+    # === CONFIGURATION BIRDEYE ===
+    'birdeye': {
+        'api_key': os.getenv('BIRDEYE_API_KEY', ''),  # À définir dans .env
+        'api_base_url': 'https://public-api.birdeye.so',
+        'api_timeout': 30,
+        'rate_limit_delay': 1.0,  # Délai entre requêtes (secondes)
+        'retry_attempts': 3,
+        'retry_delay': 2,
+        
+        # Cache
+        'cache_duration_minutes': 10,
+        'cache_enabled': True,
+        
+        # Filtres par défaut
+        'default_max_age_hours': 24,
+        'default_limit': 50,
+        'min_liquidity_usd': 1000,
+        'min_volume_24h': 5000,
+        
+        # Sources supportées
+        'supported_sources': ['new_tokens', 'trending', 'token_overview', 'security'],
+        'default_sources': ['new_tokens', 'trending']
+    },
     
     # === CONFIGURATION BASE DE DONNÉES ===
     'database': {
