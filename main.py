@@ -657,6 +657,141 @@ class SolanaTradingBot:
             self.logger.error(f"Error calculating freshness score: {e}")
             return 0.0
 
+    async def get_newest_tokens_birdeye(self, max_age_hours: int = 24, limit: int = 50) -> List[Dict]:
+        """Get newest tokens from Birdeye with age filtering"""
+        if not self.birdeye_analyzer:
+            self.logger.warning("Birdeye analyzer not available")
+            return []
+        
+        try:
+            self.logger.info(f"🐦 Getting newest tokens from Birdeye (max age: {max_age_hours}h)")
+            
+            birdeye_tokens = await self.birdeye_analyzer.get_new_tokens_async(max_age_hours, limit)
+            
+            newest_tokens = []
+            for token in birdeye_tokens:
+                # Apply additional filters
+                if (token.liquidity and token.liquidity >= self.config['birdeye']['min_liquidity_usd'] and
+                    token.volume_24h and token.volume_24h >= self.config['birdeye']['min_volume_24h']):
+                    
+                    token_data = {
+                        'token_address': token.address,
+                        'symbol': token.symbol,
+                        'name': token.name,
+                        'age_hours': token.age_hours or 0,
+                        'liquidity_usd': token.liquidity or 0,
+                        'volume_24h': token.volume_24h or 0,
+                        'price_usd': token.price or 0,
+                        'price_change_24h': token.price_change_24h or 0,
+                        'market_cap': token.market_cap or 0,
+                        'created_timestamp': token.created_at or int(time.time()),
+                        'chain_id': 'solana',
+                        'source': 'birdeye'
+                    }
+                    newest_tokens.append(token_data)
+            
+            self.logger.info(f"✅ Found {len(newest_tokens)} quality tokens from Birdeye")
+            return newest_tokens
+            
+        except Exception as e:
+            self.logger.error(f"Error getting newest tokens from Birdeye: {e}")
+            return []
+
+    async def get_trending_tokens_birdeye(self, timeframe: str = '24h', limit: int = 50) -> List[Dict]:
+        """Get trending tokens from Birdeye"""
+        if not self.birdeye_analyzer:
+            self.logger.warning("Birdeye analyzer not available") 
+            return []
+        
+        try:
+            self.logger.info(f"🐦 Getting trending tokens from Birdeye ({timeframe})")
+            
+            birdeye_tokens = await self.birdeye_analyzer.get_trending_tokens_async(timeframe, limit)
+            
+            trending_tokens = []
+            for token in birdeye_tokens:
+                token_data = {
+                    'token_address': token.address,
+                    'symbol': token.symbol,
+                    'name': token.name,
+                    'age_hours': token.age_hours or 0,
+                    'liquidity_usd': token.liquidity or 0,
+                    'volume_24h': token.volume_24h or 0,
+                    'price_usd': token.price or 0,
+                    'price_change_24h': token.price_change_24h or 0,
+                    'market_cap': token.market_cap or 0,
+                    'created_timestamp': token.created_at or int(time.time()),
+                    'chain_id': 'solana',
+                    'source': 'birdeye'
+                }
+                trending_tokens.append(token_data)
+            
+            self.logger.info(f"✅ Found {len(trending_tokens)} trending tokens from Birdeye")
+            return trending_tokens
+            
+        except Exception as e:
+            self.logger.error(f"Error getting trending tokens from Birdeye: {e}")
+            return []
+
+    async def analyze_newest_tokens_multi_source(self, sources: List[str], max_age_hours: int = 24, limit: int = 50) -> List[Dict]:
+        """Analyze newest tokens from multiple sources with age filtering"""
+        all_tokens = []
+        seen_addresses = set()
+        
+        self.logger.info(f"🔍 Multi-source analysis: {sources} (max age: {max_age_hours}h)")
+        
+        for source in sources:
+            try:
+                if source == 'birdeye' and self.birdeye_analyzer:
+                    tokens = await self.get_newest_tokens_birdeye(max_age_hours, limit)
+                    
+                elif source == 'dexscreener' and self.dexscreener_analyzer:
+                    tokens = await self.dexscreener_analyzer.get_newest_tokens_by_timestamp(max_age_hours)
+                    
+                elif source == 'trending_birdeye' and self.birdeye_analyzer:
+                    tokens = await self.get_trending_tokens_birdeye('24h', limit)
+                    
+                elif source == 'trending_dexscreener' and self.dexscreener_analyzer:
+                    trending_pairs = self.dexscreener_analyzer.get_trending_pairs(['solana'], limit)
+                    tokens = []
+                    for pair in trending_pairs:
+                        if pair.age_hours and pair.age_hours <= max_age_hours:
+                            tokens.append({
+                                'token_address': pair.base_token.address,
+                                'symbol': pair.base_token.symbol,
+                                'name': pair.base_token.name,
+                                'age_hours': pair.age_hours,
+                                'liquidity_usd': pair.liquidity.usd if pair.liquidity else 0,
+                                'volume_24h': pair.volume.h24 if pair.volume else 0,
+                                'price_usd': float(pair.price_usd) if pair.price_usd else 0,
+                                'price_change_24h': pair.price_change.h24 if pair.price_change else 0,
+                                'source': 'dexscreener_trending'
+                            })
+                else:
+                    self.logger.warning(f"Source '{source}' not available or not supported")
+                    continue
+                
+                # Add tokens avoiding duplicates
+                for token_data in tokens:
+                    address = token_data['token_address']
+                    if address not in seen_addresses:
+                        seen_addresses.add(address)
+                        all_tokens.append(token_data)
+                
+                self.logger.info(f"📊 {source}: Found {len(tokens)} tokens")
+                
+            except Exception as e:
+                self.logger.error(f"Error getting tokens from {source}: {e}")
+                continue
+        
+        # Sort by age (newest first) and limit
+        all_tokens.sort(key=lambda x: x.get('age_hours', 999))
+        final_tokens = all_tokens[:limit]
+        
+        self.logger.info(f"🎯 Multi-source result: {len(final_tokens)} unique tokens from {len(sources)} sources")
+        
+        return final_tokens
+    
     async def test_dexscreener_endpoints(self):
         """Test des endpoints DexScreener pour debug"""
         print("\n🧪 Test des endpoints DexScreener")
