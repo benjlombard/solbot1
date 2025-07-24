@@ -254,7 +254,24 @@ class SolanaTradingBot:
             self.dexscreener_integration = None
             print("⚠️ DexScreener disabled - continuing without market data")
 
-        # 4. Solana Client
+        # 4. Birdeye Analyzer  
+        print("🐦 Initializing Birdeye analyzer...")
+        self.logger.info("Initializing Birdeye analyzer...")
+        try:
+            self.birdeye_analyzer = create_birdeye_analyzer(self.config)
+            
+            # Test Birdeye with a simple request
+            birdeye_stats = self.birdeye_analyzer.get_stats()
+            status = "✅" if birdeye_stats['api_key_configured'] else "⚠️"
+            print(f"🐦 Birdeye ready: API key {status}")
+            self.logger.info(f"Birdeye ready: API configured={birdeye_stats['api_key_configured']}")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize Birdeye: {e}")
+            # Don't raise - Birdeye is not critical
+            self.birdeye_analyzer = None
+            print("⚠️ Birdeye disabled - continuing without Birdeye data")
+    
+        # 5. Solana Client
         print("🚀 Initializing Solana client...")
         self.logger.info("Initializing Solana client...")
         try:
@@ -271,7 +288,7 @@ class SolanaTradingBot:
             self.solana_client = None
             print("⚠️ Solana client disabled - continuing without trading")
 
-        # 5. Portfolio Manager (placeholder for now)
+        # 6. Portfolio Manager (placeholder for now)
         print("💰 Initializing portfolio manager...")
         self.logger.info("Initializing portfolio manager...")
         self.portfolio = {
@@ -281,11 +298,11 @@ class SolanaTradingBot:
             'daily_pnl': 0.0
         }
         
-        # 6. Trading configuration
+        # 7. Trading configuration
         self.trading_config = get_trading_config()
         self.security_config = get_security_config()
         
-        # 🆕 NOUVEAU: 7. DEX Listings Scanner
+        # 8. DEX Listings Scanner
         if self.scanner_enabled:
             print("🔍 Initializing DEX Listings Scanner...")
             self.logger.info("Initializing DEX Listings Scanner...")
