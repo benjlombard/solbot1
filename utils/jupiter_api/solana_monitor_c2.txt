@@ -15,7 +15,23 @@ from httpx import HTTPStatusError
 import base64
 
 # Configuration du logger
-logger = logging.getLogger('solana_monitoring')  # Utiliser le même logger que jup_db_scan_k2_g3_c1.py
+logger = logging.getLogger(__name__)
+
+def setup_logging(log_level='INFO'):
+    """Configure logging for solana monitor."""
+    level = getattr(logging, log_level.upper(), logging.INFO)
+    logger.setLevel(level)
+    
+    if not logger.handlers:
+        file_handler = logging.FileHandler("solana_monitor.log", encoding="utf-8")
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        file_handler.setLevel(level)
+        logger.addHandler(file_handler)
+        
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        stream_handler.setLevel(level)
+        logger.addHandler(stream_handler)
 
 # Constants
 PUMP_FUN_PROGRAM = Pubkey.from_string("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P")
@@ -775,6 +791,7 @@ async def process_new_token(token_address, bonding_curve_status, raydium_pool_ad
 
 async def start_monitoring(log_level='INFO'):
     """Start Pump.fun and Raydium monitoring tasks."""
+    setup_logging(log_level)
     logger.info(f"🚀 Starting Solana monitoring tasks with log level: {log_level}")
 
     # Créer la base de données si elle n'existe pas
@@ -810,12 +827,11 @@ async def start_monitoring(log_level='INFO'):
     ''')
     conn.commit()
     conn.close()
-    logger.debug("Database initialized successfully")   
+    
     try:
         await asyncio.gather(
             monitor_pump_fun(),
-            monitor_raydium_pools(),
-            return_exceptions=False
+            monitor_raydium_pools()
         )
     except Exception as e:
         logger.error(f"Error in monitoring tasks: {str(e)}")

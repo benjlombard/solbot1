@@ -26,14 +26,44 @@ from async_lru import alru_cache
 from math import log
 from solana_monitor_c2 import start_monitoring  # New import for monitoring
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("invest_scanner.log", encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-)
+# Configuration du logger
+logger = logging.getLogger('solana_monitoring')
+_monitoring_started = False
+
+def configure_logging(log_level, log_file='solana_monitoring.log'):
+    """Configure logging with single set of handlers."""
+    # Supprimer tous les handlers existants
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+
+    # Configurer le niveau de logging
+    logging_level = getattr(logging, log_level.upper())
+    logger.setLevel(logging_level)
+
+    # Configure formatters
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging_level)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    # File handler
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging_level)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    # Désactiver la propagation pour éviter les doublons
+    logger.propagate = False
+
+    # Réduire les logs des bibliothèques externes
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
 
 class RateLimiter:
     def __init__(self, calls_per_second: float, max_calls: int, period: float = 1.0):
@@ -614,6 +644,58 @@ class InvestScanner:
         finally:
             conn.close()
 
+async def scan_loop(scanner, args):
+    while True:
+        try:
+            print(f"\n🔄 Scanning at {datetime.now().strftime('%H:%M:%S')}")
+            await scanner.display_top_10()
+            await scanner.scan_and_process(args.limit)
+            await asyncio.sleep(args.interval * 60)
+        except Exception as e:
+            logging.error(f"Error in scan loop: {e}")
+            await asyncio.sleep(60)  # Wait 1 minute before retrying
+
+async def update_loop(scanner, args):
+    while True:
+        try:
+            await scanner.update_metrics()
+            await asyncio.sleep(args.update_interval * 60)
+        except Exception as e:
+            logging.error(f"Error in update loop: {e}")
+            await asyncio.sleep(60)  # Wait 1 minute before retrying
+
+
+
+async def monitoring_loop(log_level):
+    global _monitoring_started
+    logging.debug(f"Entering monitoring_loop with _monitoring_started={_monitoring_started}")
+    if _monitoring_started:
+        logging.info("Monitoring already started, skipping duplicate start.")
+        return
+    try:
+        logging.info(f"🚀 Starting Solana monitoring tasks with log level: {log_level}")
+        _monitoring_started = True
+        await start_monitoring(log_level)
+    except Exception as e:
+        logging.error(f"Error in monitoring loop: {e}", exc_info=True)
+        _monitoring_started = False  # Reset in case of error
+    finally:
+        logging.debug("Exiting monitoring_loop")
+
+async def main_loop(scanner, args):
+    tasks = [
+        asyncio.create_task(scan_loop(scanner, args), name="scan_loop"),
+        asyncio.create_task(update_loop(scanner, args), name="update_loop"),
+        asyncio.create_task(monitoring_loop(args.log_level), name="monitoring_loop")
+    ]
+    try:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    except Exception as e:
+        logging.error(f"Error in main loop: {e}")
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
 def main():
     parser = argparse.ArgumentParser(description="Invest-Ready Solana Token Scanner")
     parser.add_argument("--limit", type=int, default=10)
@@ -624,11 +706,10 @@ def main():
     parser.add_argument("--telegram", action="store_true")
     parser.add_argument("--telegram-token", default=None)
     parser.add_argument("--telegram-chat-id", default=None)
-    parser.add_argument("--update-interval", type=float, default=5.0, help="Update interval in minutes (default 5)")
+    parser.add_argument("--update-interval", type=float, default=5.0, help="Update interval in minutes")
     parser.add_argument("--early", action="store_true", help="enable pump.fun/early detection")
     parser.add_argument("--social", action="store_true", help="enable Twitter mentions")
     parser.add_argument("--holders-growth", action="store_true", help="enable holders growth bonus")
-    # AJOUTER CETTE LIGNE :
     parser.add_argument("--log-level", 
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default='INFO',
@@ -636,100 +717,16 @@ def main():
 
     args = parser.parse_args()
 
+    configure_logging(args.log_level)
+    logger.info(f"🚗 Starting monitor with log level: {args.log_level}")
 
-    # Configurer le niveau de logging basé sur l'argument
-    log_level = getattr(logging, args.log_level.upper())
-    
-    # Reconfigurer le logging avec le nouveau niveau
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
-    
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler("invest_scanner.log", encoding="utf-8"),
-            logging.StreamHandler()
-        ]
-    )
-
-    # Désactiver les logs HTTP pour plus de propreté
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
-    logging.info(f"🚀 Starting scanner with log level: {args.log_level}")
-
-    scanner = InvestScanner(
-        database_path=args.database,
-        telegram_token=args.telegram_token or (args.telegram and "YOUR_BOT_TOKEN"),
-        telegram_chat_id=args.telegram_chat_id or (args.telegram and "YOUR_CHAT_ID"),
-        enable_early=args.early,
-        enable_social=args.social,
-        enable_holders=args.holders_growth
-    )
-
-    if args.stats:
-        stats = scanner.get_database_stats()
-        print(f"📊 Database Stats: {stats['total_tokens']} total tokens, {stats['high_score_tokens']} high-score tokens")
-        return
-
-    if args.single_scan:
-        async def single_scan():
-            await scanner.scan_and_process(args.limit)
-            scanner.export_csv()
-        asyncio.run(single_scan())
-    else:
-        async def scan_loop():
-            while True:
-                try:
-                    print(f"\n🔄 Scanning at {datetime.now().strftime('%H:%M:%S')}")
-                    await scanner.display_top_10()
-                    await scanner.scan_and_process(args.limit)
-                    await asyncio.sleep(args.interval * 60)
-                except Exception as e:
-                    logging.error(f"Error in scan loop: {e}")
-                    await asyncio.sleep(60)  # Wait 1 minute before retrying
-
-        async def update_loop():
-            while True:
-                try:
-                    await scanner.update_metrics()
-                    await asyncio.sleep(args.update_interval * 60)
-                except Exception as e:
-                    logging.error(f"Error in update loop: {e}")
-                    await asyncio.sleep(60)  # Wait 1 minute before retrying
-
-        #_monitoring_started = False
-        async def monitoring_loop():
-            """Start the Solana monitoring in a separate task"""
-            try:
-                await start_monitoring(args.log_level)
-            except Exception as e:
-                logging.error(f"Error in monitoring loop: {e}")
-
-        async def main_loop():
-            # Start all tasks concurrently
-            tasks = [
-                asyncio.create_task(scan_loop(), name="scan_loop"),
-                asyncio.create_task(update_loop(), name="update_loop"),
-                asyncio.create_task(monitoring_loop(), name="monitoring_loop")
-            ]
-            
-            try:
-                await asyncio.gather(*tasks, return_exceptions=True)
-            except Exception as e:
-                logging.error(f"Error in main loop: {e}")
-                # Cancel all tasks
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-
-        try:
-            asyncio.run(main_loop())
-        except KeyboardInterrupt:
-            print("\n✅ Scanner stopped.")
-        except Exception as e:
-            logging.error(f"Fatal error: {e}")
+    try:
+        asyncio.run(monitoring_loop(args.log_level))
+    except KeyboardInterrupt:
+        print("\n✅ Monitor stopped by user.")
+    except Exception as e:
+        logging.error(f"Fatal error: {e}", exc_info=True)
+        
 
 if __name__ == "__main__":
     main()
