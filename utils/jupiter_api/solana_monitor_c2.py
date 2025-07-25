@@ -16,14 +16,22 @@ import base64
 
 # Configuration du logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-if not logger.handlers:
-    file_handler = logging.FileHandler("solana_monitor.log", encoding="utf-8")
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(file_handler)
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(stream_handler)
+
+def setup_logging(log_level='INFO'):
+    """Configure logging for solana monitor."""
+    level = getattr(logging, log_level.upper(), logging.INFO)
+    logger.setLevel(level)
+    
+    if not logger.handlers:
+        file_handler = logging.FileHandler("solana_monitor.log", encoding="utf-8")
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        file_handler.setLevel(level)
+        logger.addHandler(file_handler)
+        
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        stream_handler.setLevel(level)
+        logger.addHandler(stream_handler)
 
 # Constants
 PUMP_FUN_PROGRAM = Pubkey.from_string("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P")
@@ -41,7 +49,10 @@ async def monitor_pump_fun():
                 try:
                     logger.debug(f"Attempting WebSocket connection to {HELIUS_WS_URL} for program {program_id}")
                     async with websockets.connect(HELIUS_WS_URL, ping_interval=60, ping_timeout=30) as ws:
-                        logger.info(f"Connected to Helius WebSocket for program {program_id}")
+                        if program_id == PUMP_FUN_PROGRAM:
+                            logger.info(f"🎯 Connected to Pump.fun monitoring")
+                        elif program_id == SPL_TOKEN_PROGRAM:
+                            logger.info(f"🎯 Connected to SPL Token monitoring")
                         subscription = {
                             "jsonrpc": "2.0",
                             "id": subscription_id,
@@ -62,7 +73,7 @@ async def monitor_pump_fun():
                                 message_data = json.loads(message)
                                 
                                 if "result" in message_data:
-                                    logger.info(f"Subscription confirmation for program {program_id}: {message_data['result']}")
+                                    logger.debug(f"Subscription confirmation for program {program_id}: {message_data['result']}")
                                     continue
                                 
                                 # Vérifier la structure du message
@@ -127,7 +138,7 @@ async def monitor_pump_fun():
                                                 relevant_logs.append((i, log))
                                 
                                 if relevant_logs:
-                                    logger.info(f"Found {len(relevant_logs)} relevant logs for {program_id}")
+                                    logger.debug(f"Found {len(relevant_logs)} relevant logs for {program_id}")
                                     
                                     # Analyser les logs pour déterminer le type d'événement
                                     event_type = "unknown"
@@ -145,7 +156,7 @@ async def monitor_pump_fun():
                                             event_type = "data"
                                             break
                                     
-                                    logger.info(f"Detected {event_type} event for signature {signature}")
+                                    logger.debug(f"Detected {event_type} event for signature {signature}")
                                     
                                     try:
                                         token_address = await parse_pump_fun_event(signature, client)
@@ -161,7 +172,7 @@ async def monitor_pump_fun():
                                             elif event_type == "buy":
                                                 status = "active"
                                             
-                                            logger.info(f"Pump.fun token event: address={token_address}, status={status}, event_type={event_type}, signature={signature}")
+                                            logger.debug(f"Pump.fun token event: address={token_address}, status={status}, event_type={event_type}, signature={signature}")
                                             await process_new_token(token_address, status, None)
                                     except Exception as parse_error:
                                         logger.error(f"Error parsing transaction {signature}: {parse_error}")
@@ -169,7 +180,7 @@ async def monitor_pump_fun():
                                 
                                 # Log périodique de l'état de la connexion
                                 if time.time() - last_log_time > 300:  # Toutes les 5 minutes
-                                    logger.info(f"Helius WebSocket still active for program {program_id}")
+                                    logger.debug(f"Helius WebSocket still active for program {program_id}")
                                     last_log_time = time.time()
                                     
                             except websockets.exceptions.WebSocketException as e:
@@ -188,12 +199,12 @@ async def monitor_pump_fun():
                         logger.error(f"Invalid Helius API key. Stopping monitoring for program {program_id}.")
                         return
                     backoff = min(60, (2 ** random.uniform(1, 5)))
-                    logger.info(f"Retrying connection for program {program_id} in {backoff:.2f} seconds...")
+                    logger.debug(f"Retrying connection for program {program_id} in {backoff:.2f} seconds...")
                     await asyncio.sleep(backoff)
                 except Exception as e:
                     logger.error(f"Unexpected error in monitoring program {program_id}: {str(e)}")
                     backoff = min(60, (2 ** random.uniform(1, 5)))
-                    logger.info(f"Retrying connection for program {program_id} in {backoff:.2f} seconds...")
+                    logger.debug(f"Retrying connection for program {program_id} in {backoff:.2f} seconds...")
                     await asyncio.sleep(backoff)
 
         # Lancer les souscriptions pour les deux programmes en parallèle
@@ -209,7 +220,7 @@ async def monitor_raydium_pools():
             try:
                 logger.debug(f"Attempting WebSocket connection to {HELIUS_WS_URL}")
                 async with websockets.connect(HELIUS_WS_URL, ping_interval=60, ping_timeout=30) as ws:
-                    logger.info("Connected to Helius WebSocket for Raydium monitoring")
+                    logger.info("🎯 Connected to Raydium monitoring")
                     
                     subscription = {
                         "jsonrpc": "2.0",
@@ -231,7 +242,7 @@ async def monitor_raydium_pools():
                             message_data = json.loads(message)
                             
                             if "result" in message_data:
-                                logger.info(f"Raydium subscription confirmation received: {message_data['result']}")
+                                logger.debug(f"Raydium subscription confirmation received: {message_data['result']}")
                                 continue
                             
                             # Vérification de structure similaire
@@ -280,11 +291,11 @@ async def monitor_raydium_pools():
                                         if any(keyword in log_to_check for keyword in [
                                             "initialize2", "initialize", "createpool", "ray_log"
                                         ]):
-                                            logger.info(f"Potential Raydium pool initialization detected at log {check_idx}: {logs[check_idx]}")
+                                            logger.debug(f"Potential Raydium pool initialization detected at log {check_idx}: {logs[check_idx]}")
                                             try:
                                                 pool_data = await parse_raydium_pool(signature, client)
                                                 if pool_data:
-                                                    logger.info(
+                                                    logger.debug(
                                                         f"New Raydium pool detected: token_address={pool_data['token_address']}, "
                                                         f"pool_address={pool_data['pool_address']}, signature={signature}"
                                                     )
@@ -295,7 +306,7 @@ async def monitor_raydium_pools():
                                                 continue
                             
                             if time.time() - last_log_time > 300:
-                                logger.info("Helius WebSocket still active for Raydium")
+                                logger.debug("Helius WebSocket still active for Raydium")
                                 last_log_time = time.time()
                                     
                         except websockets.exceptions.WebSocketException as e:
@@ -314,12 +325,12 @@ async def monitor_raydium_pools():
                     logger.error("Invalid Helius API key. Stopping Raydium monitoring.")
                     return
                 backoff = min(60, (2 ** random.uniform(1, 5)))
-                logger.info(f"Retrying Raydium connection in {backoff:.2f} seconds...")
+                logger.debug(f"Retrying Raydium connection in {backoff:.2f} seconds...")
                 await asyncio.sleep(backoff)
             except Exception as e:
                 logger.error(f"Unexpected error in Raydium monitoring: {str(e)}")
                 backoff = min(60, (2 ** random.uniform(1, 5)))
-                logger.info(f"Retrying Raydium connection in {backoff:.2f} seconds...")
+                logger.debug(f"Retrying Raydium connection in {backoff:.2f} seconds...")
                 await asyncio.sleep(backoff)
 
 async def parse_pump_fun_event(signature: str, client: AsyncClient) -> str | None:
@@ -559,7 +570,7 @@ async def parse_raydium_pool(signature: str, client: AsyncClient) -> dict | None
                             if len(instruction.accounts) >= 3:
                                 pool_data["pool_address"] = str(message.account_keys[instruction.accounts[0]])
                                 pool_data["token_address"] = str(message.account_keys[instruction.accounts[1]])
-                                logger.info(
+                                logger.debug(
                                     f"Found Raydium pool: token_address={pool_data['token_address']}, "
                                     f"pool_address={pool_data['pool_address']}, signature={signature}"
                                 )
@@ -646,7 +657,7 @@ async def is_likely_token_mint(address: str, client: AsyncClient) -> bool:
             logger.debug(f"Address {address} has {data_length} bytes, expected 82 for token mint")
             return False
         
-        logger.info(f"✅ {address} validated as token mint (owner: SPL Token Program, data: {data_length} bytes)")
+        logger.debug(f"✅ {address} validated as token mint (owner: SPL Token Program, data: {data_length} bytes)")
         return True
         
     except Exception as e:
@@ -663,7 +674,7 @@ async def validate_and_filter_token_candidates(candidates: list, client: AsyncCl
     for pos, address in candidates:
         is_mint = await is_likely_token_mint(address, client)
         if is_mint:
-            logger.info(f"🎯 Confirmed token mint at position {pos}: {address}")
+            logger.debug(f"🎯 Confirmed token mint at position {pos}: {address}")
             return address
         else:
             logger.debug(f"❌ Position {pos} ({address}) is not a token mint")
@@ -681,7 +692,7 @@ async def validate_and_filter_token_candidates(candidates: list, client: AsyncCl
         account_info = await client.get_account_info(token_pubkey)
         
         if account_info.value:
-            logger.info(f"✅ Token {token_address} validated on-chain")
+            logger.debug(f"✅ Token {token_address} validated on-chain")
             return {
                 "is_valid": True,
                 "owner": str(account_info.value.owner),
@@ -744,7 +755,7 @@ async def process_new_token(token_address, bonding_curve_status, raydium_pool_ad
                     datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
                     token_address
                 ))
-                logger.info(f"🔄 Updated existing token: address={token_address}, status={bonding_curve_status}")
+                logger.debug(f"🔄 Updated existing token: address={token_address}, status={bonding_curve_status}")
             else:
                 logger.debug(f"⏩ No update needed for token: address={token_address}, existing_status={existing_status}, new_status={bonding_curve_status}")
         else:
@@ -766,8 +777,8 @@ async def process_new_token(token_address, bonding_curve_status, raydium_pool_ad
             logger.info(f"💾 Saved new token: address={token_address}, status={bonding_curve_status}")
             
             # Log des liens utiles pour vérification manuelle
-            logger.info(f"🔗 Explore token: https://intel.arkm.com/explorer/address/{token_address}")
-            logger.info(f"🔗 DEX Screener: https://dexscreener.com/solana/{token_address}")
+            logger.debug(f"🔗 Explore token: https://intel.arkm.com/explorer/address/{token_address}")
+            logger.debug(f"🔗 DEX Screener: https://dexscreener.com/solana/{token_address}")
             if bonding_curve_status in ["active", "completed"]:
                 logger.info(f"🔗 Pump.fun: https://pump.fun/coin/{token_address}")
         
@@ -778,10 +789,11 @@ async def process_new_token(token_address, bonding_curve_status, raydium_pool_ad
     finally:
         conn.close()
 
-async def start_monitoring():
+async def start_monitoring(log_level='INFO'):
     """Start Pump.fun and Raydium monitoring tasks."""
-    logger.info("Starting Solana monitoring tasks...")
-    
+    setup_logging(log_level)
+    logger.info(f"🚀 Starting Solana monitoring tasks with log level: {log_level}")
+
     # Créer la base de données si elle n'existe pas
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()

@@ -628,8 +628,32 @@ def main():
     parser.add_argument("--early", action="store_true", help="enable pump.fun/early detection")
     parser.add_argument("--social", action="store_true", help="enable Twitter mentions")
     parser.add_argument("--holders-growth", action="store_true", help="enable holders growth bonus")
+    # AJOUTER CETTE LIGNE :
+    parser.add_argument("--log-level", 
+                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                        default='INFO',
+                        help="Set logging level (default: INFO)")
 
     args = parser.parse_args()
+
+
+    # Configurer le niveau de logging basé sur l'argument
+    log_level = getattr(logging, args.log_level.upper())
+    
+    # Reconfigurer le logging avec le nouveau niveau
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+    
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("invest_scanner.log", encoding="utf-8"),
+            logging.StreamHandler()
+        ]
+    )
+
+    logging.info(f"🚀 Starting scanner with log level: {args.log_level}")
 
     scanner = InvestScanner(
         database_path=args.database,
@@ -674,7 +698,7 @@ def main():
         async def monitoring_loop():
             """Start the Solana monitoring in a separate task"""
             try:
-                await start_monitoring()
+                await start_monitoring(args.log_level)  # Ajouter args.log_level
             except Exception as e:
                 logging.error(f"Error in monitoring loop: {e}")
 
