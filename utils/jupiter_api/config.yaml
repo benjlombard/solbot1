@@ -1,0 +1,76 @@
+# 🔧 Configuration Dashboard Solana Token Scanner
+# Copiez ce fichier vers config.yaml et modifiez selon vos besoins
+
+# Configuration de la base de données
+database:
+  path: "tokens.db"
+  backup_enabled: true
+  backup_interval_hours: 6
+
+# Configuration du scanner
+scanner:
+  scan_interval_minutes: 10
+  update_interval_minutes: 5
+  token_limit_per_scan: 15
+  
+  # Modules optionnels
+  features:
+    early_detection: true      # Détection précoce pump.fun
+    social_signals: true       # Signaux sociaux (simulation)
+    holders_growth: true       # Croissance des holders
+    
+  # Filtres de qualité
+  filters:
+    min_rug_score: 40         # Score minimum de sécurité
+    min_holders: 10           # Nombre minimum de holders
+    min_volume_24h: 1000      # Volume minimum 24h en USD
+    ignore_system_tokens: true # Ignorer les tokens système
+    
+  # Tokens à ignorer (ajoutez vos propres exclusions)
+  ignored_symbols:
+    - "SOL"
+    - "USDC" 
+    - "USDT"
+    - "BTC"
+    - "ETH"
+    - "BONK"
+    - "WIF"
+    - "JUP"
+    - "ORCA"
+    - "RAY"
+
+# Configuration des alertes
+alertes:
+  # Seuils d'alerte
+  thresholds:
+    high_score: 85            # Score minimum pour alerte "gem"
+    volume_spike_ratio: 5.0   # Ratio de spike de volume
+    price_pump_percent: 50    # Pourcentage de hausse de prix
+    new_gem_age_hours: 6      # Âge maximum pour "fresh gem"
+    
+  # Configuration Telegram (optionnel)
+  telegram:
+    enabled: false
+    bot_token: ""
+    chat_id: "YOUR_CHAT_ID"
+    
+  # Configuration Discord (optionnel)  
+  discord:
+    enabled: false
+    webhook_url: "YOUR_WEBHOOK_URL"
+
+# Configuration de l'API Flask
+api:
+  host: "127.0.0.1"
+  port: 5000
+  debug: false
+  cors_enabled: true
+  
+  # Limites de rate limiting (requêtes par minute)
+  rate_limits:
+    default: 60
+    dashboard_data: 30
+    token_details: 100
+
+# Configuration du dashboard
+dashboard:
