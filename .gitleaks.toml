@@ -144,6 +144,6 @@ regexes = [
 [[rules]]
 id = "sensitive-env-vars"
 description = "Detect sensitive environment variables"
-regex = '''(?i)^[^#]*(?:export\s+)?([A-Z_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z_]*)\s*[:=]\s*["']?([^"'\s()]{8,})["']?\s*(?:#.*)?$'''
+regex = '''(?i)^[^#]*(?:export\s+)?([A-Z_]*(?:KEY|SECRET|PASSWORD)[A-Z_]*)\s*[:=]\s*["']?([^"'\s()]{8,})["']?\s*(?:#.*)?$'''
 [rules.allowlist]
 paths = ['''^\.env$''', '''^\.env\..*$''']

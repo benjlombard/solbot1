@@ -24,7 +24,7 @@ from typing import List, Dict
 from aiohttp import ClientSession, TCPConnector
 from async_lru import alru_cache
 from math import log
-from solana_monitor_c2 import start_monitoring  # New import for monitoring
+from solana_monitor_c3 import start_monitoring  # New import for monitoring
 
 # Configuration du logger
 logger = logging.getLogger('solana_monitoring')
