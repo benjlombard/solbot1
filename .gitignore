@@ -166,6 +166,8 @@ venv.bak/
 # mkdocs documentation
 /site
 
+utils/jupiter_api/.env
+
 # mypy
 .mypy_cache/
 .dmypy.json
