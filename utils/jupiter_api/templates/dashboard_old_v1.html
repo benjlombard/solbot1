@@ -132,13 +132,6 @@
             letter-spacing: 0.5px;
         }
 
-        .stat-description {
-            color: var(--text-light);
-            font-size: 0.75rem;
-            margin-top: 0.5rem;
-            font-style: italic;
-        }
-
         .stat-trend {
             margin-top: 0.5rem;
             font-size: 0.8rem;
@@ -323,86 +316,87 @@
         }
         
         .action-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.75rem 1.5rem;
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 8px;
-            color: var(--text);
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 500;
-            transition: var(--transition);
-            cursor: pointer;
-        }
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: var(--transition);
+    cursor: pointer;
+}
 
-        .action-btn:hover {
-            background: var(--primary);
-            color: white;
-            border-color: var(--primary);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-        }
+.action-btn:hover {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
 
-        .action-btn.primary {
-            background: var(--primary);
-            color: white;
-            border-color: var(--primary);
-        }
+.action-btn.primary {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
 
-        .action-btn.primary:hover {
-            background: var(--primary-dark);
-            border-color: var(--primary-dark);
-        }
+.action-btn.primary:hover {
+    background: var(--primary-dark);
+    border-color: var(--primary-dark);
+}
 
-        .action-btn.help {
-            background: var(--warning);
-            color: white;
-            border-color: var(--warning);
-        }
+.action-btn.help {
+    background: var(--warning);
+    color: white;
+    border-color: var(--warning);
+}
 
-        .action-btn.help:hover {
-            background: #d97706;
-            border-color: #d97706;
-        }
+.action-btn.help:hover {
+    background: #d97706;
+    border-color: #d97706;
+}
 
-        .action-btn span {
-            font-size: 1rem;
-        }
+.action-btn span {
+    font-size: 1rem;
+}
 
-        /* Amélioration responsive pour les boutons */
-        @media (max-width: 768px) {
-            .header-actions {
-                flex-direction: column;
-                align-items: center;
-            }
-            .action-btn {
-                width: 100%;
-                max-width: 200px;
-                justify-content: center;
-            }
-        }
+/* Amélioration responsive pour les boutons */
+@media (max-width: 768px) {
+    .header-actions {
+        flex-direction: column;
+        align-items: center;
+    }
+    }
+    .action-btn {
+        width: 100%;
+        max-width: 200px;
+        justify-content: center;
+    }
 
-        /* Correction du thème sombre pour les sections */
-        .dark-mode .section {
-            background: rgba(30, 41, 59, 0.8);
-            border: 1px solid rgba(51, 65, 85, 0.5);
-        }
 
-        .dark-mode .section h2 {
-            color: var(--primary);
-        }
+/* Correction du thème sombre pour les sections */
+.dark-mode .section {
+    background: rgba(30, 41, 59, 0.8);
+    border: 1px solid rgba(51, 65, 85, 0.5);
+}
 
-        /* Amélioration des token-items en mode sombre */
-        .dark-mode .token-symbol {
-            color: var(--text);
-        }
+.dark-mode .section h2 {
+    color: var(--primary);
+}
 
-        .dark-mode .token-details {
-            color: var(--text-light);
-        }
+/* Amélioration des token-items en mode sombre */
+.dark-mode .token-symbol {
+    color: var(--text);
+}
+
+.dark-mode .token-details {
+    color: var(--text-light);
+}
     </style>
 </head>
 <body>
@@ -442,12 +436,12 @@
                 <div class="stat-label">New (24h)</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" id="activeTokensCount">-</div>
+                <div class="stat-value" id="activeTokens">-</div>
                 <div class="stat-label">Active Trading</div>
-                <div class="stat-description">Volume > $50K & Tradeable</div>
             </div>
         </div>
    
+
         <div class="sections-grid">
             <div class="section">
                 <h2>🏆 Top Performers</h2>
@@ -468,8 +462,8 @@
                 </div>
             </div>
             <div class="section">
-                <h2>📈 Active Tokens List</h2>
-                <div id="activeTokensList">
+    <h2>📈 Active Tokens</h2>  <!-- ou autre titre pertinent -->
+    <div id="activeTokens">
                     <div class="loading">Loading...</div>
                 </div>
             </div>
@@ -501,7 +495,6 @@
 
         const API_BASE_URL = 'http://localhost:5000/api';
         let isLoading = false;
-        
         // Téléchargement CSV
         function downloadCSV() {
             window.location.href = '/api/export-ready';
@@ -514,7 +507,6 @@
                 downloadCSV();
             }
         });
-        
         // Fonction pour faire des requêtes API
         async function fetchAPI(endpoint) {
             try {
@@ -559,7 +551,7 @@
                     renderTokens('topTokens', data.topTokens || []);
                     renderTokens('newGems', data.newGems || []);
                     renderTokens('volumeAlerts', data.volumeAlerts || [], true);
-                    renderTokens('activeTokensList', data.activeTokensList || []);
+                    renderTokens('activeTokens', data.activeTokens || []);
                     
                     document.getElementById('lastUpdate').textContent = 
                         new Date().toLocaleTimeString();
@@ -581,7 +573,7 @@
             document.getElementById('totalTokens').textContent = stats.totalTokens || 0;
             document.getElementById('highScoreTokens').textContent = stats.highScoreTokens || 0;
             document.getElementById('newTokens').textContent = stats.newTokens || 0;
-            document.getElementById('activeTokensCount').textContent = stats.activeTokens || 0;
+            document.getElementById('activeTokens').textContent = stats.activeTokens || 0;
         }
 
         // Rendu des tokens
@@ -627,7 +619,7 @@
 
         // Affichage des erreurs
         function showGlobalError(message) {
-            const sections = ['topTokens', 'newGems', 'volumeAlerts', 'activeTokensList'];
+            const sections = ['topTokens', 'newGems', 'volumeAlerts', 'activeTokens'];
             sections.forEach(sectionId => {
                 const container = document.getElementById(sectionId);
                 container.innerHTML = `<div class="error">❌ ${message}</div>`;

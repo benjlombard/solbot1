@@ -57,6 +57,13 @@ class TokenAPI:
             """)
             new_tokens = cursor.fetchone()[0]
             
+            cursor.execute("""
+            SELECT COUNT(*) FROM tokens 
+            WHERE volume_24h > 50000 
+            AND is_tradeable = 1
+            """)
+            active_tokens = cursor.fetchone()[0]
+
             # Graduated tokens
             cursor.execute("""
                 SELECT COUNT(*) FROM tokens 
@@ -73,7 +80,8 @@ class TokenAPI:
                 "highScoreTokens": high_score_tokens,
                 "newTokens": new_tokens,
                 "graduatedTokens": graduated_tokens,
-                "tradeableTokens": tradeable_tokens
+                "tradeableTokens": tradeable_tokens,
+                "activeTokens": active_tokens
             }
             
         except Exception as e:
@@ -83,7 +91,8 @@ class TokenAPI:
                 "highScoreTokens": 0,
                 "newTokens": 0,
                 "graduatedTokens": 0,
-                "tradeableTokens": 0
+                "tradeableTokens": 0,
+                "activeTokens": 0
             }
         finally:
             conn.close()
@@ -208,6 +217,47 @@ class TokenAPI:
             
         except Exception as e:
             logger.error(f"Error getting volume alerts: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_active_tokens(self, limit: int = 10) -> List[Dict]:
+        """Récupérer les tokens actifs (avec volume et liquidité)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                SELECT address, symbol, name, invest_score, price_usdc, 
+                       volume_24h, holders, liquidity_usd, bonding_curve_status,
+                       first_discovered_at
+                FROM tokens 
+                WHERE volume_24h > 50000
+                AND is_tradeable = 1
+                AND liquidity_usd > 10000
+                ORDER BY volume_24h DESC, invest_score DESC
+                LIMIT ?
+            """, (limit,))
+            
+            active = []
+            for row in cursor.fetchall():
+                active.append({
+                    "address": row["address"],
+                    "symbol": row["symbol"] or "UNKNOWN",
+                    "name": row["name"],
+                    "score": float(row["invest_score"]) if row["invest_score"] else 0,
+                    "price": float(row["price_usdc"]) if row["price_usdc"] else 0,
+                    "volume": float(row["volume_24h"]) if row["volume_24h"] else 0,
+                    "holders": int(row["holders"]) if row["holders"] else 0,
+                    "liquidity": float(row["liquidity_usd"]) if row["liquidity_usd"] else 0,
+                    "status": row["bonding_curve_status"] or "unknown",
+                    "discoveredAt": row["first_discovered_at"]
+                })
+            
+            return active
+            
+        except Exception as e:
+            logger.error(f"Error getting active tokens: {e}")
             return []
         finally:
             conn.close()
@@ -469,7 +519,7 @@ def get_dashboard_data():
             "topTokens": token_api.get_top_tokens(5),
             "newGems": token_api.get_fresh_gems(6, 5),
             "volumeAlerts": token_api.get_volume_alerts(5),
-            "graduated": token_api.get_graduated_tokens(5),
+            "activeTokens": token_api.get_active_tokens(5),
             "lastUpdate": datetime.now().isoformat()
         }
         return jsonify(dashboard_data)
