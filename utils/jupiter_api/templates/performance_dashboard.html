@@ -286,6 +286,61 @@
             cursor: pointer;
             font-size: 0.8rem;
         }
+        .auto-refresh-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    margin-left: auto;
+}
+
+.auto-refresh-control label {
+    color: var(--text-light);
+    font-weight: 500;
+}
+
+.auto-refresh-control select {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--card-border);
+    border-radius: 4px;
+    background: var(--card-bg);
+    color: var(--text);
+    font-size: 0.85rem;
+}
+
+.refresh-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--card-bg);
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    font-size: 0.9rem;
+    color: var(--text-light);
+}
+
+.refresh-indicator.active {
+    color: var(--success);
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--card-border);
+    border-top: 2px solid var(--success);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
     </style>
 </head>
 <body>
@@ -293,19 +348,34 @@
         <div class="header">
             <h1>📊 Solana Bot Performance Dashboard</h1>
             <div class="status-bar">
-                <div>
-                    <span>Bot Status: </span>
-                    <span id="botStatus" class="trend up">🟢 Running</span>
-                </div>
-                <div class="refresh-indicator" id="refreshIndicator">
-                    <span>🔄</span>
-                    <span>Auto-refresh: 10s</span>
-                </div>
-                <div>
-                    <span>Uptime: </span>
-                    <span id="uptime">00:00:00</span>
-                </div>
-            </div>
+    <div>
+        <span>Bot Status: </span>
+        <span id="botStatus" class="trend up">🟢 Running</span>
+    </div>
+    
+    <div style="display: flex; align-items: center; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <label for="refreshIntervalSelect" style="color: var(--text-light); font-size: 0.9rem;">🔄 Auto-refresh:</label>
+            <select id="refreshIntervalSelect" onchange="updateRefreshInterval()" style="padding: 0.25rem 0.5rem; border: 1px solid var(--border); border-radius: 4px; background: var(--card-bg); color: var(--text); font-size: 0.85rem;">
+                <option value="5000">5s</option>
+                <option value="10000" selected>10s</option>
+                <option value="30000">30s</option>
+                <option value="60000">1min</option>
+                <option value="300000">5min</option>
+            </select>
+        </div>
+        
+        <div class="refresh-indicator" id="refreshIndicator">
+            <span>🔄</span>
+            <span>Auto-refresh: 10s</span>
+        </div>
+    </div>
+    
+    <div>
+        <span>Uptime: </span>
+        <span id="uptime">00:00:00</span>
+    </div>
+</div>
         </div>
 
         <div class="metrics-grid">
@@ -448,7 +518,20 @@
                     this.drawChart(this.responseTimeCtx, [], 'Updates', '#f59e0b');
                 }
             }
-
+            updateRefreshInterval(newInterval) {
+                this.updateInterval = newInterval;
+                clearInterval(this.autoRefreshTimer);
+                this.startAutoRefresh();
+    
+                // Mettre à jour l'affichage
+                const indicator = document.getElementById('refreshIndicator');
+                if (indicator) {
+                    const intervalText = newInterval >= 60000 ? 
+                        `${newInterval/60000}min` : 
+                        `${newInterval/1000}s`;
+                    indicator.querySelector('span:last-child').textContent = `Auto-refresh: ${intervalText}`;
+                }
+            }
             drawChart(ctx, data, label, color) {
                 const canvas = ctx.canvas;
                 const width = canvas.width;
@@ -913,9 +996,18 @@
                 this.fetchMetrics();
                 
                 // Auto-refresh
-                setInterval(() => {
+                this.autoRefreshTimer = setInterval(() => {
                     this.fetchMetrics();
                 }, this.updateInterval);
+            }
+        }
+
+        function updateRefreshInterval() {
+            const select = document.getElementById('refreshIntervalSelect');
+            const newInterval = parseInt(select.value);
+            
+            if (window.dashboard) {
+                window.dashboard.updateRefreshInterval(newInterval);
             }
         }
 

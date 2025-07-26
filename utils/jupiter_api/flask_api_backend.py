@@ -634,6 +634,44 @@ def get_stats():
         logger.error(f"Error in /api/stats: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
+@app.route('/api/debug/bonding-curve')
+def debug_bonding_curve():
+    """Debug endpoint pour vérifier les statuts bonding curve"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Compter les différents statuts
+        cursor.execute('''
+            SELECT bonding_curve_status, COUNT(*) as count
+            FROM tokens 
+            GROUP BY bonding_curve_status
+            ORDER BY count DESC
+        ''')
+        
+        status_counts = [{"status": row[0] or "NULL", "count": row[1]} for row in cursor.fetchall()]
+        
+        # Quelques exemples avec statut
+        cursor.execute('''
+            SELECT address, symbol, bonding_curve_status, first_discovered_at
+            FROM tokens 
+            WHERE bonding_curve_status IS NOT NULL
+            ORDER BY first_discovered_at DESC
+            LIMIT 10
+        ''')
+        
+        examples = [dict(zip([col[0] for col in cursor.description], row)) for row in cursor.fetchall()]
+        
+        return jsonify({
+            "status_distribution": status_counts,
+            "examples_with_status": examples
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+        
 @app.route('/api/tokens-detail')
 def get_tokens_detail():
     """Endpoint pour récupérer tous les tokens avec détails"""
@@ -645,7 +683,7 @@ def get_tokens_detail():
         cursor.execute('''
             SELECT address, symbol, name, price_usdc, invest_score, liquidity_usd,
                    volume_24h, holders, age_hours, rug_score, is_tradeable,
-                   updated_at, first_discovered_at,
+                   updated_at, first_discovered_at, bonding_curve_status,
                    COALESCE(updated_at, first_discovered_at) as last_update
             FROM tokens
             ORDER BY last_update DESC, invest_score DESC
