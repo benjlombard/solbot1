@@ -637,7 +637,6 @@ def get_stats():
 @app.route('/api/debug/bonding-curve')
 def debug_bonding_curve():
     """Debug endpoint pour vérifier les statuts bonding curve"""
-    import aiohttp
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     
