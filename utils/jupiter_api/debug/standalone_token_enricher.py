@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class StandaloneEnricher:
-    def __init__(self, database_path: str = "tokens.db"):
+    def __init__(self, database_path: str = "../tokens.db"):
         self.database_path = database_path
         self.enricher = TokenEnricher(database_path)
     

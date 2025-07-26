@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List
 import json
-
+from flask import make_response
 
 app = Flask(__name__)
 CORS(app)  # Permettre les requêtes cross-origin pour le dashboard
@@ -284,6 +284,124 @@ def get_stats():
     except Exception as e:
         logger.error(f"Error in /api/stats: {e}")
         return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/dashboard/invest-ready')
+def invest_ready_page():
+    return render_template('invest_ready.html')
+
+@app.route('/api/favorites', methods=['GET'])
+def get_favorites():
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT t.* FROM tokens t
+        JOIN favorites f ON t.address = f.address
+        ORDER BY f.added_at DESC
+    ''')
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+@app.route('/api/favorites/<address>', methods=['POST', 'DELETE'])
+def toggle_favorite(address):
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    if request.method == 'POST':
+        cursor.execute('INSERT OR IGNORE INTO favorites(address) VALUES(?)', (address,))
+    else:
+        cursor.execute('DELETE FROM favorites WHERE address = ?', (address,))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
+    
+@app.route('/api/invest-ready')
+def get_invest_ready():
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT address, symbol, name, price_usdc, invest_score, liquidity_usd,
+               volume_24h, holders, age_hours, rug_score, first_discovered_at
+        FROM tokens
+        WHERE invest_score >= 75
+          AND rug_score < 30
+          AND liquidity_usd > 50000
+        ORDER BY invest_score DESC
+        LIMIT 50
+    ''')
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+@app.route('/api/export-ready')
+def export_ready():
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT address, symbol, price_usdc, invest_score, liquidity_usd,
+               volume_24h, holders, age_hours, first_discovered_at
+        FROM tokens
+        WHERE invest_score >= 75
+          AND rug_score < 30
+          AND liquidity_usd > 50000
+        ORDER BY invest_score DESC
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+
+    # Génération CSV
+    import io, csv
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["address","symbol","price_usdc","invest_score","liquidity_usd","volume_24h","holders","age_hours","first_discovered_at"])
+    for r in rows:
+        writer.writerow(list(r))
+    csv_data = output.getvalue()
+    output.close()
+
+    response = make_response(csv_data)
+    response.headers["Content-Disposition"] = "attachment; filename=invest_ready.csv"
+    response.headers["Content-type"] = "text/csv"
+    return response
+
+@app.route('/api/tokens-detail')
+def get_tokens_detail_v0():
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT rowid, address, symbol, name, price_usdc, invest_score, liquidity_usd,
+               volume_24h, holders, age_hours, rug_score, holder_distribution,
+               is_tradeable, first_discovered_at
+        FROM tokens
+        WHERE is_tradeable = 1
+        ORDER BY invest_score DESC
+    ''')
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+@app.route('/api/tokens-detail')
+def get_tokens_detail():
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT address, symbol, price_usdc, invest_score, liquidity_usd,
+               volume_24h, holders, age_hours, rug_score, is_tradeable,
+               updated_at, first_discovered_at
+        FROM tokens
+        ORDER BY invest_score DESC
+    ''')
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+@app.route('/dashboard/detail')
+def dashboard_detail():
+    return render_template('dashboard_detail.html')
 
 @app.route('/api/top-tokens')
 def get_top_tokens():

@@ -174,10 +174,25 @@ class InvestScanner:
             ("holders_bonus", "INTEGER DEFAULT 0"),
             ("launch_timestamp", "TIMESTAMP"),
             ("bonding_curve_status", "TEXT"),
-            ("raydium_pool_address", "TEXT")
+            ("raydium_pool_address", "TEXT"),
+            ("updated_at", "TIMESTAMP") 
         ]:
             if col not in cols:
                 cursor.execute(f"ALTER TABLE tokens ADD COLUMN {col} {col_type}")
+                logging.info(f"✅ Added column: {col}")
+        
+        # ✅ NOUVEAU: Initialiser updated_at pour les tokens existants
+        if 'updated_at' not in cols:
+            try:
+                cursor.execute('''
+                    UPDATE tokens 
+                    SET updated_at = first_discovered_at 
+                    WHERE updated_at IS NULL
+                ''')
+                logging.info(f"✅ Initialized updated_at for existing tokens")
+            except sqlite3.Error as e:
+                logging.warning(f"Could not initialize updated_at: {e}")
+
         conn.commit()
         conn.close()
 
@@ -418,15 +433,16 @@ class InvestScanner:
                 liquidity_usd, volume_24h, price_change_24h, age_hours,
                 rug_score, holders, is_tradeable, invest_score,
                 early_bonus, social_bonus, holders_bonus, first_discovered_at,
-                launch_timestamp, bonding_curve_status, raydium_pool_address
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
+                launch_timestamp, bonding_curve_status, raydium_pool_address,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT first_discovered_at FROM tokens WHERE address = ?), CURRENT_TIMESTAMP, ?, ?, ?, CURRENT_TIMESTAMP)
             ''', (
                 token["address"], token["symbol"], token["name"], token["decimals"],
                 token.get("logo_uri"), token.get("price_usdc"), token.get("market_cap"),
                 token.get("liquidity_usd"), token.get("volume_24h"), token.get("price_change_24h"),
                 token.get("age_hours"), token.get("rug_score"), token.get("holders"),
                 token.get("is_tradeable"), token.get("invest_score"),
-                token.get("early_bonus"), token.get("social_bonus"), token.get("holders_bonus"),
+                token.get("early_bonus"), token.get("social_bonus"), token.get("holders_bonus"), token["address"],
                 token.get("launch_timestamp"), token.get("bonding_curve_status"),
                 token.get("raydium_pool_address")
             ))

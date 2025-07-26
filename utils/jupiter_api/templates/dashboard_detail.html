@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>📊 Token Detail Report</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", sans-serif; background: #0f0f23; color: #fff; }
+    .nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; background: #1e1e38; }
+    .nav a { color: #00d4ff; text-decoration: none; }
+    .controls { display: flex; gap: 1rem; align-items: center; padding: 1rem 2rem; background: #16213e; }
+    .filter-panel { padding: 1rem 2rem; background: #16213e; border-bottom: 1px solid #2a2a4a; }
+    .filter-panel .filter-group { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .filter-panel .filter-group label { margin-right: 0.5rem; color: #00d4ff; font-size: 0.9rem; }
+    .filter-panel .filter-group input { padding: 0.4rem; border: none; border-radius: 4px; background: #2a2a4a; color: #fff; width: 100px; font-size: 0.9rem; }
+    .filter-panel .filter-group input:focus { outline: none; border: 1px solid #00d4ff; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: 0.6rem 0.5rem; border-bottom: 1px solid #2a2a4a; text-align: left; }
+    th { background: #0f3460; position: sticky; top: 0; }
+    .price { color: #00ff88; font-weight: bold; }
+    .score { color: #ffaa00; font-weight: bold; }
+    .pagination { display: flex; gap: 0.5rem; padding: 1rem 2rem; justify-content: space-between; }
+    .pagination button { padding: 0.4rem 0.8rem; border: none; border-radius: 4px; background: #00d4ff; color: #fff; cursor: pointer; }
+    .pagination button:disabled { background: #444; cursor: not-allowed; }
+    .fav { color: gold; cursor: pointer; }
+    .no-data { text-align: center; padding: 1rem; color: #888; }
+  </style>
+</head>
+<body>
+  <!-- Navigation -->
+  <div class="nav">
+    <h1>📊 Token Detail Report</h1>
+    <a href="/dashboard">← Retour au Dashboard</a>
+  </div>
+
+  <!-- Contrôles -->
+  <div class="controls">
+    <button onclick="reloadData()">🔄 Actualiser</button>
+    <button onclick="resetFilters()">🧹 Réinitialiser Filtres</button>
+    <label>Afficher
+      <select id="perPage" onchange="changePerPage()">
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select> tokens
+    </label>
+    <span title="Critères recommandés : invest_score ≥ 75, rug_score < 30, liquidity > 50 k$">❓</span>
+  </div>
+
+  <!-- Panneau des filtres -->
+  <div class="filter-panel">
+    <div class="filter-group">
+      <label>Symbol:</label><input type="text" id="filterSymbol" placeholder="Symbol (e.g., DNT)">
+      <label>Price Min ($):</label><input type="number" id="filterPriceMin" placeholder="Min" step="0.000001">
+      <label>Price Max ($):</label><input type="number" id="filterPriceMax" placeholder="Max" step="0.000001">
+      <label>Score Min:</label><input type="number" id="filterScoreMin" placeholder="Min" step="0.1">
+      <label>Score Max:</label><input type="number" id="filterScoreMax" placeholder="Max" step="0.1">
+    </div>
+    <div class="filter-group">
+      <label>Liquidity Min ($):</label><input type="number" id="filterLiquidityMin" placeholder="Min 5000" title="Recommandé: ≥ 5,000 $">
+      <label>Liquidity Max ($):</label><input type="number" id="filterLiquidityMax" placeholder="Max">
+      <label>Volume Min ($):</label><input type="number" id="filterVolumeMin" placeholder="Min 100000" title="Recommandé: ≥ 100,000 $">
+      <label>Volume Max ($):</label><input type="number" id="filterVolumeMax" placeholder="Max">
+      <label>Holders Min:</label><input type="number" id="filterHoldersMin" placeholder="Min 500" title="Recommandé: ≥ 500">
+      <label>Holders Max:</label><input type="number" id="filterHoldersMax" placeholder="Max">
+    </div>
+    <div class="filter-group">
+      <label>Age Min (h):</label><input type="number" id="filterAgeMin" placeholder="Min 6" step="0.1" title="Recommandé: ≥ 6 heures">
+      <label>Age Max (h):</label><input type="number" id="filterAgeMax" placeholder="Max" step="0.1">
+      <label>Risk Min:</label><input type="number" id="filterRiskMin" placeholder="Min">
+      <label>Risk Max:</label><input type="number" id="filterRiskMax" placeholder="Max 50" title="Recommandé: ≤ 50">
+      <label>Updated At:</label><input type="date" id="filterUpdatedAt" placeholder="Updated At">
+    </div>
+  </div>
+
+  <!-- Tableau -->
+  <table id="tokensTable">
+    <thead>
+      <tr>
+        <th>⭐</th>
+        <th>Symbol</th>
+        <th>Price ($)</th>
+        <th>Score</th>
+        <th>Liquidity ($)</th>
+        <th>Volume 24h ($)</th>
+        <th>Holders</th>
+        <th>Age (h)</th>
+        <th>Risk</th>
+        <th>Updated At</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <!-- Pagination -->
+  <div class="pagination">
+    <button id="prevBtn" onclick="prevPage()">Précédent</button>
+    <span id="pageInfo"></span>
+    <button id="nextBtn" onclick="nextPage()">Suivant</button>
+  </div>
+
+  <script>
+    let data = [], filteredData = [], currentPage = 1, perPage = 10;
+
+    async function fetchData() {
+      try {
+        const response = await fetch('/api/tokens-detail');
+        if (!response.ok) throw new Error('Réponse API invalide');
+        data = await response.json();
+        console.log('Données brutes:', data); // Débogage
+        filteredData = [...data];
+        currentPage = 1;
+        renderPage();
+      } catch (error) {
+        console.error('Erreur lors du chargement des données:', error);
+        document.getElementById('tbody').innerHTML = '<tr><td colspan="10">Erreur lors du chargement des données</td></tr>';
+      }
+    }
+
+    function applyFilters() {
+      const filters = {
+        symbol: document.getElementById('filterSymbol').value.toLowerCase().trim(),
+        priceMin: document.getElementById('filterPriceMin').value ? parseFloat(document.getElementById('filterPriceMin').value) : null,
+        priceMax: document.getElementById('filterPriceMax').value ? parseFloat(document.getElementById('filterPriceMax').value) : null,
+        scoreMin: document.getElementById('filterScoreMin').value ? parseFloat(document.getElementById('filterScoreMin').value) : null,
+        scoreMax: document.getElementById('filterScoreMax').value ? parseFloat(document.getElementById('filterScoreMax').value) : null,
+        liquidityMin: document.getElementById('filterLiquidityMin').value ? parseFloat(document.getElementById('filterLiquidityMin').value) : null,
+        liquidityMax: document.getElementById('filterLiquidityMax').value ? parseFloat(document.getElementById('filterLiquidityMax').value) : null,
+        volumeMin: document.getElementById('filterVolumeMin').value ? parseFloat(document.getElementById('filterVolumeMin').value) : null,
+        volumeMax: document.getElementById('filterVolumeMax').value ? parseFloat(document.getElementById('filterVolumeMax').value) : null,
+        holdersMin: document.getElementById('filterHoldersMin').value ? parseInt(document.getElementById('filterHoldersMin').value) : null,
+        holdersMax: document.getElementById('filterHoldersMax').value ? parseInt(document.getElementById('filterHoldersMax').value) : null,
+        ageMin: document.getElementById('filterAgeMin').value ? parseFloat(document.getElementById('filterAgeMin').value) : null,
+        ageMax: document.getElementById('filterAgeMax').value ? parseFloat(document.getElementById('filterAgeMax').value) : null,
+        riskMin: document.getElementById('filterRiskMin').value ? parseInt(document.getElementById('filterRiskMin').value) : null,
+        riskMax: document.getElementById('filterRiskMax').value ? parseInt(document.getElementById('filterRiskMax').value) : null,
+        updatedAt: document.getElementById('filterUpdatedAt').value
+      };
+
+      filteredData = data.filter(row => {
+        const riskValue = 100 - (row.rug_score || 50);
+        return (
+          (!filters.symbol || row.symbol.toLowerCase().includes(filters.symbol)) &&
+          (filters.priceMin === null || row.price_usdc >= filters.priceMin) &&
+          (filters.priceMax === null || row.price_usdc <= filters.priceMax) &&
+          (filters.scoreMin === null || row.invest_score >= filters.scoreMin) &&
+          (filters.scoreMax === null || row.invest_score <= filters.scoreMax) &&
+          (filters.liquidityMin === null || row.liquidity_usd >= filters.liquidityMin) &&
+          (filters.liquidityMax === null || row.liquidity_usd <= filters.liquidityMax) &&
+          (filters.volumeMin === null || row.volume_24h >= filters.volumeMin) &&
+          (filters.volumeMax === null || row.volume_24h <= filters.volumeMax) &&
+          (filters.holdersMin === null || row.holders >= filters.holdersMin) &&
+          (filters.holdersMax === null || row.holders <= filters.holdersMax) &&
+          (filters.ageMin === null || row.age_hours >= filters.ageMin) &&
+          (filters.ageMax === null || row.age_hours <= filters.ageMax) &&
+          (filters.riskMin === null || riskValue >= filters.riskMin) &&
+          (filters.riskMax === null || riskValue <= filters.riskMax) &&
+          (!filters.updatedAt || new Date(row.updated_at || row.first_discovered_at).toISOString().startsWith(filters.updatedAt))
+        );
+      });
+
+      console.log('Filtered data:', filteredData.length, 'rows', filters); // Débogage
+      currentPage = 1;
+      renderPage();
+    }
+
+    function renderPage() {
+      const start = (currentPage - 1) * perPage;
+      const rows = filteredData.slice(start, start + perPage);
+      const tbody = document.getElementById('tbody');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
+      } else {
+        tbody.innerHTML = rows.map(r => `
+          <tr>
+            <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
+            <td><a href="https://dexscreener.com/solana/${r.address}" target="_blank">${r.symbol}</a></td>
+            <td class="price">${(+r.price_usdc || 0).toFixed(8)}</td>
+            <td class="score">${(+r.invest_score || 0).toFixed(1)}</td>
+            <td>${Math.round(r.liquidity_usd || 0).toLocaleString()}</td>
+            <td>${Math.round(r.volume_24h || 0).toLocaleString()}</td>
+            <td>${r.holders || 0}</td>
+            <td>${(+r.age_hours || 0).toFixed(1)}</td>
+            <td>${Math.round(100 - (r.rug_score || 50))}</td>
+            <td>${r.updated_at || r.first_discovered_at}</td>
+          </tr>
+        `).join('');
+      }
+      document.getElementById("pageInfo").textContent = `Page ${currentPage} / ${Math.ceil(filteredData.length / perPage)}`;
+      document.getElementById("prevBtn").disabled = currentPage === 1;
+      document.getElementById("nextBtn").disabled = currentPage === Math.ceil(filteredData.length / perPage);
+    }
+
+    function changePerPage() {
+      perPage = +document.getElementById("perPage").value;
+      currentPage = 1;
+      renderPage();
+    }
+
+    function prevPage() {
+      if (currentPage > 1) {
+        currentPage--;
+        renderPage();
+      }
+    }
+
+    function nextPage() {
+      if (currentPage < Math.ceil(filteredData.length / perPage)) {
+        currentPage++;
+        renderPage();
+      }
+    }
+
+    function reloadData() {
+      fetchData();
+      document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
+      applyFilters();
+    }
+
+    function resetFilters() {
+      document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
+      filteredData = [...data];
+      currentPage = 1;
+      renderPage();
+    }
+
+    async function toggleFav(address) {
+      await fetch(`/api/favorites/${address}`, { method: 'POST' });
+      alert('Ajouté aux favoris !');
+    }
+
+    let debounceTimeout;
+    document.querySelectorAll('.filter-panel input').forEach(input => {
+      input.addEventListener('input', () => {
+        clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(() => {
+          console.log(`Filter changed: ${input.id} = ${input.value}`);
+          applyFilters();
+        }, 300);
+      });
+    });
+
+    fetchData();
+  </script>
+</body>
+</html>

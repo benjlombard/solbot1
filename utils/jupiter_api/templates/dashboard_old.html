@@ -5,32 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Solana Token Dashboard</title>
     <style>
-        :root {
-            --primary: #6366f1;
-            --primary-dark: #4f46e5;
-            --text: #1e293b;
-            --text-light: #64748b;
-            --bg: #f8fafc;
-            --card-bg: #ffffff;
-            --card-border: #e2e8f0;
-            --success: #10b981;
-            --warning: #f59e0b;
-            --danger: #ef4444;
-            --shadow: 0 1px 3px rgba(0,0,0,0.1);
-            --transition: all 0.3s ease;
-        }
-
-        .dark-mode {
-            --primary: #818cf8;
-            --primary-dark: #6366f1;
-            --text: #f8fafc;
-            --text-light: #94a3b8;
-            --bg: #0f172a;
-            --card-bg: #1e293b;
-            --card-border: #334155;
-            --shadow: 0 1px 3px rgba(0,0,0,0.3);
-        }
-
         * {
             margin: 0;
             padding: 0;
@@ -38,11 +12,10 @@
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--bg);
-            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            color: #ffffff;
             min-height: 100vh;
-            transition: var(--transition);
         }
 
         .container {
@@ -53,47 +26,15 @@
 
         .header {
             text-align: center;
-            margin-bottom: 2rem;
-            position: relative;
+            margin-bottom: 30px;
         }
 
         .header h1 {
             font-size: 2.5rem;
-            font-weight: 800;
-            color: var(--primary);
-            margin-bottom: 0.5rem;
-            display: inline-block;
-        }
-
-        .header p {
-            color: var(--text-light);
-            max-width: 600px;
-            margin: 0 auto 1rem;
-        }
-
-        .header-actions {
-            display: flex;
-            justify-content: center;
-            gap: 1rem;
-            margin-top: 1rem;
-            flex-wrap: wrap;
-        }
-
-        .theme-toggle {
-            position: absolute;
-            top: 0;
-            right: 0;
-            background: none;
-            border: none;
-            font-size: 1.5rem;
-            cursor: pointer;
-            color: var(--text-light);
-            transition: var(--transition);
-        }
-
-        .theme-toggle:hover {
-            color: var(--primary);
-            transform: rotate(30deg);
+            background: linear-gradient(45deg, #00d4ff, #090979);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
         }
 
         .stats-grid {
@@ -104,49 +45,24 @@
         }
 
         .stat-card {
-            background: var(--card-bg);
-            border-radius: 12px;
-            padding: 1.5rem;
-            border: 1px solid var(--card-border);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
             text-align: center;
-            box-shadow: var(--shadow);
-            transition: var(--transition);
-        }
-
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 15px rgba(0,0,0,0.1);
         }
 
         .stat-value {
-            font-size: 2.5rem;
-            font-weight: 800;
-            color: var(--primary);
-            margin-bottom: 0.5rem;
-            font-feature-settings: 'tnum';
+            font-size: 2rem;
+            font-weight: bold;
+            color: #00d4ff;
+            margin-bottom: 5px;
         }
 
         .stat-label {
-            color: var(--text-light);
+            color: #b0b0b0;
             font-size: 0.9rem;
-            letter-spacing: 0.5px;
-        }
-
-        .stat-trend {
-            margin-top: 0.5rem;
-            font-size: 0.8rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.3rem;
-        }
-
-        .trend-up {
-            color: var(--success);
-        }
-
-        .trend-down {
-            color: var(--danger);
         }
 
         .sections-grid {
@@ -170,32 +86,17 @@
         }
 
         .token-item {
-            background: var(--card-bg);
+            background: rgba(255, 255, 255, 0.05);
             border-radius: 10px;
-            padding: 1rem;
-            margin-bottom: 0.75rem;
-            border-left: 4px solid var(--primary);
-            transition: var(--transition);
-            box-shadow: var(--shadow);
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #00d4ff;
+            transition: transform 0.2s ease;
         }
 
         .token-item:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            border-left-color: var(--primary-dark);
-        }
-
-        .token-item.alert-high {
-            border-left-color: var(--danger);
-            background: rgba(239, 68, 68, 0.05);
-        }
-
-        .token-item.alert-medium {
-            border-left-color: var(--warning);
-            background: rgba(245, 158, 11, 0.05);
+            transform: translateX(5px);
+            background: rgba(255, 255, 255, 0.1);
         }
 
         .token-header {
@@ -259,39 +160,26 @@
             position: fixed;
             bottom: 20px;
             right: 20px;
-            background: var(--primary);
+            background: linear-gradient(45deg, #00d4ff, #090979);
             border: none;
             color: white;
-            padding: 1rem;
+            padding: 15px;
             border-radius: 50%;
             cursor: pointer;
             font-size: 1.2rem;
-            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
-            transition: var(--transition);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10;
+            box-shadow: 0 4px 15px rgba(0, 212, 255, 0.3);
+            transition: transform 0.2s ease;
         }
 
         .refresh-btn:hover {
-            transform: scale(1.1) rotate(30deg);
-            background: var(--primary-dark);
+            transform: scale(1.1);
         }
 
         .update-time {
             text-align: center;
-            color: var(--text-light);
+            color: #888;
             font-size: 0.8rem;
-            margin-top: 2rem;
-            padding: 0.5rem;
-            background: var(--card-bg);
-            border-radius: 8px;
-            display: inline-block;
-            margin-left: auto;
-            margin-right: auto;
-            width: auto;
-            min-width: 200px;
+            margin-top: 20px;
         }
 
         .loading {
@@ -319,24 +207,20 @@
 <body>
     <div class="container">
         <div class="header">
-            <button class="theme-toggle" id="themeToggle">🌓</button>
             <h1>🚀 Solana Token Scanner</h1>
-            <p>Real-time monitoring of emerging Solana tokens with advanced analytics</p>
             
-            <div class="header-actions">
-                <a href="/dashboard/detail" class="action-btn">
-                    <span>📊</span> Detailed Report
-                </a>
-                <button id="exportBtn" class="action-btn primary" onclick="downloadCSV()">
-                    <span>📥</span> Export Ready
-                </button>
-                <a href="/dashboard/invest-ready" class="action-btn primary">
-                    <span>🎯</span> Invest Ready
-                </a>
-                <button class="action-btn help" title="Criteria: invest_score ≥ 75, rug_score < 30, liquidity_usd > 50 000">
-                    <span>❓</span> Info
-                </button>
-            </div>
+            <p>Real-time monitoring of emerging tokens</p>
+            <a href="/dashboard/detail" style="color:#00d4ff;font-size:1rem;">📊 Voir le rapport détaillé</a>
+            <button id="exportBtn" style="margin-left:1rem;padding:.4rem .8rem;background:#00d4ff;border:none;border-radius:4px;color:#fff;cursor:pointer;" onclick="downloadCSV()">📥 Export Ready</button>
+            <span style="cursor:help;color:#ffaa00;margin-left:1rem;font-size:.9rem;" 
+      title="Critères : invest_score ≥ 75, rug_score < 30, liquidity_usd > 50 000">
+  ❓
+</span>
+ <div class="nav" style="margin-top:.5rem;">
+  <a href="/dashboard/invest-ready" style="background:#00d4ff;padding:.5rem 1rem;border-radius:4px;color:#fff;">
+    🎯 Voir les Invest Ready
+  </a>
+</div>
         </div>
 
         <div class="stats-grid">
@@ -400,22 +284,6 @@
     <button class="refresh-btn" onclick="manualRefresh()">🔄</button>
 
     <script>
-        // Theme toggle functionality
-        const themeToggle = document.getElementById('themeToggle');
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        
-        if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && prefersDark)) {
-            document.documentElement.classList.add('dark-mode');
-            themeToggle.textContent = '🌞';
-        }
-
-        themeToggle.addEventListener('click', () => {
-            document.documentElement.classList.toggle('dark-mode');
-            const isDark = document.documentElement.classList.contains('dark-mode');
-            localStorage.setItem('theme', isDark ? 'dark' : 'light');
-            themeToggle.textContent = isDark ? '🌞' : '🌓';
-        });
-
         const API_BASE_URL = 'http://localhost:5000/api';
         let isLoading = false;
         // Téléchargement CSV

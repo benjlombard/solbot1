@@ -367,7 +367,8 @@ class TokenEnricher:
                     symbol = ?, name = ?, decimals = ?, logo_uri = ?,
                     price_usdc = ?, market_cap = ?, liquidity_usd = ?, volume_24h = ?,
                     price_change_24h = ?, age_hours = ?, quality_score = ?, rug_score = ?,
-                    holders = ?, is_tradeable = ?, invest_score = ?
+                    holders = ?, is_tradeable = ?, invest_score = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE address = ?
             ''', (
                 token_data.get("symbol"),
