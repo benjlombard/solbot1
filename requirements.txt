@@ -8,6 +8,7 @@ solana
 websocket-client
 python-decouple
 flask
+pytz
 
 # === CORE DEPENDENCIES ===
 # Base Python packages

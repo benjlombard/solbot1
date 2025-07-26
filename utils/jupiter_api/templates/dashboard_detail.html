@@ -11,18 +11,34 @@
     .filter-panel { padding: 1rem 2rem; background: #16213e; border-bottom: 1px solid #2a2a4a; }
     .filter-panel .filter-group { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .filter-panel .filter-group label { margin-right: 0.5rem; color: #00d4ff; font-size: 0.9rem; }
-    .filter-panel .filter-group input { padding: 0.4rem; border: none; border-radius: 4px; background: #2a2a4a; color: #fff; width: 100px; font-size: 0.9rem; }
-    .filter-panel .filter-group input:focus { outline: none; border: 1px solid #00d4ff; }
+    .filter-panel .filter-group input, .filter-panel .filter-group select { 
+      padding: 0.4rem; border: none; border-radius: 4px; background: #2a2a4a; color: #fff; width: 100px; font-size: 0.9rem; 
+    }
+    .filter-panel .filter-group input:focus, .filter-panel .filter-group select:focus { 
+      outline: none; border: 1px solid #00d4ff; 
+    }
+    .filter-panel .filter-group .time-filter { width: 120px; }
+    .filter-panel .filter-group .time-unit { width: 80px; }
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
     th, td { padding: 0.6rem 0.5rem; border-bottom: 1px solid #2a2a4a; text-align: left; }
     th { background: #0f3460; position: sticky; top: 0; }
     .price { color: #00ff88; font-weight: bold; }
     .score { color: #ffaa00; font-weight: bold; }
+    .updated-recent { color: #00ff88; font-weight: bold; }
+    .updated-old { color: #ff6b6b; }
+    .updated-medium { color: #ffaa00; }
     .pagination { display: flex; gap: 0.5rem; padding: 1rem 2rem; justify-content: space-between; }
     .pagination button { padding: 0.4rem 0.8rem; border: none; border-radius: 4px; background: #00d4ff; color: #fff; cursor: pointer; }
     .pagination button:disabled { background: #444; cursor: not-allowed; }
     .fav { color: gold; cursor: pointer; }
     .no-data { text-align: center; padding: 1rem; color: #888; }
+    .preset-buttons { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .preset-btn { 
+      padding: 0.3rem 0.6rem; border: none; border-radius: 3px; background: #2a2a4a; 
+      color: #00d4ff; cursor: pointer; font-size: 0.8rem; 
+    }
+    .preset-btn:hover { background: #00d4ff; color: #fff; }
+    .preset-btn.active { background: #00d4ff; color: #fff; }
   </style>
 </head>
 <body>
@@ -49,6 +65,26 @@
 
   <!-- Panneau des filtres -->
   <div class="filter-panel">
+    <!-- Filtres temporels avec boutons présets -->
+    <div class="filter-group">
+      <label>🕒 Mis à jour depuis:</label>
+      <div class="preset-buttons">
+        <button class="preset-btn" onclick="setTimeFilter(15, 'minutes')">15min</button>
+        <button class="preset-btn" onclick="setTimeFilter(30, 'minutes')">30min</button>
+        <button class="preset-btn" onclick="setTimeFilter(1, 'hours')">1h</button>
+        <button class="preset-btn" onclick="setTimeFilter(6, 'hours')">6h</button>
+        <button class="preset-btn" onclick="setTimeFilter(24, 'hours')">24h</button>
+        <button class="preset-btn" onclick="clearTimeFilter()">Tout</button>
+      </div>
+      <input type="number" id="filterTimeValue" class="time-filter" placeholder="Valeur" min="1">
+      <select id="filterTimeUnit" class="time-unit">
+        <option value="">-</option>
+        <option value="minutes">Minutes</option>
+        <option value="hours">Heures</option>
+        <option value="days">Jours</option>
+      </select>
+    </div>
+    
     <div class="filter-group">
       <label>Symbol:</label><input type="text" id="filterSymbol" placeholder="Symbol (e.g., DNT)">
       <label>Price Min ($):</label><input type="number" id="filterPriceMin" placeholder="Min" step="0.000001">
@@ -69,7 +105,7 @@
       <label>Age Max (h):</label><input type="number" id="filterAgeMax" placeholder="Max" step="0.1">
       <label>Risk Min:</label><input type="number" id="filterRiskMin" placeholder="Min">
       <label>Risk Max:</label><input type="number" id="filterRiskMax" placeholder="Max 50" title="Recommandé: ≤ 50">
-      <label>Updated At:</label><input type="date" id="filterUpdatedAt" placeholder="Updated At">
+      <label>Date Découverte:</label><input type="date" id="filterDiscoveredAt" placeholder="Discovered At">
     </div>
   </div>
 
@@ -86,7 +122,8 @@
         <th>Holders</th>
         <th>Age (h)</th>
         <th>Risk</th>
-        <th>Updated At</th>
+        <th>Dernière MAJ</th>
+        <th>Découvert</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -102,19 +139,132 @@
   <script>
     let data = [], filteredData = [], currentPage = 1, perPage = 10;
 
+    // === FONCTIONS UTILITAIRES ===
+    function parseDateTime(dateString) {
+      if (!dateString) return null;
+      
+      // Si la date ne contient pas d'info timezone, on considère qu'elle est déjà locale
+      if (dateString.includes('T') || dateString.includes('Z')) {
+        return new Date(dateString);
+      } else {
+        // Format "YYYY-MM-DD HH:MM:SS" - considéré comme local
+        return new Date(dateString.replace(' ', 'T'));
+      }
+    }
+
+    function formatLocalDateTime(dateString) {
+      if (!dateString) return 'Inconnue';
+      
+      const date = parseDateTime(dateString);
+      if (!date || isNaN(date.getTime())) return 'Invalide';
+      
+      // Format français : JJ/MM/AAAA HH:MM
+      return date.toLocaleString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    function getTimeAgo(dateString) {
+      if (!dateString) return { text: 'Inconnue', className: 'updated-old' };
+      
+      const now = new Date();
+      const updateTime = parseDateTime(dateString);
+      
+      if (!updateTime || isNaN(updateTime.getTime())) {
+        return { text: 'Invalide', className: 'updated-old' };
+      }
+      
+      const diffMs = now - updateTime;
+      const diffMinutes = Math.floor(diffMs / (1000 * 60));
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      
+      let text, className;
+      
+      if (diffMinutes < 1) {
+        text = 'À l\'instant';
+        className = 'updated-recent';
+      } else if (diffMinutes < 60) {
+        text = `${diffMinutes}min`;
+        className = diffMinutes < 30 ? 'updated-recent' : 'updated-medium';
+      } else if (diffHours < 24) {
+        text = `${diffHours}h`;
+        className = diffHours < 6 ? 'updated-medium' : 'updated-old';
+      } else {
+        text = `${diffDays}j`;
+        className = 'updated-old';
+      }
+      
+      return { text, className };
+    }
+
+    function isWithinTimeFilter(dateString, filterValue, filterUnit) {
+      if (!dateString || !filterValue || !filterUnit) return true;
+      
+      const now = new Date();
+      const updateTime = parseDateTime(dateString);
+      
+      if (!updateTime || isNaN(updateTime.getTime())) return false;
+      
+      const diffMs = now - updateTime;
+      
+      let thresholdMs;
+      switch (filterUnit) {
+        case 'minutes':
+          thresholdMs = filterValue * 60 * 1000;
+          break;
+        case 'hours':
+          thresholdMs = filterValue * 60 * 60 * 1000;
+          break;
+        case 'days':
+          thresholdMs = filterValue * 24 * 60 * 60 * 1000;
+          break;
+        default:
+          return true;
+      }
+      
+      return diffMs <= thresholdMs;
+    }
+
+    // === FONCTIONS DE DONNÉES ===
     async function fetchData() {
       try {
         const response = await fetch('/api/tokens-detail');
         if (!response.ok) throw new Error('Réponse API invalide');
         data = await response.json();
-        console.log('Données brutes:', data); // Débogage
+        console.log('Données brutes:', data);
         filteredData = [...data];
         currentPage = 1;
         renderPage();
       } catch (error) {
         console.error('Erreur lors du chargement des données:', error);
-        document.getElementById('tbody').innerHTML = '<tr><td colspan="10">Erreur lors du chargement des données</td></tr>';
+        document.getElementById('tbody').innerHTML = '<tr><td colspan="11">Erreur lors du chargement des données</td></tr>';
       }
+    }
+
+    // === FONCTIONS DE FILTRAGE ===
+    function setTimeFilter(value, unit) {
+      document.getElementById('filterTimeValue').value = value;
+      document.getElementById('filterTimeUnit').value = unit;
+      
+      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      
+      applyFilters();
+    }
+
+    function clearTimeFilter() {
+      document.getElementById('filterTimeValue').value = '';
+      document.getElementById('filterTimeUnit').value = '';
+      
+      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      
+      applyFilters();
     }
 
     function applyFilters() {
@@ -134,11 +284,15 @@
         ageMax: document.getElementById('filterAgeMax').value ? parseFloat(document.getElementById('filterAgeMax').value) : null,
         riskMin: document.getElementById('filterRiskMin').value ? parseInt(document.getElementById('filterRiskMin').value) : null,
         riskMax: document.getElementById('filterRiskMax').value ? parseInt(document.getElementById('filterRiskMax').value) : null,
-        updatedAt: document.getElementById('filterUpdatedAt').value
+        discoveredAt: document.getElementById('filterDiscoveredAt').value,
+        timeValue: document.getElementById('filterTimeValue').value ? parseInt(document.getElementById('filterTimeValue').value) : null,
+        timeUnit: document.getElementById('filterTimeUnit').value
       };
 
       filteredData = data.filter(row => {
         const riskValue = 100 - (row.rug_score || 50);
+        const updatedAt = row.updated_at || row.first_discovered_at;
+        
         return (
           (!filters.symbol || row.symbol.toLowerCase().includes(filters.symbol)) &&
           (filters.priceMin === null || row.price_usdc >= filters.priceMin) &&
@@ -155,42 +309,55 @@
           (filters.ageMax === null || row.age_hours <= filters.ageMax) &&
           (filters.riskMin === null || riskValue >= filters.riskMin) &&
           (filters.riskMax === null || riskValue <= filters.riskMax) &&
-          (!filters.updatedAt || new Date(row.updated_at || row.first_discovered_at).toISOString().startsWith(filters.updatedAt))
+          (!filters.discoveredAt || new Date(row.first_discovered_at).toISOString().startsWith(filters.discoveredAt)) &&
+          isWithinTimeFilter(updatedAt, filters.timeValue, filters.timeUnit)
         );
       });
 
-      console.log('Filtered data:', filteredData.length, 'rows', filters); // Débogage
+      console.log('Filtered data:', filteredData.length, 'rows', filters);
       currentPage = 1;
       renderPage();
     }
 
+    // === FONCTIONS D'AFFICHAGE ===
     function renderPage() {
       const start = (currentPage - 1) * perPage;
       const rows = filteredData.slice(start, start + perPage);
       const tbody = document.getElementById('tbody');
+      
       if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
       } else {
-        tbody.innerHTML = rows.map(r => `
-          <tr>
-            <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
-            <td><a href="https://dexscreener.com/solana/${r.address}" target="_blank">${r.symbol}</a></td>
-            <td class="price">${(+r.price_usdc || 0).toFixed(8)}</td>
-            <td class="score">${(+r.invest_score || 0).toFixed(1)}</td>
-            <td>${Math.round(r.liquidity_usd || 0).toLocaleString()}</td>
-            <td>${Math.round(r.volume_24h || 0).toLocaleString()}</td>
-            <td>${r.holders || 0}</td>
-            <td>${(+r.age_hours || 0).toFixed(1)}</td>
-            <td>${Math.round(100 - (r.rug_score || 50))}</td>
-            <td>${r.updated_at || r.first_discovered_at}</td>
-          </tr>
-        `).join('');
+        tbody.innerHTML = rows.map(r => {
+          const updatedAt = r.updated_at || r.first_discovered_at;
+          const timeAgo = getTimeAgo(updatedAt);
+          const discoveredAt = formatLocalDateTime(r.first_discovered_at);
+          const fullUpdateTime = formatLocalDateTime(updatedAt);
+          
+          return `
+            <tr>
+              <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
+              <td><a href="https://dexscreener.com/solana/${r.address}" target="_blank">${r.symbol}</a></td>
+              <td class="price">${(+r.price_usdc || 0).toFixed(8)}</td>
+              <td class="score">${(+r.invest_score || 0).toFixed(1)}</td>
+              <td>${Math.round(r.liquidity_usd || 0).toLocaleString()}</td>
+              <td>${Math.round(r.volume_24h || 0).toLocaleString()}</td>
+              <td>${r.holders || 0}</td>
+              <td>${(+r.age_hours || 0).toFixed(1)}</td>
+              <td>${Math.round(100 - (r.rug_score || 50))}</td>
+              <td class="${timeAgo.className}" title="${fullUpdateTime}">${timeAgo.text}</td>
+              <td title="${discoveredAt}">${discoveredAt}</td>
+            </tr>
+          `;
+        }).join('');
       }
-      document.getElementById("pageInfo").textContent = `Page ${currentPage} / ${Math.ceil(filteredData.length / perPage)}`;
+      
+      document.getElementById("pageInfo").textContent = `Page ${currentPage} / ${Math.ceil(filteredData.length / perPage)} (${filteredData.length} tokens)`;
       document.getElementById("prevBtn").disabled = currentPage === 1;
       document.getElementById("nextBtn").disabled = currentPage === Math.ceil(filteredData.length / perPage);
     }
 
+    // === FONCTIONS DE PAGINATION ===
     function changePerPage() {
       perPage = +document.getElementById("perPage").value;
       currentPage = 1;
@@ -211,14 +378,20 @@
       }
     }
 
+    // === FONCTIONS DE CONTRÔLE ===
     function reloadData() {
       fetchData();
       document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
+      document.getElementById('filterTimeUnit').value = '';
+      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
       applyFilters();
     }
 
     function resetFilters() {
       document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
+      document.getElementById('filterTimeUnit').value = '';
+      document.getElementById('filterDiscoveredAt').value = '';
+      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
       filteredData = [...data];
       currentPage = 1;
       renderPage();
@@ -229,8 +402,9 @@
       alert('Ajouté aux favoris !');
     }
 
+    // === ÉVÉNEMENTS ===
     let debounceTimeout;
-    document.querySelectorAll('.filter-panel input').forEach(input => {
+    document.querySelectorAll('.filter-panel input, .filter-panel select').forEach(input => {
       input.addEventListener('input', () => {
         clearTimeout(debounceTimeout);
         debounceTimeout = setTimeout(() => {
@@ -240,7 +414,8 @@
       });
     });
 
+    // === INITIALISATION ===
     fetchData();
-  </script>
+</script>
 </body>
 </html>

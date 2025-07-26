@@ -24,11 +24,18 @@ from typing import List, Dict
 from aiohttp import ClientSession, TCPConnector
 from async_lru import alru_cache
 from math import log
-from solana_monitor_c3 import start_monitoring  # New import for monitoring
+from solana_monitor_c3 import start_monitoring
+import pytz
+
+LOCAL_TZ = pytz.timezone('Europe/Paris')
 
 # Configuration du logger
 logger = logging.getLogger('solana_monitoring')
 _monitoring_started = False
+
+def get_local_timestamp():
+    """Obtenir un timestamp dans la timezone locale"""
+    return datetime.now(LOCAL_TZ).strftime('%Y-%m-%d %H:%M:%S')
 
 def configure_logging(log_level, log_file='solana_monitoring.log'):
     """Configure logging with single set of handlers."""
@@ -356,7 +363,7 @@ class InvestScanner:
 
         if launch_timestamp:
             try:
-                # Gérer différents formats de timestamp
+                # Gérer différents formats de timestamp - CORRECTION ICI
                 if isinstance(launch_timestamp, str):
                     try:
                         launch_time = datetime.strptime(launch_timestamp, '%Y-%m-%d %H:%M:%S')
@@ -369,11 +376,16 @@ class InvestScanner:
                 else:
                     launch_time = datetime.fromtimestamp(launch_timestamp)
                 
-                # Assurez-vous que launch_time a une timezone
+                # CORRECTION: Utiliser l'heure locale pour la comparaison
                 if launch_time.tzinfo is None:
-                    launch_time = launch_time.replace(tzinfo=timezone.utc)
+                    # Si pas de timezone, considérer comme local
+                    launch_time = launch_time
+                else:
+                    # Convertir vers local si nécessaire
+                    launch_time = launch_time.replace(tzinfo=None)
                 
-                time_since_launch = datetime.now(timezone.utc) - launch_time
+                # Comparer avec l'heure locale actuelle
+                time_since_launch = datetime.now() - launch_time
                 
                 if time_since_launch < timedelta(hours=1):
                     bonus += 30  # Very recent launch
@@ -427,22 +439,31 @@ class InvestScanner:
         conn = sqlite3.connect(self.database_path)
         cursor = conn.cursor()
         try:
+
+            # Utiliser un timestamp local pour les nouveaux tokens
+            local_timestamp = get_local_timestamp()
+
             cursor.execute('''
             INSERT OR REPLACE INTO tokens (
                 address, symbol, name, decimals, logo_uri, price_usdc, market_cap,
                 liquidity_usd, volume_24h, price_change_24h, age_hours,
                 rug_score, holders, is_tradeable, invest_score,
-                early_bonus, social_bonus, holders_bonus, first_discovered_at,
-                launch_timestamp, bonding_curve_status, raydium_pool_address,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT first_discovered_at FROM tokens WHERE address = ?), CURRENT_TIMESTAMP, ?, ?, ?, CURRENT_TIMESTAMP)
+                early_bonus, social_bonus, holders_bonus, 
+                first_discovered_at, updated_at,
+                launch_timestamp, bonding_curve_status, raydium_pool_address
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                    COALESCE((SELECT first_discovered_at FROM tokens WHERE address = ?), ?),
+                    ?,
+                    ?, ?, ?)
             ''', (
                 token["address"], token["symbol"], token["name"], token["decimals"],
                 token.get("logo_uri"), token.get("price_usdc"), token.get("market_cap"),
                 token.get("liquidity_usd"), token.get("volume_24h"), token.get("price_change_24h"),
                 token.get("age_hours"), token.get("rug_score"), token.get("holders"),
                 token.get("is_tradeable"), token.get("invest_score"),
-                token.get("early_bonus"), token.get("social_bonus"), token.get("holders_bonus"), token["address"],
+                token.get("early_bonus"), token.get("social_bonus"), token.get("holders_bonus"),
+                token["address"], local_timestamp,  # first_discovered_at avec timestamp local
+                local_timestamp,  # updated_at avec timestamp local
                 token.get("launch_timestamp"), token.get("bonding_curve_status"),
                 token.get("raydium_pool_address")
             ))
@@ -716,7 +737,7 @@ def main():
     parser = argparse.ArgumentParser(description="Invest-Ready Solana Token Scanner")
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--interval", type=float, default=10, help="Scan interval in minutes")
-    parser.add_argument("--database", default="invest.db")
+    parser.add_argument("--database", default="tokens.db")
     parser.add_argument("--single-scan", action="store_true")
     parser.add_argument("--stats", action="store_true")
     parser.add_argument("--telegram", action="store_true")

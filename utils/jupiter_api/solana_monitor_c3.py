@@ -12,7 +12,7 @@ import websockets
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solana.rpc.async_api import AsyncClient
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decouple import config
 from websockets.exceptions import ConnectionClosedError, InvalidStatusCode
 import random
@@ -22,6 +22,7 @@ import base64
 import aiohttp
 from aiohttp import ClientSession, TCPConnector
 from math import log
+
 
 # Configuration du logger
 logger = logging.getLogger('solana_monitoring')
@@ -33,6 +34,10 @@ RAYDIUM_AMM_PROGRAM = Pubkey.from_string("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFS
 HELIUS_WS_URL = f"wss://rpc.helius.xyz/?api-key={config('HELIUS_API_KEY', default='872ddf73-4cfd-4263-a418-521bbde27eb8')}"
 SOLANA_RPC_URL = f"https://rpc.helius.xyz/?api-key={config('HELIUS_API_KEY', default='872ddf73-4cfd-4263-a418-521bbde27eb8')}"
 DATABASE_PATH = "tokens.db"
+
+def get_local_timestamp():
+    """Obtenir un timestamp dans la timezone locale"""
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 class TokenEnricher:
     """Classe pour enrichir les tokens détectés en temps réel"""
@@ -362,6 +367,51 @@ class TokenEnricher:
         cursor = conn.cursor()
         
         try:
+            # Utiliser l'heure locale pour updated_at
+            local_timestamp = get_local_timestamp()
+            
+            cursor.execute('''
+                UPDATE tokens SET 
+                    symbol = ?, name = ?, decimals = ?, logo_uri = ?,
+                    price_usdc = ?, market_cap = ?, liquidity_usd = ?, volume_24h = ?,
+                    price_change_24h = ?, age_hours = ?, quality_score = ?, rug_score = ?,
+                    holders = ?, is_tradeable = ?, invest_score = ?,
+                    updated_at = ?
+                WHERE address = ?
+            ''', (
+                token_data.get("symbol"),
+                token_data.get("name"),
+                token_data.get("decimals"),
+                token_data.get("logo_uri"),
+                token_data.get("price_usdc"),
+                token_data.get("market_cap"),
+                token_data.get("liquidity_usd"),
+                token_data.get("volume_24h"),
+                token_data.get("price_change_24h"),
+                token_data.get("age_hours"),
+                token_data.get("quality_score"),
+                token_data.get("rug_score"),
+                token_data.get("holders"),
+                token_data.get("is_tradeable"),
+                token_data.get("invest_score"),
+                local_timestamp,  # updated_at avec heure locale
+                token_data["address"]
+            ))
+            
+            conn.commit()
+            logger.debug(f"💾 Updated token {token_data['address']} in database")
+            
+        except sqlite3.Error as e:
+            logger.error(f"Database error updating token {token_data['address']}: {e}")
+        finally:
+            conn.close()
+
+    async def _update_token_in_db_old(self, token_data: dict):
+        """Mettre à jour le token dans la base de données"""
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        
+        try:
             cursor.execute('''
                 UPDATE tokens SET 
                     symbol = ?, name = ?, decimals = ?, logo_uri = ?,
@@ -555,7 +605,98 @@ def is_valid_token_address(address: str) -> bool:
     
     return True
 
+
 async def process_new_token(token_address, bonding_curve_status, raydium_pool_address):
+    """Store newly detected token in the database and queue for enrichment."""
+    if not is_valid_token_address(token_address):
+        logger.warning(f"Invalid token address detected: {token_address}")
+        return
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    try:
+        # Utiliser l'heure locale pour les nouveaux tokens
+        local_timestamp = get_local_timestamp()
+        
+        # Vérifier si le token existe déjà
+        cursor.execute('SELECT address, bonding_curve_status FROM tokens WHERE address = ?', (token_address,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Mettre à jour les informations existantes seulement si c'est pertinent
+            existing_status = existing[1]
+            should_update = False
+            
+            # Logic de mise à jour intelligente
+            if not existing_status and bonding_curve_status:
+                should_update = True
+            elif existing_status == "active" and bonding_curve_status in ["completed", "migrated"]:
+                should_update = True
+            elif existing_status == "completed" and bonding_curve_status == "migrated":
+                should_update = True
+            elif not raydium_pool_address is None:  # Toujours mettre à jour si on a une nouvelle pool address
+                should_update = True
+            
+            if should_update:
+                cursor.execute('''
+                    UPDATE tokens SET 
+                        bonding_curve_status = COALESCE(?, bonding_curve_status),
+                        raydium_pool_address = COALESCE(?, raydium_pool_address),
+                        updated_at = ?,
+                        launch_timestamp = COALESCE(launch_timestamp, ?)
+                    WHERE address = ?
+                ''', (
+                    bonding_curve_status, 
+                    raydium_pool_address,
+                    local_timestamp,  # updated_at avec heure locale
+                    local_timestamp,  # launch_timestamp avec heure locale
+                    token_address
+                ))
+                logger.debug(f"🔄 Updated existing token: address={token_address}, status={bonding_curve_status}")
+                
+                # Queue for re-enrichment if status changed significantly
+                if bonding_curve_status in ["completed", "migrated"]:
+                    await token_enricher.queue_for_enrichment(token_address)
+            else:
+                logger.debug(f"⏩ No update needed for token: address={token_address}, existing_status={existing_status}, new_status={bonding_curve_status}")
+        else:
+            # Insérer un nouveau token avec l'heure locale
+            cursor.execute('''
+                INSERT INTO tokens (
+                    address, symbol, name, decimals, logo_uri, price_usdc, market_cap,
+                    liquidity_usd, volume_24h, price_change_24h, age_hours, quality_score,
+                    rug_score, holders, holder_distribution, is_tradeable, invest_score,
+                    early_bonus, social_bonus, holders_bonus, 
+                    first_discovered_at, updated_at,
+                    launch_timestamp, bonding_curve_status, raydium_pool_address
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                token_address, "UNKNOWN", None, None, None, None, None,
+                None, None, None, None, None, None, None, None, None, None, None, None, None,
+                local_timestamp,  # first_discovered_at avec heure locale
+                local_timestamp,  # updated_at avec heure locale
+                local_timestamp,  # launch_timestamp avec heure locale
+                bonding_curve_status, raydium_pool_address
+            ))
+            logger.info(f"💾 Saved new token: address={token_address}, status={bonding_curve_status}")
+            
+            # Queue for enrichment
+            await token_enricher.queue_for_enrichment(token_address)
+            
+            # Log des liens utiles pour vérification manuelle
+            logger.info(f"🔗 DEX Screener: https://dexscreener.com/solana/{token_address}")
+            if bonding_curve_status in ["active", "completed"]:
+                logger.info(f"🔗 Pump.fun: https://pump.fun/coin/{token_address}")
+        
+        conn.commit()
+        
+    except sqlite3.Error as e:
+        logger.error(f"Database error saving token {token_address}: {str(e)}")
+    finally:
+        conn.close()
+
+
+async def process_new_token_old(token_address, bonding_curve_status, raydium_pool_address):
     """Store newly detected token in the database and queue for enrichment."""
     if not is_valid_token_address(token_address):
         logger.warning(f"Invalid token address detected: {token_address}")
@@ -650,7 +791,7 @@ async def enrich_existing_tokens():
             cursor.execute('''
                 SELECT address FROM tokens 
                 WHERE (symbol IS NULL OR symbol = 'UNKNOWN' OR symbol = '') 
-                AND first_discovered_at > datetime('now', '-24 hours')
+                AND first_discovered_at > datetime('now', '-24 hours', 'localtime')
                 ORDER BY first_discovered_at DESC
                 LIMIT 5
             ''')
@@ -687,7 +828,7 @@ async def display_token_stats():
             cursor.execute("SELECT COUNT(*) FROM tokens WHERE invest_score >= 80")
             high_score = cursor.fetchone()[0]
             
-            cursor.execute("SELECT COUNT(*) FROM tokens WHERE first_discovered_at > datetime('now', '-1 hour')")
+            cursor.execute("SELECT COUNT(*) FROM tokens WHERE first_discovered_at > datetime('now', '-1 hour', 'localtime')")
             recent = cursor.fetchone()[0]
             
             # Top 3 tokens par score

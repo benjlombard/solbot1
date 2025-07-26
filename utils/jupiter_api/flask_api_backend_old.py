@@ -8,10 +8,11 @@ from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 import sqlite3
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 import json
 from flask import make_response
+import pytz
 
 app = Flask(__name__)
 CORS(app)  # Permettre les requêtes cross-origin pour le dashboard
@@ -20,9 +21,33 @@ CORS(app)  # Permettre les requêtes cross-origin pour le dashboard
 DATABASE_PATH = "tokens.db"  # Votre base de données existante
 logger = logging.getLogger(__name__)
 
+# Définir le fuseau horaire local (remplacer par votre zone)
+LOCAL_TZ = pytz.timezone('Europe/Paris')  # UTC+1/+2 selon l'heure d'été
+
 def format_datetime_local(dt_str):
-    """Les timestamps sont maintenant corrigés, pas besoin de conversion"""
-    return dt_str
+        """Convertir un datetime UTC en timezone locale"""
+        if not dt_str:
+            return None
+        
+        try:
+            # Parser le datetime (supposé UTC)
+            if isinstance(dt_str, str):
+                dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+            else:
+                dt = datetime.fromtimestamp(float(dt_str), tz=timezone.utc)
+            
+            # Si pas de timezone, considérer comme UTC
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            
+            # Convertir vers la timezone locale
+            local_dt = dt.astimezone(LOCAL_TZ)
+            return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        except Exception as e:
+            print(f"Erreur conversion timezone: {e}")
+            return dt_str
+            
 
 class TokenAPI:
     """API pour récupérer les données des tokens"""
@@ -50,10 +75,10 @@ class TokenAPI:
             cursor.execute("SELECT COUNT(*) FROM tokens WHERE invest_score >= 80")
             high_score_tokens = cursor.fetchone()[0]
             
-            # New tokens (24h) - avec timezone locale
+            # New tokens (24h)
             cursor.execute("""
                 SELECT COUNT(*) FROM tokens 
-                WHERE first_discovered_at > datetime('now', '-24 hours', 'localtime')
+                WHERE first_discovered_at > datetime('now', '-24 hours')
             """)
             new_tokens = cursor.fetchone()[0]
             
@@ -141,7 +166,7 @@ class TokenAPI:
                        volume_24h, holders, age_hours, bonding_curve_status,
                        first_discovered_at
                 FROM tokens 
-                WHERE first_discovered_at > datetime('now', '-{} hours', 'localtime')
+                WHERE first_discovered_at > datetime('now', '-{} hours')
                 AND invest_score >= 60
                 AND is_tradeable = 1
                 ORDER BY invest_score DESC, first_discovered_at DESC
@@ -172,17 +197,18 @@ class TokenAPI:
             conn.close()
     
     def get_volume_alerts(self, limit: int = 10) -> List[Dict]:
-        """Détecter les pics de volume"""
+        """Détecter les pics de volume (simulation basée sur volume élevé)"""
         conn = self.get_connection()
         cursor = conn.cursor()
         
         try:
+            # Pour la simulation, on prend les tokens avec le plus gros volume des dernières 24h
             cursor.execute("""
                 SELECT t.address, t.symbol, t.volume_24h, t.invest_score,
                        t.price_usdc, t.holders, t.first_discovered_at
                 FROM tokens t
                 WHERE t.volume_24h > 50000
-                AND t.first_discovered_at > datetime('now', '-24 hours', 'localtime')
+                AND t.first_discovered_at > datetime('now', '-24 hours')
                 AND t.is_tradeable = 1
                 ORDER BY t.volume_24h DESC
                 LIMIT ?
@@ -190,6 +216,7 @@ class TokenAPI:
             
             alerts = []
             for row in cursor.fetchall():
+                # Simulation du ratio (dans la vraie vie, comparer avec historique)
                 volume = float(row["volume_24h"]) if row["volume_24h"] else 0
                 volume_ratio = min(10, volume / 10000)  # Simulation
                 
@@ -224,7 +251,7 @@ class TokenAPI:
                        raydium_pool_address, first_discovered_at
                 FROM tokens 
                 WHERE bonding_curve_status IN ('completed', 'migrated')
-                AND first_discovered_at > datetime('now', '-48 hours', 'localtime')
+                AND first_discovered_at > datetime('now', '-48 hours')
                 ORDER BY invest_score DESC, first_discovered_at DESC
                 LIMIT ?
             """, (limit,))
@@ -252,6 +279,8 @@ class TokenAPI:
         finally:
             conn.close()
     
+    
+
     def get_token_details(self, address: str) -> Dict:
         """Récupérer les détails d'un token spécifique"""
         conn = self.get_connection()
@@ -289,34 +318,33 @@ def get_stats():
 
 @app.route('/api/tokens-detail')
 def get_tokens_detail():
-    """Endpoint pour récupérer tous les tokens avec détails"""
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    cursor.execute('''
+        SELECT address, symbol, name, price_usdc, invest_score, liquidity_usd,
+               volume_24h, holders, age_hours, rug_score, is_tradeable,
+               updated_at, first_discovered_at,
+               COALESCE(updated_at, first_discovered_at) as last_update
+        FROM tokens
+        ORDER BY last_update DESC, invest_score DESC
+    ''')
     
-    try:
-        cursor.execute('''
-            SELECT address, symbol, name, price_usdc, invest_score, liquidity_usd,
-                   volume_24h, holders, age_hours, rug_score, is_tradeable,
-                   updated_at, first_discovered_at,
-                   COALESCE(updated_at, first_discovered_at) as last_update
-            FROM tokens
-            ORDER BY last_update DESC, invest_score DESC
-        ''')
-        
-        rows = []
-        for row in cursor.fetchall():
-            row_dict = dict(row)
-            # Les timestamps sont maintenant corrects, pas besoin de conversion
-            rows.append(row_dict)
-        
-        return jsonify(rows)
-        
-    except Exception as e:
-        logger.error(f"Error in /api/tokens-detail: {e}")
-        return jsonify({"error": "Internal server error"}), 500
-    finally:
-        conn.close()
+    rows = []
+    for row in cursor.fetchall():
+        row_dict = dict(row)
+        # Convertir les timestamps vers la timezone locale
+        if row_dict['updated_at']:
+            row_dict['updated_at'] = format_datetime_local(row_dict['updated_at'])
+        if row_dict['first_discovered_at']:
+            row_dict['first_discovered_at'] = format_datetime_local(row_dict['first_discovered_at'])
+        if row_dict['last_update']:
+            row_dict['last_update'] = format_datetime_local(row_dict['last_update'])
+        rows.append(row_dict)
+    
+    conn.close()
+    return jsonify(rows)
+
 
 @app.route('/dashboard/invest-ready')
 def invest_ready_page():
@@ -398,6 +426,23 @@ def export_ready():
     response.headers["Content-Disposition"] = "attachment; filename=invest_ready.csv"
     response.headers["Content-type"] = "text/csv"
     return response
+
+@app.route('/api/tokens-detail')
+def get_tokens_detail_v0():
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT address, symbol, name, price_usdc, invest_score, liquidity_usd,
+               volume_24h, holders, age_hours, rug_score, is_tradeable,
+               updated_at, first_discovered_at,
+               COALESCE(updated_at, first_discovered_at) as last_update
+        FROM tokens
+        ORDER BY last_update DESC, invest_score DESC
+    ''')
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return jsonify(rows)
 
 @app.route('/dashboard/detail')
 def dashboard_detail():

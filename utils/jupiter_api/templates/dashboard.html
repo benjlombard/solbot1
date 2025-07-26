@@ -314,6 +314,89 @@
             .stats-grid { grid-template-columns: repeat(2, 1fr); }
             .header h1 { font-size: 2rem; }
         }
+        
+        .action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: var(--transition);
+    cursor: pointer;
+}
+
+.action-btn:hover {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.action-btn.primary {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.action-btn.primary:hover {
+    background: var(--primary-dark);
+    border-color: var(--primary-dark);
+}
+
+.action-btn.help {
+    background: var(--warning);
+    color: white;
+    border-color: var(--warning);
+}
+
+.action-btn.help:hover {
+    background: #d97706;
+    border-color: #d97706;
+}
+
+.action-btn span {
+    font-size: 1rem;
+}
+
+/* Amélioration responsive pour les boutons */
+@media (max-width: 768px) {
+    .header-actions {
+        flex-direction: column;
+        align-items: center;
+    }
+    }
+    .action-btn {
+        width: 100%;
+        max-width: 200px;
+        justify-content: center;
+    }
+
+
+/* Correction du thème sombre pour les sections */
+.dark-mode .section {
+    background: rgba(30, 41, 59, 0.8);
+    border: 1px solid rgba(51, 65, 85, 0.5);
+}
+
+.dark-mode .section h2 {
+    color: var(--primary);
+}
+
+/* Amélioration des token-items en mode sombre */
+.dark-mode .token-symbol {
+    color: var(--text);
+}
+
+.dark-mode .token-details {
+    color: var(--text-light);
+}
     </style>
 </head>
 <body>
