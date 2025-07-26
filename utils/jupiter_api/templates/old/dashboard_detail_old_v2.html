@@ -147,49 +147,9 @@
         color: #fff; 
         box-shadow: 0 2px 4px rgba(244, 67, 54, 0.3);
     }
-    /* Progress bar styles */
-    .progress-container {
-        width: 80px;
-        height: 16px;
-        background: #2a2a4a;
-        border-radius: 8px;
-        overflow: hidden;
-        position: relative;
-        border: 1px solid #444;
-    }
-
-    .progress-bar {
-        height: 100%;
-        border-radius: 8px;
-        background: linear-gradient(90deg, #ff6b35, #00ff9d);
-        transition: width 0.3s ease;
-        position: relative;
-    }
-
-    .progress-text {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        font-size: 0.65rem;
-        font-weight: bold;
-        color: #fff;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-        z-index: 2;
-    }
-
-    .progress-container.completed .progress-bar {
-        background: linear-gradient(90deg, #00ff9d, #00d4ff);
-    }
-
-    .progress-container.low .progress-bar {
-        background: linear-gradient(90deg, #ff6b35, #ffab00);
-    }
-
-    .no-progress {
-        color: #666;
-        font-size: 0.7rem;
-        text-align: center;
+    .bonding-unknown { 
+        background: #555; 
+        color: #ccc; 
     }
 
     /* Légende des statuts */
@@ -329,9 +289,6 @@
         <option value="unknown">Unknown (Inconnu)</option>
       </select>
       
-      <label>📊 Progress Min (%):</label><input type="number" id="filterProgressMin" placeholder="Min %" min="0" max="100" step="1" style="width: 80px;">
-      <label>Progress Max (%):</label><input type="number" id="filterProgressMax" placeholder="Max %" min="0" max="100" step="1" style="width: 80px;">
-      
       <label>Price Min ($):</label><input type="number" id="filterPriceMin" placeholder="Min" step="0.000001">
       <label>Price Max ($):</label><input type="number" id="filterPriceMax" placeholder="Max" step="0.000001">
     </div>
@@ -370,7 +327,6 @@
         <th>Age (h)</th>
         <th>Risk</th>
         <th>Bonding Curve</th>
-        <th>Progress</th>
         <th>Dernière MAJ</th>
         <th>Découvert</th>
       </tr>
@@ -495,34 +451,7 @@
         }
     }
 
-    // === FONCTION PROGRESSION BONDING CURVE ===
-    function getBondingProgressDisplay(status, progress) {
-        // Afficher seulement pour les statuts active et created
-        if (!status || !['active', 'created'].includes(status.toLowerCase())) {
-            return '<div class="no-progress">N/A</div>';
-        }
-        
-        const progressValue = parseFloat(progress) || 0;
-        
-        if (progressValue <= 0) {
-            return '<div class="no-progress">0%</div>';
-        }
-        
-        // Déterminer la classe CSS basée sur le pourcentage
-        let progressClass = '';
-        if (progressValue >= 90) {
-            progressClass = 'completed';
-        } else if (progressValue < 30) {
-            progressClass = 'low';
-        }
-        
-        return `
-            <div class="progress-container ${progressClass}" title="Progression: ${progressValue}%">
-                <div class="progress-bar" style="width: ${Math.min(progressValue, 100)}%"></div>
-                <div class="progress-text">${progressValue}%</div>
-            </div>
-        `;
-    }
+    // === FONCTION BONDING CURVE AMÉLIORÉE ===
     function getBondingCurveDisplay(status) {
         console.debug('Bonding curve status received:', status, typeof status);
         if (!status) return '<span class="bonding-status bonding-unknown">Unknown</span>';
@@ -668,8 +597,6 @@
       const filters = {
         symbol: document.getElementById('filterSymbol').value.toLowerCase().trim(),
         bondingStatus: document.getElementById('filterBondingStatus').value.toLowerCase().trim(),
-        progressMin: document.getElementById('filterProgressMin').value ? parseFloat(document.getElementById('filterProgressMin').value) : null,
-        progressMax: document.getElementById('filterProgressMax').value ? parseFloat(document.getElementById('filterProgressMax').value) : null,
         priceMin: document.getElementById('filterPriceMin').value ? parseFloat(document.getElementById('filterPriceMin').value) : null,
         priceMax: document.getElementById('filterPriceMax').value ? parseFloat(document.getElementById('filterPriceMax').value) : null,
         scoreMin: document.getElementById('filterScoreMin').value ? parseFloat(document.getElementById('filterScoreMin').value) : null,
@@ -693,13 +620,10 @@
         const riskValue = 100 - (row.rug_score || 50);
         const updatedAt = row.updated_at || row.first_discovered_at;
         const rowBondingStatus = (row.bonding_curve_status || '').toLowerCase();
-        const progressValue = parseFloat(row.bonding_curve_progress) || 0;
         
         return (
           (!filters.symbol || row.symbol.toLowerCase().includes(filters.symbol)) &&
           (!filters.bondingStatus || rowBondingStatus === filters.bondingStatus) &&
-          (filters.progressMin === null || progressValue >= filters.progressMin) &&
-          (filters.progressMax === null || progressValue <= filters.progressMax) &&
           (filters.priceMin === null || row.price_usdc >= filters.priceMin) &&
           (filters.priceMax === null || row.price_usdc <= filters.priceMax) &&
           (filters.scoreMin === null || row.invest_score >= filters.scoreMin) &&
@@ -731,7 +655,7 @@
       const tbody = document.getElementById('tbody');
       
       if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="13" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
       } else {
         tbody.innerHTML = rows.map(r => {
           const updatedAt = r.updated_at || r.first_discovered_at;
@@ -739,7 +663,6 @@
           const discoveredAt = formatLocalDateTime(r.first_discovered_at);
           const fullUpdateTime = formatLocalDateTime(updatedAt);
           const bondingCurveDisplay = getBondingCurveDisplay(r.bonding_curve_status);
-          const progressDisplay = getBondingProgressDisplay(r.bonding_curve_status, r.bonding_curve_progress);
           
           return `
             <tr>
@@ -753,7 +676,6 @@
               <td>${(+r.age_hours || 0).toFixed(1)}</td>
               <td>${Math.round(100 - (r.rug_score || 50))}</td>
               <td>${bondingCurveDisplay}</td>
-              <td>${progressDisplay}</td>
               <td class="${timeAgo.className}" title="${fullUpdateTime}">${timeAgo.text}</td>
               <td title="${discoveredAt}">${discoveredAt}</td>
             </tr>

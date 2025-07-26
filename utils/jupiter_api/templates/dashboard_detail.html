@@ -8,6 +8,32 @@
     .nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; background: #1e1e38; }
     .nav a { color: #00d4ff; text-decoration: none; }
     .controls { display: flex; gap: 1rem; align-items: center; padding: 1rem 2rem; background: #16213e; flex-wrap: wrap; }
+    
+    /* Système d'onglets */
+    .tabs-container { background: #16213e; border-bottom: 1px solid #2a2a4a; }
+    .tabs { display: flex; padding: 0 2rem; gap: 0.5rem; }
+    .tab { 
+      padding: 1rem 1.5rem; 
+      background: transparent; 
+      border: none; 
+      color: #888; 
+      cursor: pointer; 
+      border-bottom: 3px solid transparent;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+    .tab:hover { color: #00d4ff; }
+    .tab.active { 
+      color: #00d4ff; 
+      border-bottom-color: #00d4ff; 
+      background: rgba(0, 212, 255, 0.1);
+    }
+    
+    /* Contenu des onglets */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    
     .filter-panel { padding: 1rem 2rem; background: #16213e; border-bottom: 1px solid #2a2a4a; }
     .filter-panel .filter-group { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .filter-panel .filter-group label { margin-right: 0.5rem; color: #00d4ff; font-size: 0.9rem; }
@@ -20,8 +46,9 @@
     .filter-panel .filter-group .time-filter { width: 120px; }
     .filter-panel .filter-group .time-unit { width: 80px; }
     .filter-panel .filter-group .bonding-filter { width: 120px; }
+    
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-    th, td { padding: 0.6rem 0.5rem; border-bottom: 1px solid #2a2a4a; text-align: left; }
+    th, td { padding: 0.6rem 0.5rem; border-bottom: 1px solid #2a2a4a; text-align: left; font-size: 0.85rem; }
     th { background: #0f3460; position: sticky; top: 0; }
     .price { color: #00ff88; font-weight: bold; }
     .score { color: #ffaa00; font-weight: bold; }
@@ -147,6 +174,7 @@
         color: #fff; 
         box-shadow: 0 2px 4px rgba(244, 67, 54, 0.3);
     }
+
     /* Progress bar styles */
     .progress-container {
         width: 80px;
@@ -223,6 +251,63 @@
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
     }
+
+    /* Styles spécifiques pour l'onglet analyse */
+    .analysis-container {
+        padding: 2rem;
+    }
+    
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    
+    .metric-card {
+        background: #1e1e38;
+        padding: 1.5rem;
+        border-radius: 8px;
+        border: 1px solid #2a2a4a;
+    }
+    
+    .metric-title {
+        color: #00d4ff;
+        font-size: 1.1rem;
+        font-weight: bold;
+        margin-bottom: 1rem;
+    }
+    
+    .metric-value {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #fff;
+        margin-bottom: 0.5rem;
+    }
+    
+    .metric-subtitle {
+        color: #888;
+        font-size: 0.9rem;
+    }
+    
+    .chart-placeholder {
+        background: #1e1e38;
+        border: 1px solid #2a2a4a;
+        border-radius: 8px;
+        padding: 2rem;
+        text-align: center;
+        color: #888;
+        margin: 1rem 0;
+    }
+
+    /* Responsive pour petits écrans */
+    @media (max-width: 768px) {
+        .tabs { padding: 0 1rem; }
+        .filter-panel { padding: 1rem; }
+        .controls { padding: 1rem; }
+        th, td { padding: 0.4rem 0.3rem; font-size: 0.8rem; }
+        .metrics-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -244,7 +329,6 @@
             <option value="100">100</option>
         </select> tokens
     </label>
-    <span title="Critères recommandés : invest_score ≥ 75, rug_score < 30, liquidity > 50 k$">❓</span>
     
     <!-- Contrôle auto-refresh amélioré -->
     <div class="auto-refresh-section">
@@ -266,117 +350,208 @@
             <span id="refreshStatus">Auto-refresh: 30s</span>
         </div>
     </div>
-</div>
+  </div>
 
-  <!-- Légende des statuts -->
-  <div class="status-legend">
-    <div class="legend-item">
-        <span class="bonding-status bonding-created">Created</span>
-        <span>Nouveau token détecté</span>
-    </div>
-    <div class="legend-item">
-        <span class="bonding-status bonding-active">Active</span>
-        <span>Bonding curve en cours</span>
-    </div>
-    <div class="legend-item">
-        <span class="bonding-status bonding-completed">Completed</span>
-        <span>Bonding curve terminée</span>
-    </div>
-    <div class="legend-item">
-        <span class="bonding-status bonding-migrated">Migrated</span>
-        <span>Migré vers Raydium</span>
-    </div>
-    <div class="legend-item">
-        <span class="bonding-status bonding-terminated">Terminated</span>
-        <span>Bonding curve arrêtée</span>
+  <!-- Onglets -->
+  <div class="tabs-container">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('base', this)">📊 Données de Base</button>
+      <button class="tab" onclick="switchTab('dexscreener', this)">📈 DexScreener</button>
+      <button class="tab" onclick="switchTab('analysis', this)">🔬 Analyse</button>
     </div>
   </div>
 
-  <!-- Panneau des filtres -->
-  <div class="filter-panel">
-    <!-- Filtres temporels avec boutons présets -->
-    <div class="filter-group">
-      <label>🕒 Mis à jour depuis:</label>
-      <div class="preset-buttons">
-        <button class="preset-btn" onclick="setTimeFilter(15, 'minutes')">15min</button>
-        <button class="preset-btn" onclick="setTimeFilter(30, 'minutes')">30min</button>
-        <button class="preset-btn" onclick="setTimeFilter(1, 'hours')">1h</button>
-        <button class="preset-btn" onclick="setTimeFilter(6, 'hours')">6h</button>
-        <button class="preset-btn" onclick="setTimeFilter(24, 'hours')">24h</button>
-        <button class="preset-btn" onclick="clearTimeFilter()">Tout</button>
+  <!-- Contenu Onglet Données de Base -->
+  <div id="base-content" class="tab-content active">
+    <!-- Légende des statuts -->
+    <div class="status-legend">
+      <div class="legend-item">
+          <span class="bonding-status bonding-created">Created</span>
+          <span>Nouveau token détecté</span>
       </div>
-      <input type="number" id="filterTimeValue" class="time-filter" placeholder="Valeur" min="1">
-      <select id="filterTimeUnit" class="time-unit">
-        <option value="">-</option>
-        <option value="minutes">Minutes</option>
-        <option value="hours">Heures</option>
-        <option value="days">Jours</option>
-      </select>
+      <div class="legend-item">
+          <span class="bonding-status bonding-active">Active</span>
+          <span>Bonding curve en cours</span>
+      </div>
+      <div class="legend-item">
+          <span class="bonding-status bonding-completed">Completed</span>
+          <span>Bonding curve terminée</span>
+      </div>
+      <div class="legend-item">
+          <span class="bonding-status bonding-migrated">Migrated</span>
+          <span>Migré vers Raydium</span>
+      </div>
+      <div class="legend-item">
+          <span class="bonding-status bonding-terminated">Terminated</span>
+          <span>Bonding curve arrêtée</span>
+      </div>
     </div>
-    
-    <div class="filter-group">
-      <label>Symbol:</label><input type="text" id="filterSymbol" placeholder="Symbol (e.g., DNT)">
+
+    <!-- Panneau des filtres -->
+    <div class="filter-panel">
+      <!-- Filtres temporels avec boutons présets -->
+      <div class="filter-group">
+        <label>🕒 Mis à jour depuis:</label>
+        <div class="preset-buttons">
+          <button class="preset-btn" onclick="setTimeFilter(15, 'minutes')">15min</button>
+          <button class="preset-btn" onclick="setTimeFilter(30, 'minutes')">30min</button>
+          <button class="preset-btn" onclick="setTimeFilter(1, 'hours')">1h</button>
+          <button class="preset-btn" onclick="setTimeFilter(6, 'hours')">6h</button>
+          <button class="preset-btn" onclick="setTimeFilter(24, 'hours')">24h</button>
+          <button class="preset-btn" onclick="clearTimeFilter()">Tout</button>
+        </div>
+        <input type="number" id="filterTimeValue" class="time-filter" placeholder="Valeur" min="1">
+        <select id="filterTimeUnit" class="time-unit">
+          <option value="">-</option>
+          <option value="minutes">Minutes</option>
+          <option value="hours">Heures</option>
+          <option value="days">Jours</option>
+        </select>
+      </div>
       
-      <!-- Nouveau filtre Bonding Curve -->
-      <label>🔗 Bonding Curve:</label>
-      <select id="filterBondingStatus" class="bonding-filter">
-        <option value="">Tous les statuts</option>
-        <option value="created">Created (Nouveau)</option>
-        <option value="active">Active (En cours)</option>
-        <option value="completed">Completed (Terminée)</option>
-        <option value="migrated">Migrated (Migrée)</option>
-        <option value="terminated">Terminated (Arrêtée)</option>
-        <option value="unknown">Unknown (Inconnu)</option>
-      </select>
+      <div class="filter-group">
+        <label>Symbol:</label><input type="text" id="filterSymbol" placeholder="Symbol (e.g., DNT)">
+        
+        <!-- Nouveau filtre Bonding Curve -->
+        <label>🔗 Bonding Curve:</label>
+        <select id="filterBondingStatus" class="bonding-filter">
+          <option value="">Tous les statuts</option>
+          <option value="created">Created (Nouveau)</option>
+          <option value="active">Active (En cours)</option>
+          <option value="completed">Completed (Terminée)</option>
+          <option value="migrated">Migrated (Migrée)</option>
+          <option value="terminated">Terminated (Arrêtée)</option>
+          <option value="unknown">Unknown (Inconnu)</option>
+        </select>
+        
+        <label>📊 Progress Min (%):</label><input type="number" id="filterProgressMin" placeholder="Min %" min="0" max="100" step="1" style="width: 80px;">
+        <label>Progress Max (%):</label><input type="number" id="filterProgressMax" placeholder="Max %" min="0" max="100" step="1" style="width: 80px;">
+        
+        <label>Price Min ($):</label><input type="number" id="filterPriceMin" placeholder="Min" step="0.000001">
+        <label>Price Max ($):</label><input type="number" id="filterPriceMax" placeholder="Max" step="0.000001">
+      </div>
       
-      <label>📊 Progress Min (%):</label><input type="number" id="filterProgressMin" placeholder="Min %" min="0" max="100" step="1" style="width: 80px;">
-      <label>Progress Max (%):</label><input type="number" id="filterProgressMax" placeholder="Max %" min="0" max="100" step="1" style="width: 80px;">
+      <div class="filter-group">
+        <label>Score Min:</label><input type="number" id="filterScoreMin" placeholder="Min" step="0.1">
+        <label>Score Max:</label><input type="number" id="filterScoreMax" placeholder="Max" step="0.1">
+        <label>Liquidity Min ($):</label><input type="number" id="filterLiquidityMin" placeholder="Min 5000" title="Recommandé: ≥ 5,000 $">
+        <label>Liquidity Max ($):</label><input type="number" id="filterLiquidityMax" placeholder="Max">
+        <label>Volume Min ($):</label><input type="number" id="filterVolumeMin" placeholder="Min 100000" title="Recommandé: ≥ 100,000 $">
+        <label>Volume Max ($):</label><input type="number" id="filterVolumeMax" placeholder="Max">
+      </div>
       
-      <label>Price Min ($):</label><input type="number" id="filterPriceMin" placeholder="Min" step="0.000001">
-      <label>Price Max ($):</label><input type="number" id="filterPriceMax" placeholder="Max" step="0.000001">
+      <div class="filter-group">
+        <label>Holders Min:</label><input type="number" id="filterHoldersMin" placeholder="Min 500" title="Recommandé: ≥ 500">
+        <label>Holders Max:</label><input type="number" id="filterHoldersMax" placeholder="Max">
+        <label>Age Min (h):</label><input type="number" id="filterAgeMin" placeholder="Min 6" step="0.1" title="Recommandé: ≥ 6 heures">
+        <label>Age Max (h):</label><input type="number" id="filterAgeMax" placeholder="Max" step="0.1">
+        <label>Risk Min:</label><input type="number" id="filterRiskMin" placeholder="Min">
+        <label>Risk Max:</label><input type="number" id="filterRiskMax" placeholder="Max 50" title="Recommandé: ≤ 50">
+        <label>Date Découverte:</label><input type="date" id="filterDiscoveredAt" placeholder="Discovered At">
+      </div>
     </div>
-    
-    <div class="filter-group">
-      <label>Score Min:</label><input type="number" id="filterScoreMin" placeholder="Min" step="0.1">
-      <label>Score Max:</label><input type="number" id="filterScoreMax" placeholder="Max" step="0.1">
-      <label>Liquidity Min ($):</label><input type="number" id="filterLiquidityMin" placeholder="Min 5000" title="Recommandé: ≥ 5,000 $">
-      <label>Liquidity Max ($):</label><input type="number" id="filterLiquidityMax" placeholder="Max">
-      <label>Volume Min ($):</label><input type="number" id="filterVolumeMin" placeholder="Min 100000" title="Recommandé: ≥ 100,000 $">
-      <label>Volume Max ($):</label><input type="number" id="filterVolumeMax" placeholder="Max">
-    </div>
-    
-    <div class="filter-group">
-      <label>Holders Min:</label><input type="number" id="filterHoldersMin" placeholder="Min 500" title="Recommandé: ≥ 500">
-      <label>Holders Max:</label><input type="number" id="filterHoldersMax" placeholder="Max">
-      <label>Age Min (h):</label><input type="number" id="filterAgeMin" placeholder="Min 6" step="0.1" title="Recommandé: ≥ 6 heures">
-      <label>Age Max (h):</label><input type="number" id="filterAgeMax" placeholder="Max" step="0.1">
-      <label>Risk Min:</label><input type="number" id="filterRiskMin" placeholder="Min">
-      <label>Risk Max:</label><input type="number" id="filterRiskMax" placeholder="Max 50" title="Recommandé: ≤ 50">
-      <label>Date Découverte:</label><input type="date" id="filterDiscoveredAt" placeholder="Discovered At">
-    </div>
+
+    <!-- Tableau données de base -->
+    <table id="baseTable">
+      <thead>
+        <tr>
+          <th>⭐</th>
+          <th>Symbol</th>
+          <th>Price ($)</th>
+          <th>Score</th>
+          <th>Liquidity ($)</th>
+          <th>Volume 24h ($)</th>
+          <th>Holders</th>
+          <th>Age (h)</th>
+          <th>Risk</th>
+          <th>Bonding Curve</th>
+          <th>Progress</th>
+          <th>Dernière MAJ</th>
+          <th>Découvert</th>
+        </tr>
+      </thead>
+      <tbody id="baseTbody"></tbody>
+    </table>
   </div>
 
-  <!-- Tableau -->
-  <table id="tokensTable">
-    <thead>
-      <tr>
-        <th>⭐</th>
-        <th>Symbol</th>
-        <th>Price ($)</th>
-        <th>Score</th>
-        <th>Liquidity ($)</th>
-        <th>Volume 24h ($)</th>
-        <th>Holders</th>
-        <th>Age (h)</th>
-        <th>Risk</th>
-        <th>Bonding Curve</th>
-        <th>Progress</th>
-        <th>Dernière MAJ</th>
-        <th>Découvert</th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
+  <!-- Contenu Onglet DexScreener -->
+  <div id="dexscreener-content" class="tab-content">
+    <div class="filter-panel">
+      <div class="filter-group">
+        <label>Symbol:</label><input type="text" id="dexFilterSymbol" placeholder="Symbol">
+        <label>Prix DexScreener Min ($):</label><input type="number" id="dexFilterPriceMin" placeholder="Min" step="0.000001">
+        <label>Prix DexScreener Max ($):</label><input type="number" id="dexFilterPriceMax" placeholder="Max" step="0.000001">
+        <label>Market Cap Min ($):</label><input type="number" id="dexFilterMarketCapMin" placeholder="Min">
+        <label>Market Cap Max ($):</label><input type="number" id="dexFilterMarketCapMax" placeholder="Max">
+      </div>
+      <div class="filter-group">
+        <label>Volume 1h Min:</label><input type="number" id="dexFilterVolume1hMin" placeholder="Min">
+        <label>Volume 6h Min:</label><input type="number" id="dexFilterVolume6hMin" placeholder="Min">
+        <label>Volume 24h Min:</label><input type="number" id="dexFilterVolume24hMin" placeholder="Min">
+        <label>Transactions 24h Min:</label><input type="number" id="dexFilterTxns24hMin" placeholder="Min">
+      </div>
+      <div class="filter-group">
+        <label>Dernière MAJ DexScreener:</label>
+        <div class="preset-buttons">
+          <button class="preset-btn" onclick="setDexTimeFilter(1, 'hours')">1h</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(6, 'hours')">6h</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(24, 'hours')">24h</button>
+          <button class="preset-btn" onclick="clearDexTimeFilter()">Tout</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tableau DexScreener -->
+    <table id="dexscreenerTable">
+      <thead>
+        <tr>
+          <th>⭐</th>
+          <th>Symbol</th>
+          <th>Prix DS ($)</th>
+          <th>Market Cap ($)</th>
+          <th>Liq. Base</th>
+          <th>Liq. Quote ($)</th>
+          <th>Vol 1h ($)</th>
+          <th>Vol 6h ($)</th>
+          <th>Vol 24h ($)</th>
+          <th>Δ Prix 1h (%)</th>
+          <th>Δ Prix 6h (%)</th>
+          <th>Δ Prix 24h (%)</th>
+          <th>Txns 1h</th>
+          <th>Txns 6h</th>
+          <th>Txns 24h</th>
+          <th>Buys 1h</th>
+          <th>Sells 1h</th>
+          <th>Buys 24h</th>
+          <th>Sells 24h</th>
+          <th>URL DexScreener</th>
+          <th>Créé le</th>
+          <th>MAJ DS</th>
+        </tr>
+      </thead>
+      <tbody id="dexscreenerTbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Contenu Onglet Analyse -->
+  <div id="analysis-content" class="tab-content">
+    <div class="analysis-container">
+      <h2>📊 Analyse des Données</h2>
+      
+      <div class="metrics-grid" id="analysisMetrics">
+        <!-- Les métriques seront générées dynamiquement -->
+      </div>
+      
+      <div class="chart-placeholder">
+        📈 Graphiques d'analyse en temps réel
+        <br><br>
+        • Distribution des scores d'investissement<br>
+        • Évolution des volumes 24h<br>
+        • Répartition par statut bonding curve<br>
+        • Corrélation price vs liquidity
+      </div>
+    </div>
+  </div>
 
   <!-- Pagination -->
   <div class="pagination">
@@ -387,24 +562,45 @@
 
   <script>
     let data = [], filteredData = [], currentPage = 1, perPage = 10;
-    let refreshInterval = 30000; // 30 secondes par défaut
+    let refreshInterval = 30000;
     let refreshTimer = null;
-    let isAutoRefreshEnabled = true; // Nouvel état
+    let isAutoRefreshEnabled = true;
+    let currentTab = 'base';
+
+    // === GESTION DES ONGLETS ===
+    function switchTab(tabName, button) {
+      // Masquer tous les contenus d'onglets
+      document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+      });
+      
+      // Désactiver tous les onglets
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      
+      // Activer l'onglet et le contenu sélectionnés
+      document.getElementById(tabName + '-content').classList.add('active');
+      button.classList.add('active');
+      
+      currentTab = tabName;
+      
+      // Rendre la page selon l'onglet actif
+      renderPage();
+    }
 
     // === FONCTIONS UTILITAIRES ===
     function parseDateTime(dateString) {
       if (!dateString) return null;
       
-      // Si la date ne contient pas d'info timezone, on considère qu'elle est déjà locale
       if (dateString.includes('T') || dateString.includes('Z')) {
         return new Date(dateString);
       } else {
-        // Format "YYYY-MM-DD HH:MM:SS" - considéré comme local
         return new Date(dateString.replace(' ', 'T'));
       }
     }
 
-    // === FONCTIONS AUTO-REFRESH AMÉLIORÉES ===
+    // === FONCTIONS AUTO-REFRESH ===
     function toggleAutoRefresh() {
         isAutoRefreshEnabled = !isAutoRefreshEnabled;
         const toggle = document.getElementById('autoRefreshToggle');
@@ -415,13 +611,11 @@
             indicator.classList.remove('paused');
             indicator.classList.add('active');
             startAutoRefresh();
-            console.log('🔄 Auto-refresh enabled');
         } else {
             toggle.classList.remove('active');
             indicator.classList.remove('active');
             indicator.classList.add('paused');
             stopAutoRefresh();
-            console.log('⏸️ Auto-refresh paused');
         }
         
         updateRefreshStatus();
@@ -437,7 +631,6 @@
         }
         
         updateRefreshStatus();
-        console.log(`🔄 Auto-refresh interval updated to ${refreshInterval/1000}s`);
     }
 
     function startAutoRefresh() {
@@ -497,7 +690,6 @@
 
     // === FONCTION PROGRESSION BONDING CURVE ===
     function getBondingProgressDisplay(status, progress) {
-        // Afficher seulement pour les statuts active et created
         if (!status || !['active', 'created'].includes(status.toLowerCase())) {
             return '<div class="no-progress">N/A</div>';
         }
@@ -508,7 +700,6 @@
             return '<div class="no-progress">0%</div>';
         }
         
-        // Déterminer la classe CSS basée sur le pourcentage
         let progressClass = '';
         if (progressValue >= 90) {
             progressClass = 'completed';
@@ -523,8 +714,8 @@
             </div>
         `;
     }
+
     function getBondingCurveDisplay(status) {
-        console.debug('Bonding curve status received:', status, typeof status);
         if (!status) return '<span class="bonding-status bonding-unknown">Unknown</span>';
         
         const statusLower = String(status).toLowerCase().trim();
@@ -546,7 +737,6 @@
       const date = parseDateTime(dateString);
       if (!date || isNaN(date.getTime())) return 'Invalide';
       
-      // Format français : JJ/MM/AAAA HH:MM
       return date.toLocaleString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
@@ -621,7 +811,6 @@
     // === FONCTIONS DE DONNÉES ===
     async function fetchData() {
       if (!isAutoRefreshEnabled) {
-        console.log('⏸️ Auto-refresh is disabled, skipping fetch');
         return;
       }
       
@@ -630,20 +819,26 @@
         const response = await fetch('/api/tokens-detail');
         if (!response.ok) throw new Error('Réponse API invalide');
         data = await response.json();
-        console.log('Données brutes:', data);
         filteredData = [...data];
         currentPage = 1;
         renderPage();
+        
+        // Mettre à jour l'analyse si on est sur cet onglet
+        if (currentTab === 'analysis') {
+          updateAnalysis();
+        }
       } catch (error) {
         console.error('Erreur lors du chargement des données:', error);
-        document.getElementById('tbody').innerHTML = '<tr><td colspan="12">Erreur lors du chargement des données</td></tr>';
-      }
-      finally {
+        const tbody = document.getElementById('baseTbody');
+        if (tbody) {
+          tbody.innerHTML = '<tr><td colspan="13">Erreur lors du chargement des données</td></tr>';
+        }
+      } finally {
         showRefreshIndicator(false);
-    }
+      }
     }
 
-    // === FONCTIONS DE FILTRAGE AMÉLIORÉES ===
+    // === FONCTIONS DE FILTRAGE ===
     function setTimeFilter(value, unit) {
       document.getElementById('filterTimeValue').value = value;
       document.getElementById('filterTimeUnit').value = unit;
@@ -662,6 +857,16 @@
       event.target.classList.add('active');
       
       applyFilters();
+    }
+
+    function setDexTimeFilter(value, unit) {
+      // Logique pour filtrer les données DexScreener par temps
+      applyDexFilters();
+    }
+
+    function clearDexTimeFilter() {
+      // Logique pour effacer les filtres temps DexScreener
+      applyDexFilters();
     }
 
     function applyFilters() {
@@ -719,7 +924,38 @@
         );
       });
 
-      console.log('Filtered data:', filteredData.length, 'rows', filters);
+      currentPage = 1;
+      renderPage();
+    }
+
+    function applyDexFilters() {
+      // Filtres spécifiques pour l'onglet DexScreener
+      const dexFilters = {
+        symbol: document.getElementById('dexFilterSymbol').value.toLowerCase().trim(),
+        priceMin: document.getElementById('dexFilterPriceMin').value ? parseFloat(document.getElementById('dexFilterPriceMin').value) : null,
+        priceMax: document.getElementById('dexFilterPriceMax').value ? parseFloat(document.getElementById('dexFilterPriceMax').value) : null,
+        marketCapMin: document.getElementById('dexFilterMarketCapMin').value ? parseFloat(document.getElementById('dexFilterMarketCapMin').value) : null,
+        marketCapMax: document.getElementById('dexFilterMarketCapMax').value ? parseFloat(document.getElementById('dexFilterMarketCapMax').value) : null,
+        volume1hMin: document.getElementById('dexFilterVolume1hMin').value ? parseFloat(document.getElementById('dexFilterVolume1hMin').value) : null,
+        volume6hMin: document.getElementById('dexFilterVolume6hMin').value ? parseFloat(document.getElementById('dexFilterVolume6hMin').value) : null,
+        volume24hMin: document.getElementById('dexFilterVolume24hMin').value ? parseFloat(document.getElementById('dexFilterVolume24hMin').value) : null,
+        txns24hMin: document.getElementById('dexFilterTxns24hMin').value ? parseFloat(document.getElementById('dexFilterTxns24hMin').value) : null
+      };
+
+      filteredData = data.filter(row => {
+        return (
+          (!dexFilters.symbol || row.symbol.toLowerCase().includes(dexFilters.symbol)) &&
+          (dexFilters.priceMin === null || (row.dexscreener_price_usd || 0) >= dexFilters.priceMin) &&
+          (dexFilters.priceMax === null || (row.dexscreener_price_usd || 0) <= dexFilters.priceMax) &&
+          (dexFilters.marketCapMin === null || (row.dexscreener_market_cap || 0) >= dexFilters.marketCapMin) &&
+          (dexFilters.marketCapMax === null || (row.dexscreener_market_cap || 0) <= dexFilters.marketCapMax) &&
+          (dexFilters.volume1hMin === null || (row.dexscreener_volume_1h || 0) >= dexFilters.volume1hMin) &&
+          (dexFilters.volume6hMin === null || (row.dexscreener_volume_6h || 0) >= dexFilters.volume6hMin) &&
+          (dexFilters.volume24hMin === null || (row.dexscreener_volume_24h || 0) >= dexFilters.volume24hMin) &&
+          (dexFilters.txns24hMin === null || (row.dexscreener_txns_24h || 0) >= dexFilters.txns24hMin)
+        );
+      });
+
       currentPage = 1;
       renderPage();
     }
@@ -728,7 +964,20 @@
     function renderPage() {
       const start = (currentPage - 1) * perPage;
       const rows = filteredData.slice(start, start + perPage);
-      const tbody = document.getElementById('tbody');
+      
+      if (currentTab === 'base') {
+        renderBaseTable(rows);
+      } else if (currentTab === 'dexscreener') {
+        renderDexScreenerTable(rows);
+      } else if (currentTab === 'analysis') {
+        updateAnalysis();
+      }
+      
+      updatePagination();
+    }
+
+    function renderBaseTable(rows) {
+      const tbody = document.getElementById('baseTbody');
       
       if (rows.length === 0) {
         tbody.innerHTML = '<tr><td colspan="13" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
@@ -760,8 +1009,142 @@
           `;
         }).join('');
       }
+    }
+
+    function renderDexScreenerTable(rows) {
+      const tbody = document.getElementById('dexscreenerTbody');
       
-      document.getElementById("pageInfo").textContent = `Page ${currentPage} / ${Math.ceil(filteredData.length / perPage)} (${filteredData.length} tokens)`;
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="22" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
+      } else {
+        tbody.innerHTML = rows.map(r => {
+          const dexUrl = r.dexscreener_dexscreener_url || '#';
+          const dexUrlDisplay = dexUrl !== '#' ? 
+            `<a href="${dexUrl}" target="_blank">🔗 Voir</a>` : 
+            'N/A';
+          
+          const pairCreatedAt = formatLocalDateTime(r.dexscreener_pair_created_at);
+          const lastDexUpdate = formatLocalDateTime(r.dexscreener_last_dexscreener_update);
+          
+          return `
+            <tr>
+              <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
+              <td><strong>${r.symbol}</strong></td>
+              <td class="price">${(r.dexscreener_price_usd || 0).toFixed(8)}</td>
+              <td>${Math.round(r.dexscreener_market_cap || 0).toLocaleString()}</td>
+              <td>${(r.dexscreener_liquidity_base || 0).toFixed(2)}</td>
+              <td>${Math.round(r.dexscreener_liquidity_quote || 0).toLocaleString()}</td>
+              <td>${Math.round(r.dexscreener_volume_1h || 0).toLocaleString()}</td>
+              <td>${Math.round(r.dexscreener_volume_6h || 0).toLocaleString()}</td>
+              <td>${Math.round(r.dexscreener_volume_24h || 0).toLocaleString()}</td>
+              <td style="color: ${(r.dexscreener_price_change_1h || 0) >= 0 ? '#00ff88' : '#ff6b6b'}">${(r.dexscreener_price_change_1h || 0).toFixed(2)}%</td>
+              <td style="color: ${(r.dexscreener_price_change_6h || 0) >= 0 ? '#00ff88' : '#ff6b6b'}">${(r.dexscreener_price_change_6h || 0).toFixed(2)}%</td>
+              <td style="color: ${(r.dexscreener_price_change_h24 || 0) >= 0 ? '#00ff88' : '#ff6b6b'}">${(r.dexscreener_price_change_h24 || 0).toFixed(2)}%</td>
+              <td>${r.dexscreener_txns_1h || 0}</td>
+              <td>${r.dexscreener_txns_6h || 0}</td>
+              <td>${r.dexscreener_txns_24h || 0}</td>
+              <td style="color: #00ff88">${r.dexscreener_buys_1h || 0}</td>
+              <td style="color: #ff6b6b">${r.dexscreener_sells_1h || 0}</td>
+              <td style="color: #00ff88">${r.dexscreener_buys_24h || 0}</td>
+              <td style="color: #ff6b6b">${r.dexscreener_sells_24h || 0}</td>
+              <td>${dexUrlDisplay}</td>
+              <td>${pairCreatedAt}</td>
+              <td>${lastDexUpdate}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+
+    function updateAnalysis() {
+      const metricsContainer = document.getElementById('analysisMetrics');
+      
+      if (filteredData.length === 0) {
+        metricsContainer.innerHTML = '<div class="metric-card"><div class="metric-title">Aucune donnée à analyser</div></div>';
+        return;
+      }
+
+      // Calculer les métriques d'analyse
+      const totalTokens = filteredData.length;
+      const avgScore = filteredData.reduce((sum, token) => sum + (token.invest_score || 0), 0) / totalTokens;
+      const avgLiquidity = filteredData.reduce((sum, token) => sum + (token.liquidity_usd || 0), 0) / totalTokens;
+      const avgVolume = filteredData.reduce((sum, token) => sum + (token.volume_24h || 0), 0) / totalTokens;
+      const avgHolders = filteredData.reduce((sum, token) => sum + (token.holders || 0), 0) / totalTokens;
+      
+      const highScoreTokens = filteredData.filter(token => (token.invest_score || 0) >= 80).length;
+      const activeTokens = filteredData.filter(token => token.bonding_curve_status === 'active').length;
+      const migratedTokens = filteredData.filter(token => token.bonding_curve_status === 'migrated').length;
+      
+      const totalDexVolume = filteredData.reduce((sum, token) => sum + (token.dexscreener_volume_24h || 0), 0);
+      const avgDexPrice = filteredData.filter(token => (token.dexscreener_price_usd || 0) > 0)
+        .reduce((sum, token, _, arr) => sum + (token.dexscreener_price_usd || 0) / arr.length, 0);
+
+      metricsContainer.innerHTML = `
+        <div class="metric-card">
+          <div class="metric-title">📊 Tokens Analysés</div>
+          <div class="metric-value">${totalTokens}</div>
+          <div class="metric-subtitle">Dans la sélection actuelle</div>
+        </div>
+        
+        <div class="metric-card">
+          <div class="metric-title">⭐ Score Moyen</div>
+          <div class="metric-value">${avgScore.toFixed(1)}</div>
+          <div class="metric-subtitle">Score d'investissement</div>
+        </div>
+        
+        <div class="metric-card">
+          <div class="metric-title">🏆 Tokens Premium</div>
+          <div class="metric-value">${highScoreTokens}</div>
+          <div class="metric-subtitle">${((highScoreTokens/totalTokens)*100).toFixed(1)}% avec score ≥80</div>
+        </div>
+        
+        <div class="metric-card">
+          <div class="metric-title">💧 Liquidité Moyenne</div>
+          <div class="metric-value">${(avgLiquidity/1000).toFixed(1)}K</div>
+          <div class="metric-subtitle">Liquidité USD moyenne</div>
+        </div>
+        
+        <div class="metric-card">
+          <div class="metric-title">📈 Volume Moyen 24h</div>
+          <div class="metric-value">${(avgVolume/1000).toFixed(1)}K</div>
+          <div class="metric-subtitle">Volume moyen par token</div>
+        </div>
+        
+        <div class="metric-card">
+          <div class="metric-title">👥 Holders Moyen</div>
+          <div class="metric-value">${Math.round(avgHolders)}</div>
+          <div class="metric-subtitle">Nombre de détenteurs</div>
+        </div>
+        
+        <div class="metric-card">
+          <div class="metric-title">🔄 Tokens Actifs</div>
+          <div class="metric-value">${activeTokens}</div>
+          <div class="metric-subtitle">${((activeTokens/totalTokens)*100).toFixed(1)}% en bonding curve</div>
+        </div>
+        
+        <div class="metric-card">
+          <div class="metric-title">🚀 Tokens Migrés</div>
+          <div class="metric-value">${migratedTokens}</div>
+          <div class="metric-subtitle">${((migratedTokens/totalTokens)*100).toFixed(1)}% sur Raydium</div>
+        </div>
+        
+        <div class="metric-card">
+          <div class="metric-title">📊 Volume DexScreener</div>
+          <div class="metric-value">${(totalDexVolume/1000000).toFixed(2)}M</div>
+          <div class="metric-subtitle">Volume total 24h</div>
+        </div>
+        
+        <div class="metric-card">
+          <div class="metric-title">💰 Prix Moyen DS</div>
+          <div class="metric-value">${avgDexPrice.toFixed(6)}</div>
+          <div class="metric-subtitle">Prix moyen DexScreener</div>
+        </div>
+      `;
+    }
+
+    function updatePagination() {
+      document.getElementById("pageInfo").textContent = 
+        `Page ${currentPage} / ${Math.ceil(filteredData.length / perPage)} (${filteredData.length} tokens)`;
       document.getElementById("prevBtn").disabled = currentPage === 1;
       document.getElementById("nextBtn").disabled = currentPage === Math.ceil(filteredData.length / perPage);
     }
@@ -815,12 +1198,23 @@
 
     // === ÉVÉNEMENTS ===
     let debounceTimeout;
-    document.querySelectorAll('.filter-panel input, .filter-panel select').forEach(input => {
+    
+    // Filtres onglet base
+    document.querySelectorAll('#base-content .filter-panel input, #base-content .filter-panel select').forEach(input => {
       input.addEventListener('input', () => {
         clearTimeout(debounceTimeout);
         debounceTimeout = setTimeout(() => {
-          console.log(`Filter changed: ${input.id} = ${input.value}`);
           applyFilters();
+        }, 300);
+      });
+    });
+
+    // Filtres onglet DexScreener
+    document.querySelectorAll('#dexscreener-content .filter-panel input, #dexscreener-content .filter-panel select').forEach(input => {
+      input.addEventListener('input', () => {
+        clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(() => {
+          applyDexFilters();
         }, 300);
       });
     });
