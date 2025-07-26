@@ -27,11 +27,48 @@ from math import log
 from solana_monitor_c3 import start_monitoring
 import pytz
 
+
 LOCAL_TZ = pytz.timezone('Europe/Paris')
 
-# Configuration du logger
+# ✅ DÉFINIR LE LOGGER EN PREMIER
 logger = logging.getLogger('solana_monitoring')
 _monitoring_started = False
+
+
+try:
+    from performance_monitor import (
+        start_performance_monitoring, 
+        record_token_update, 
+        record_api_call,
+        set_enrichment_queue_size,
+        export_performance_report,
+        get_performance_summary
+    )
+    MONITORING_AVAILABLE = True
+    logger.info("✅ Performance monitoring module loaded")
+except ImportError as e:
+    logger.warning(f"⚠️ Performance monitoring not available: {e}")
+    MONITORING_AVAILABLE = False
+    
+    # Fonctions de fallback
+    def start_performance_monitoring(): pass
+    def record_token_update(address: str, update_time: float, success: bool = True): pass
+    def record_api_call(api_name: str, call_time: float): pass
+    def set_enrichment_queue_size(size: int): pass
+    def export_performance_report(): return None
+    def get_performance_summary(): return {}
+except Exception as e:
+    logger.error(f"❌ Error loading performance monitor: {e}")
+    MONITORING_AVAILABLE = False
+    
+    # Fonctions de fallback
+    def start_performance_monitoring(): pass
+    def record_token_update(address: str, update_time: float, success: bool = True): pass
+    def record_api_call(api_name: str, call_time: float): pass
+    def set_enrichment_queue_size(size: int): pass
+    def export_performance_report(): return None
+    def get_performance_summary(): return {}
+
 
 def get_local_timestamp():
     """Obtenir un timestamp dans la timezone locale"""
@@ -103,7 +140,7 @@ class InvestScanner:
     DEXSCREENER_API = "https://api.dexscreener.com/latest"
     IGNORED_TOKENS = {'SOL', 'USDC', 'USDT', 'BTC', 'ETH', 'BONK', 'WIF', 'JUP', 'ORCA', 'RAY'}
 
-    def __init__(self, database_path: str = "invest.db", telegram_token: str = None, telegram_chat_id: str = None,
+    def __init__(self, database_path: str = "../tokens.db", telegram_token: str = None, telegram_chat_id: str = None,
                  enable_early: bool = False, enable_social: bool = False, enable_holders: bool = False):
         self.database_path = database_path
         self.telegram_token = telegram_token
@@ -119,6 +156,8 @@ class InvestScanner:
         }
         self.setup_database()
         self.migrate_database()
+        start_performance_monitoring()
+        logger.info("📊 Performance monitoring started")
 
     # ---------- BASE DE DONNÉES ----------
     def setup_database(self):
@@ -256,7 +295,11 @@ class InvestScanner:
 
     # ---------- OUTILS HTTP ----------
     async def fetch_json(self, url: str, session: aiohttp.ClientSession, api_type: str, timeout: int = 10, max_retries: int = 3):
+        """Version modifiée avec monitoring des performances"""
         await self.rate_limiters[api_type].acquire()
+        
+        start_time = time.time()
+        
         for attempt in range(max_retries):
             try:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
@@ -266,11 +309,21 @@ class InvestScanner:
                         await asyncio.sleep(backoff)
                         continue
                     if resp.status == 200:
+                        # Enregistrer le temps d'appel API
+                        call_time = time.time() - start_time
+                        record_api_call(api_type, call_time)
                         return await resp.json()
                     logging.debug(f"HTTP {resp.status} for {url}")
+                    
+                    # Enregistrer l'échec
+                    call_time = time.time() - start_time
+                    record_api_call(f"{api_type}_error", call_time)
                     return None
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 if attempt == max_retries - 1:
+                    # Enregistrer l'échec final
+                    call_time = time.time() - start_time
+                    record_api_call(f"{api_type}_error", call_time)
                     logging.error(f"Failed to fetch {url} after {max_retries} attempts: {e}")
                     return None
                 backoff = (2 ** attempt) + random.uniform(0, 0.1)
@@ -519,9 +572,12 @@ class InvestScanner:
 
     async def enrich_token(self, token: Dict) -> Dict:
         address = token["address"]
+        start_time = time.time()
+        success = False
         logging.info(f"🔍 Enriching {token['symbol']} ({address})")
 
         try:
+            
             # Exécuter les requêtes en parallèle pour améliorer les performances
             dex_task = self.get_dexscreener_data(address)
             jup_task = self.check_jupiter_price(address)
@@ -565,10 +621,13 @@ class InvestScanner:
             enriched["bonding_curve_status"] = launch_data.get("bonding_curve_status")
             enriched["raydium_pool_address"] = launch_data.get("raydium_pool_address")
             enriched["invest_score"] = self.calculate_invest_score(enriched)
+
+            success = True
             return enriched
 
         except Exception as e:
             logging.error(f"Error enriching token {address}: {e}")
+            success = False
             # Retourner un token minimal en cas d'erreur
             return {
                 **token,
@@ -580,6 +639,10 @@ class InvestScanner:
                 "holders": 0,
                 "holder_distribution": "Error"
             }
+        finally:
+            # Enregistrer les métriques de performance
+            update_time = time.time() - start_time
+            record_token_update(address, update_time, success)
 
     async def batch_jupiter_check(self, addresses):
         async with aiohttp.ClientSession(connector=TCPConnector(limit=50)) as session:
@@ -751,6 +814,7 @@ def main():
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default='INFO',
                         help="Set logging level (default: INFO)")
+    parser.add_argument("--export-performance", action="store_true", help="Export performance report on exit")
 
     args = parser.parse_args()
 
@@ -760,7 +824,16 @@ def main():
     try:
         asyncio.run(monitoring_loop(args.log_level))
     except KeyboardInterrupt:
+
         print("\n✅ Monitor stopped by user.")
+        
+        # Exporter le rapport de performance si demandé
+        if args.export_performance:
+            try:
+                filename = export_performance_report()
+                print(f"📊 Performance report exported to: {filename}")
+            except Exception as e:
+                print(f"❌ Failed to export performance report: {e}")
     except Exception as e:
         logging.error(f"Fatal error: {e}", exc_info=True)
         

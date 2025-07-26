@@ -73,22 +73,43 @@ class TokenEnricher:
         """Ajouter un token à la queue d'enrichissement"""
         if self.is_running:
             await self.enrichment_queue.put(address)
-            logger.debug(f"🔄 Queued token for enrichment: {address}")
+            set_enrichment_queue_size(self.enrichment_queue.qsize())
+            logger.debug(f"🔄 Queued token for enrichment: {address} (queue size: {self.enrichment_queue.qsize()})")
     
     async def _enrichment_worker(self):
         """Worker qui enrichit les tokens en continu"""
         while self.is_running:
             try:
+
+                # Mettre à jour le nombre de tâches actives
+                from performance_monitor import set_active_enrichment_tasks
+                set_active_enrichment_tasks(1)
                 # Attendre un nouveau token (timeout de 10s)
                 address = await asyncio.wait_for(
                     self.enrichment_queue.get(), 
                     timeout=10.0
                 )
                 
+                set_enrichment_queue_size(self.enrichment_queue.qsize())
+
                 logger.info(f"🔍 Starting enrichment for: {address}")
-                await self._enrich_token(address)
-                
+
+                # Mesurer le temps d'enrichissement
+                start_time = time.time()
+                success = False
+
+                try:
+                    await self._enrich_token(address)
+                    success = True
+                except Exception as e:
+                    logger.error(f"Error enriching token {address}: {e}")
+                    success = False
+                finally:
+                    # Enregistrer les métriques
+                    enrichment_time = time.time() - start_time
+                    record_token_update(address, enrichment_time, success)
                 # Délai entre les enrichissements pour éviter le rate limiting
+
                 await asyncio.sleep(3)
                 
             except asyncio.TimeoutError:
@@ -97,17 +118,40 @@ class TokenEnricher:
             except Exception as e:
                 logger.error(f"Error in enrichment worker: {e}")
                 await asyncio.sleep(5)
+            finally:
+                # Remettre à 0 les tâches actives
+                set_active_enrichment_tasks(0)
     
     async def _fetch_json(self, url: str, timeout: int = 10) -> dict:
         """Fetch JSON avec gestion d'erreur"""
+        # Déterminer le type d'API à partir de l'URL
+        api_type = "unknown"
+        if "jupiter" in url:
+            api_type = "jupiter"
+        elif "dexscreener" in url:
+            api_type = "dexscreener"
+        elif "rugcheck" in url:
+            api_type = "rugcheck"
+        elif "helius" in url:
+            api_type = "helius"
+        elif "solscan" in url:
+            api_type = "solscan"
+        
+        start_time = time.time()
         try:
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                 if resp.status == 200:
+                    call_time = time.time() - start_time
+                    record_api_call(api_type, call_time)
                     return await resp.json()
                 else:
+                    call_time = time.time() - start_time
+                    record_api_call(f"{api_type}_error", call_time)
                     logger.debug(f"HTTP {resp.status} for {url}")
                     return {}
         except Exception as e:
+            call_time = time.time() - start_time
+            record_api_call(f"{api_type}_error", call_time)
             logger.debug(f"Error fetching {url}: {e}")
             return {}
     
