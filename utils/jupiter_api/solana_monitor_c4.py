@@ -146,6 +146,67 @@ class OptimizedTokenEnricher:
                 logger.error(f"Error in batch processor: {e}")
                 await asyncio.sleep(5)
     
+    async def debug_bonding_curve_progress(address: str):
+        """Debug pour comparer les différentes sources de progression"""
+        import aiohttp
+        
+        results = {}
+        
+        # 1. Test API Pump.fun
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://frontend-api.pump.fun/coins/{address}"
+                async with session.get(url, timeout=8) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        results['pump_fun'] = {
+                            'market_cap': data.get("market_cap", 0),
+                            'complete': data.get("complete", False),
+                            'virtual_sol_reserves': data.get("virtual_sol_reserves"),
+                            'virtual_token_reserves': data.get("virtual_token_reserves"),
+                            'real_sol_reserves': data.get("real_sol_reserves"),
+                            'real_token_reserves': data.get("real_token_reserves"),
+                            'total_supply': data.get("total_supply"),
+                            'progress': data.get("progress")  # Peut-être que cette valeur existe
+                        }
+                    else:
+                        results['pump_fun'] = {'error': f'HTTP {resp.status}'}
+        except Exception as e:
+            results['pump_fun'] = {'error': str(e)}
+        
+        # 2. Test DexScreener
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.dexscreener.com/latest/dex/tokens/{address}"
+                async with session.get(url, timeout=5) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        pairs = data.get("pairs", [])
+                        if pairs:
+                            best_pair = pairs[0]
+                            results['dexscreener'] = {
+                                'market_cap': best_pair.get("marketCap"),
+                                'liquidity': best_pair.get("liquidity", {}).get("usd"),
+                                'dex_id': best_pair.get("dexId"),
+                                'pair_address': best_pair.get("pairAddress")
+                            }
+                    else:
+                        results['dexscreener'] = {'error': f'HTTP {resp.status}'}
+        except Exception as e:
+            results['dexscreener'] = {'error': str(e)}
+        
+        # 3. Calcul actuel
+        market_cap = results.get('pump_fun', {}).get('market_cap', 0)
+        if market_cap:
+            current_calc = min((market_cap / 69000) * 100, 99.9)
+            results['my_calculation'] = {
+                'market_cap_used': market_cap,
+                'target_used': 69000,
+                'percentage_calculated': round(current_calc, 1)
+            }
+        
+        return results
+
     async def _enrich_token_fast(self, address: str) -> Dict:
         """Version rapide de l'enrichissement"""
         try:
@@ -153,7 +214,8 @@ class OptimizedTokenEnricher:
             tasks = [
                 self._get_metadata_fast(address),
                 self._get_market_data_fast(address),
-                self._get_holders_fast(address)
+                self._get_holders_fast(address),
+                get_bonding_curve_progress(address)
             ]
             
             results = await asyncio.wait_for(
@@ -171,6 +233,11 @@ class OptimizedTokenEnricher:
             enriched["invest_score"] = self._calculate_score_fast(enriched)
             enriched["is_tradeable"] = bool(enriched.get("price_usdc", 0) > 0)
             
+            # Log du progress pour debug
+            progress = enriched.get("progress_percentage", 0)
+            if progress > 0:
+                logger.debug(f"💎 {enriched.get('symbol', 'UNKNOWN')} progress: {progress}%")
+
             return enriched
             
         except Exception as e:
@@ -179,7 +246,8 @@ class OptimizedTokenEnricher:
                 "address": address,
                 "symbol": "ERROR",
                 "invest_score": 0,
-                "is_tradeable": False
+                "is_tradeable": False,
+                "progress_percentage": 0.0
             }
     
     async def _get_metadata_fast(self, address: str) -> Dict:
@@ -328,12 +396,16 @@ class OptimizedTokenEnricher:
                     symbol = ?, name = ?, decimals = ?, price_usdc = ?, 
                     liquidity_usd = ?, volume_24h = ?, rug_score = ?,
                     holders = ?, is_tradeable = ?, invest_score = ?,
+                    bonding_curve_progress = ?,
                     updated_at = ?
                 WHERE address = ?
             '''
             
             batch_data = []
             for token in enriched_tokens:
+
+                progress = token.get("progress_percentage", 0.0)
+                
                 batch_data.append((
                     token.get("symbol", "UNKNOWN"),
                     token.get("name", "Unknown"),
@@ -345,21 +417,415 @@ class OptimizedTokenEnricher:
                     token.get("holders"),
                     token.get("is_tradeable"),
                     token.get("invest_score"),
+                    progress,
                     local_timestamp,
                     token["address"]
                 ))
             
             cursor.executemany(update_sql, batch_data)
             conn.commit()
+
+            # Log pour debug
+            progress_tokens = [t for t in enriched_tokens if t.get("progress_percentage", 0) > 0]
+            if progress_tokens:
+                logger.info(f"💾 Batch updated {len(enriched_tokens)} tokens ({len(progress_tokens)} with progress)")
+            else:
+                logger.info(f"💾 Batch updated {len(enriched_tokens)} tokens in DB")
             
-            logger.info(f"💾 Batch updated {len(enriched_tokens)} tokens in DB")
+           
             
         except sqlite3.Error as e:
             logger.error(f"Batch DB update error: {e}")
         finally:
             conn.close()
-    
 
+async def determine_bonding_curve_status(address: str, client: AsyncClient) -> str:
+    """
+    Détermine le statut réel de la bonding curve en analysant les données on-chain
+    """
+    try:
+        # 1. Vérifier d'abord DexScreener pour voir si le token est tradé
+        dex_status = await check_dexscreener_status(address)
+        
+        # 2. Vérifier les données Pump.fun
+        pump_status = await check_pump_fun_status(address)
+        
+        # 3. Vérifier les pools Raydium
+        raydium_status = await check_raydium_pools(address)
+        
+        # Priorité 1: Token migré vers Raydium
+        if raydium_status.get("has_pool", False):
+            return "migrated"
+        
+        # Priorité 2: Token présent sur DexScreener
+        if dex_status.get("has_pairs", False):
+            dex_id = dex_status.get("dex_id", "").lower()
+            liquidity = dex_status.get("liquidity_usd", 0)
+            
+            # Si c'est sur Raydium via DexScreener = migrated
+            if "raydium" in dex_id:
+                return "migrated"
+            
+            # Si c'est sur Pump.fun via DexScreener
+            if "pump" in dex_id or liquidity > 0:
+                # Vérifier le statut Pump.fun
+                if pump_status.get("bonding_curve_complete", False):
+                    return "completed"
+                else:
+                    return "active"  # ← Correction principale !
+            
+            # Autres DEX = probablement completed ou migrated
+            return "completed"
+        
+        # Priorité 3: Seulement visible sur Pump.fun
+        if pump_status.get("exists", False):
+            if pump_status.get("is_active", False):
+                return "active"
+            elif pump_status.get("bonding_curve_complete", False):
+                return "completed"
+            else:
+                return "created"
+        
+        return "unknown"
+        
+    except Exception as e:
+        logger.error(f"Error determining bonding curve status for {address}: {e}")
+        return "unknown"
+
+
+async def check_dexscreener_status(address: str) -> dict:
+    """Vérifier le statut sur DexScreener"""
+    import aiohttp
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.dexscreener.com/latest/dex/tokens/{address}"
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    pairs = data.get("pairs", [])
+                    
+                    if pairs:
+                        # Analyser les paires pour déterminer le statut
+                        for pair in pairs:
+                            dex_id = pair.get("dexId", "").lower()
+                            liquidity = pair.get("liquidity", {}).get("usd", 0)
+                            
+                            return {
+                                "has_pairs": True,
+                                "dex_id": dex_id,
+                                "liquidity_usd": liquidity,
+                                "is_raydium": "raydium" in dex_id,
+                                "is_pump_fun": "pump" in dex_id or "pump.fun" in dex_id.replace(".", "")
+                            }
+                    
+                    return {"has_pairs": False}
+    except Exception as e:
+        logger.debug(f"Error checking DexScreener for {address}: {e}")
+    
+    return {"has_pairs": False}
+
+async def check_pump_fun_status(address: str) -> dict:
+    """Vérifier le statut sur Pump.fun via leur API"""
+    import aiohttp
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # API Pump.fun (exemple - ajuster selon leur vraie API)
+            url = f"https://frontend-api.pump.fun/coins/{address}"
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    # Analyser les données Pump.fun
+                    market_cap = data.get("market_cap", 0)
+                    complete = data.get("complete", False)
+                    raydium_pool = data.get("raydium_pool")
+                    
+                    return {
+                        "exists": True,
+                        "is_active": market_cap > 0 and not complete,
+                        "bonding_curve_complete": complete,
+                        "market_cap": market_cap,
+                        "has_raydium_pool": raydium_pool is not None
+                    }
+                elif resp.status == 404:
+                    return {"exists": False}
+    except Exception as e:
+        logger.debug(f"Error checking Pump.fun for {address}: {e}")
+    
+    return {"exists": False}
+
+
+
+
+
+async def check_raydium_pools(address: str) -> dict:
+    """Vérifier s'il existe des pools Raydium pour ce token"""
+    import aiohttp
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # API Raydium pour chercher les pools
+            url = f"https://api.raydium.io/v2/sdk/liquidity/mainnet"
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    # Chercher des pools contenant notre token
+                    for pool in data.get("official", []) + data.get("unOfficial", []):
+                        base_mint = pool.get("baseMint", "")
+                        quote_mint = pool.get("quoteMint", "")
+                        
+                        if base_mint == address or quote_mint == address:
+                            return {
+                                "has_pool": True,
+                                "pool_id": pool.get("id"),
+                                "liquidity": pool.get("liquidity", 0),
+                                "is_official": pool in data.get("official", [])
+                            }
+    except Exception as e:
+        logger.debug(f"Error checking Raydium pools for {address}: {e}")
+    
+    return {"has_pool": False}  
+
+
+def should_update_token_status(old_status: str, new_status: str) -> bool:
+    """Détermine si le statut doit être mis à jour basé sur la priorité"""
+    
+    # Hiérarchie des statuts (plus élevé = plus prioritaire)
+    status_priority = {
+        "unknown": 0,
+        "created": 1,
+        "active": 2,
+        "completed": 3,
+        "terminated": 3,  # Même priorité que completed
+        "migrated": 4     # Plus haute priorité
+    }
+    
+    old_priority = status_priority.get(old_status, 0)
+    new_priority = status_priority.get(new_status, 0)
+    
+    # Mettre à jour si le nouveau statut a une priorité plus élevée
+    # ou si c'est une transition logique
+    return new_priority > old_priority or is_valid_status_transition(old_status, new_status)
+
+def is_valid_status_transition(from_status: str, to_status: str) -> bool:
+    """Vérifie si la transition de statut est logique"""
+    
+    valid_transitions = {
+        "created": ["active", "terminated"],
+        "active": ["completed", "terminated"],
+        "completed": ["migrated", "terminated"],
+        "terminated": [],  # Les tokens terminés ne changent plus
+        "migrated": [],    # Les tokens migrés ne changent plus
+        "unknown": ["created", "active", "completed", "migrated", "terminated"]
+    }
+    
+    allowed = valid_transitions.get(from_status, [])
+    return to_status in allowed
+
+# Fonction pour mettre à jour en masse les statuts existants
+async def update_existing_token_statuses():
+    """Mettre à jour les statuts de tous les tokens existants"""
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Récupérer tous les tokens sans statut ou avec statut "unknown"
+        cursor.execute("""
+            SELECT address, bonding_curve_status 
+            FROM tokens 
+            WHERE bonding_curve_status IS NULL 
+               OR bonding_curve_status = 'unknown'
+               OR bonding_curve_status = ''
+            LIMIT 50
+        """)
+        
+        tokens_to_update = cursor.fetchall()
+        
+        if not tokens_to_update:
+            logger.info("✅ No tokens need status updates")
+            return
+        
+        logger.info(f"🔄 Updating status for {len(tokens_to_update)} tokens...")
+        
+        client = AsyncClient("https://rpc.helius.xyz/?api-key=872ddf73-4cfd-4263-a418-521bbde27eb8")
+        
+        for address, current_status in tokens_to_update:
+            try:
+                new_status = await determine_bonding_curve_status(address, client)
+                
+                if new_status != "unknown" and new_status != current_status:
+                    cursor.execute("""
+                        UPDATE tokens 
+                        SET bonding_curve_status = ?, updated_at = ?
+                        WHERE address = ?
+                    """, (new_status, get_local_timestamp(), address))
+                    
+                    logger.info(f"📊 Updated {address}: {current_status} -> {new_status}")
+                
+                # Petit délai pour éviter le rate limiting
+                await asyncio.sleep(0.5)
+                
+            except Exception as e:
+                logger.error(f"Error updating status for {address}: {e}")
+                continue
+        
+        await client.close()
+        conn.commit()
+        
+        logger.info(f"✅ Status update completed for {len(tokens_to_update)} tokens")
+        
+    except Exception as e:
+        logger.error(f"Error in bulk status update: {e}")
+    finally:
+        conn.close()
+
+async def get_bonding_curve_progress_accurate(address: str) -> dict:
+    """Version corrigée avec la vraie formule de progression Pump.fun"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://frontend-api.pump.fun/coins/{address}"
+            async with session.get(url, timeout=8) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    # Récupérer toutes les données de réserves
+                    virtual_sol_reserves = float(data.get("virtual_sol_reserves", 0))
+                    virtual_token_reserves = float(data.get("virtual_token_reserves", 0))
+                    real_sol_reserves = float(data.get("real_sol_reserves", 0))
+                    
+                    # Vérifier si le champ progress existe directement
+                    if "progress" in data:
+                        progress = float(data["progress"]) * 100  # Souvent en décimal 0-1
+                        logger.debug(f"📊 Direct progress from Pump.fun for {address}: {progress}%")
+                        return {
+                            "progress_percentage": round(progress, 1),
+                            "source": "pump_fun_direct",
+                            "has_progress_data": True
+                        }
+                    
+                    # Calcul basé sur les réserves SOL (formule plus précise)
+                    if real_sol_reserves > 0 and virtual_sol_reserves > 0:
+                        # La bonding curve de Pump.fun se complete quand real_sol_reserves atteint ~30 SOL
+                        TARGET_SOL_RESERVES = 30.0  # SOL target pour completion
+                        progress = min((real_sol_reserves / TARGET_SOL_RESERVES) * 100, 99.9)
+                        
+                        logger.debug(f"📊 Progress via SOL reserves for {address}: {progress}% ({real_sol_reserves:.2f}/{TARGET_SOL_RESERVES} SOL)")
+                        
+                        return {
+                            "progress_percentage": round(progress, 1),
+                            "current_sol_reserves": real_sol_reserves,
+                            "target_sol_reserves": TARGET_SOL_RESERVES,
+                            "source": "sol_reserves",
+                            "has_progress_data": True
+                        }
+                    
+                    # Fallback sur market cap mais avec target plus précis
+                    market_cap = data.get("market_cap", 0)
+                    if market_cap > 0:
+                        # Target basé sur observations DexScreener (plus proche de 50-60k)
+                        TARGET_MARKET_CAP = 50000  # Ajusté basé sur vos observations
+                        progress = min((market_cap / TARGET_MARKET_CAP) * 100, 99.9)
+                        
+                        logger.debug(f"📊 Progress via market cap for {address}: {progress}% (${market_cap}/${TARGET_MARKET_CAP})")
+                        
+                        return {
+                            "progress_percentage": round(progress, 1),
+                            "current_market_cap": market_cap,
+                            "target_market_cap": TARGET_MARKET_CAP,
+                            "source": "market_cap_adjusted",
+                            "has_progress_data": True
+                        }
+                
+    except Exception as e:
+        logger.debug(f"Error getting accurate progress for {address}: {e}")
+    
+    return {
+        "progress_percentage": 0.0,
+        "has_progress_data": False,
+        "source": "no_data"
+    }
+    
+async def get_bonding_curve_progress_old(address: str) -> dict:
+    """Récupérer le pourcentage de progression de la bonding curve"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Essayer d'abord l'API Pump.fun
+            url = f"https://frontend-api.pump.fun/coins/{address}"
+            async with session.get(url, timeout=8) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    # Calcul du pourcentage basé sur market cap
+                    market_cap = data.get("market_cap", 0)
+                    bonding_curve_complete = data.get("complete", False)
+                    
+                    # Pump.fun complete généralement à ~69k$ market cap
+                    TARGET_MARKET_CAP = 69000  # $69k en USD
+                    
+                    if bonding_curve_complete:
+                        progress = 100.0
+                    elif market_cap > 0:
+                        progress = min((market_cap / TARGET_MARKET_CAP) * 100, 99.9)
+                    else:
+                        progress = 0.0
+                    
+                    logger.debug(f"📊 Progress for {address}: {progress}% (MC: ${market_cap})")
+                    
+                    return {
+                        "progress_percentage": round(progress, 1),
+                        "current_market_cap": market_cap,
+                        "target_market_cap": TARGET_MARKET_CAP,
+                        "complete": bonding_curve_complete,
+                        "has_progress_data": True
+                    }
+                else:
+                    logger.debug(f"Pump.fun API returned {resp.status} for {address}")
+                
+    except Exception as e:
+        logger.debug(f"Error getting bonding curve progress from Pump.fun for {address}: {e}")
+    
+    # Fallback: essayer via DexScreener market cap
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.dexscreener.com/latest/dex/tokens/{address}"
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    pairs = data.get("pairs", [])
+                    
+                    if pairs:
+                        best_pair = max(pairs, key=lambda p: p.get("marketCap", 0) or 0)
+                        market_cap = best_pair.get("marketCap", 0) or 0
+                        
+                        if market_cap > 0:
+                            TARGET_MARKET_CAP = 69000
+                            progress = min((market_cap / TARGET_MARKET_CAP) * 100, 99.9)
+                            
+                            logger.debug(f"📊 Progress via DexScreener for {address}: {progress}% (MC: ${market_cap})")
+                            
+                            return {
+                                "progress_percentage": round(progress, 1),
+                                "current_market_cap": market_cap,
+                                "target_market_cap": TARGET_MARKET_CAP,
+                                "complete": progress >= 99.9,
+                                "has_progress_data": True,
+                                "source": "dexscreener"
+                            }
+                else:
+                    logger.debug(f"DexScreener API returned {resp.status} for {address}")
+                    
+    except Exception as e:
+        logger.debug(f"Error getting market cap from DexScreener for {address}: {e}")
+    
+    logger.debug(f"📊 No progress data found for {address}")
+    return {
+        "progress_percentage": 0.0,
+        "has_progress_data": False
+    }
 
 async def validate_and_filter_token_candidates(candidates: list, client: AsyncClient) -> str | None:
     """Validate multiple token candidates and return the most likely mint."""
@@ -518,15 +984,25 @@ def is_valid_token_address(address: str) -> bool:
     return True
 
 
-async def process_new_token(token_address, bonding_curve_status, raydium_pool_address):
-    """Store newly detected token in the database and queue for enrichment."""
+async def process_new_token(token_address, initial_status=None, raydium_pool_address=None):
+    """Version améliorée de process_new_token avec détection de statut"""
     if not is_valid_token_address(token_address):
         logger.warning(f"Invalid token address detected: {token_address}")
         return
     
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+    # Créer un client Solana pour les vérifications
+    client = AsyncClient("https://rpc.helius.xyz/?api-key=872ddf73-4cfd-4263-a418-521bbde27eb8")
+    
     try:
+        # Déterminer le vrai statut de la bonding curve
+        real_status = await determine_bonding_curve_status(token_address, client)
+        
+        # Utiliser le statut déterminé ou celui fourni en paramètre
+        bonding_curve_status = real_status if real_status != "unknown" else initial_status
+        
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        
         # Utiliser l'heure locale pour les nouveaux tokens
         local_timestamp = get_local_timestamp()
         
@@ -535,24 +1011,13 @@ async def process_new_token(token_address, bonding_curve_status, raydium_pool_ad
         existing = cursor.fetchone()
         
         if existing:
-            # Mettre à jour les informations existantes seulement si c'est pertinent
             existing_status = existing[1]
-            should_update = False
-            
-            # Logic de mise à jour intelligente
-            if not existing_status and bonding_curve_status:
-                should_update = True
-            elif existing_status == "active" and bonding_curve_status in ["completed", "migrated"]:
-                should_update = True
-            elif existing_status == "completed" and bonding_curve_status == "migrated":
-                should_update = True
-            elif not raydium_pool_address is None:  # Toujours mettre à jour si on a une nouvelle pool address
-                should_update = True
+            should_update = should_update_token_status(existing_status, bonding_curve_status)
             
             if should_update:
                 cursor.execute('''
                     UPDATE tokens SET 
-                        bonding_curve_status = COALESCE(?, bonding_curve_status),
+                        bonding_curve_status = ?,
                         raydium_pool_address = COALESCE(?, raydium_pool_address),
                         updated_at = ?,
                         launch_timestamp = COALESCE(launch_timestamp, ?)
@@ -560,19 +1025,17 @@ async def process_new_token(token_address, bonding_curve_status, raydium_pool_ad
                 ''', (
                     bonding_curve_status, 
                     raydium_pool_address,
-                    local_timestamp,  # updated_at avec heure locale
-                    local_timestamp,  # launch_timestamp avec heure locale
+                    local_timestamp,
+                    local_timestamp,
                     token_address
                 ))
-                logger.debug(f"🔄 Updated existing token: address={token_address}, status={bonding_curve_status}")
+                logger.info(f"🔄 Updated token status: {token_address} -> {bonding_curve_status}")
                 
-                # Queue for re-enrichment if status changed significantly
-                if bonding_curve_status in ["completed", "migrated"]:
+                # Queue for enrichment si changement significatif
+                if bonding_curve_status in ["completed", "migrated", "terminated"]:
                     await token_enricher.queue_for_enrichment(token_address)
-            else:
-                logger.debug(f"⏩ No update needed for token: address={token_address}, existing_status={existing_status}, new_status={bonding_curve_status}")
         else:
-            # Insérer un nouveau token avec l'heure locale
+            # Insérer nouveau token
             cursor.execute('''
                 INSERT INTO tokens (
                     address, symbol, name, decimals, logo_uri, price_usdc, market_cap,
@@ -585,26 +1048,25 @@ async def process_new_token(token_address, bonding_curve_status, raydium_pool_ad
             ''', (
                 token_address, "UNKNOWN", None, None, None, None, None,
                 None, None, None, None, None, None, None, None, None, None, None, None, None,
-                local_timestamp,  # first_discovered_at avec heure locale
-                local_timestamp,  # updated_at avec heure locale
-                local_timestamp,  # launch_timestamp avec heure locale
+                local_timestamp, local_timestamp, local_timestamp,
                 bonding_curve_status, raydium_pool_address
             ))
-            logger.info(f"💾 Saved new token: address={token_address}, status={bonding_curve_status}")
+            logger.info(f"💾 New token: {token_address} -> {bonding_curve_status}")
             
             # Queue for enrichment
             await token_enricher.queue_for_enrichment(token_address)
-            
-            # Log des liens utiles pour vérification manuelle
-            logger.info(f"🔗 DEX Screener: https://dexscreener.com/solana/{token_address}")
-            if bonding_curve_status in ["active", "completed"]:
-                logger.info(f"🔗 Pump.fun: https://pump.fun/coin/{token_address}")
         
         conn.commit()
         
-    except sqlite3.Error as e:
-        logger.error(f"Database error saving token {token_address}: {str(e)}")
+        # Log des liens utiles
+        logger.info(f"🔗 DEX: https://dexscreener.com/solana/{token_address}")
+        if bonding_curve_status in ["active", "created", "completed"]:
+            logger.info(f"🔗 Pump: https://pump.fun/coin/{token_address}")
+            
+    except Exception as e:
+        logger.error(f"Error processing token {token_address}: {e}")
     finally:
+        await client.close()
         conn.close()
 
 
@@ -688,6 +1150,16 @@ async def display_token_stats():
             logger.error(f"Error in display_token_stats: {e}")
             await asyncio.sleep(300)
 
+
+async def update_existing_token_statuses_loop():
+    """Boucle pour mettre à jour les statuts des tokens existants"""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Toutes les heures
+            await update_existing_token_statuses()
+        except Exception as e:
+            logger.error(f"Error in status update loop: {e}")
+            await asyncio.sleep(1800)  # Attendre 30min en cas d'erreur
 
 async def monitor_pump_fun():
     """Monitor Pump.fun for new token mints and bonding curve completions."""
@@ -1133,9 +1605,41 @@ async def parse_pump_fun_event(signature: str, client: AsyncClient) -> str | Non
     return None
 
 
+def migrate_database_progress():
+    """Migration spécifique pour ajouter la colonne bonding_curve_progress"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Vérifier si la colonne existe
+        cursor.execute("PRAGMA table_info(tokens)")
+        cols = {col[1] for col in cursor.fetchall()}
+        
+        if 'bonding_curve_progress' not in cols:
+            cursor.execute("ALTER TABLE tokens ADD COLUMN bonding_curve_progress REAL DEFAULT 0")
+            logger.info("✅ Added bonding_curve_progress column")
+        
+        conn.commit()
+        
+    except sqlite3.Error as e:
+        logger.error(f"Error migrating database: {e}")
+    finally:
+        conn.close()
+
 async def start_monitoring(log_level='INFO'):
     """Start Pump.fun and Raydium monitoring tasks with enrichment."""
     logger.info(f"🚀 Starting Enhanced Solana monitoring with enrichment (log level: {log_level})")
+
+    # ✅ AJOUTER CETTE LIGNE
+    migrate_database_progress()
+
+    # ✅ TEST TEMPORAIRE
+    test_progress = await get_bonding_curve_progress("7wH62v4rw7K6cMckiQF5cZFytydBs97WSWxScjF1pump")
+    logger.info(f"🧪 Test progress: {test_progress}")
+
+    # ✅ DEBUG TEMPORAIRE
+    debug_results = await debug_bonding_curve_progress("41vZZpGqBQ2dGxS99cmWZuQuC7X97VbcqiAobp29pump")
+    logger.info(f"🔍 DEBUG RESULTS: {json.dumps(debug_results, indent=2)}")
 
     # Créer la base de données si elle n'existe pas
     conn = sqlite3.connect(DATABASE_PATH)
@@ -1183,6 +1687,7 @@ async def start_monitoring(log_level='INFO'):
             monitor_raydium_pools(),
             enrich_existing_tokens(),
             display_token_stats(),
+            update_existing_token_statuses_loop(),  # ← NOUVELLE TÂCHE
             return_exceptions=False
         )
     except Exception as e:

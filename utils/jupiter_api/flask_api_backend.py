@@ -637,6 +637,7 @@ def get_stats():
 @app.route('/api/debug/bonding-curve')
 def debug_bonding_curve():
     """Debug endpoint pour vérifier les statuts bonding curve"""
+    import aiohttp
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     
@@ -683,7 +684,7 @@ def get_tokens_detail():
         cursor.execute('''
             SELECT address, symbol, name, price_usdc, invest_score, liquidity_usd,
                    volume_24h, holders, age_hours, rug_score, is_tradeable,
-                   updated_at, first_discovered_at, bonding_curve_status,
+                   updated_at, first_discovered_at, bonding_curve_status,bonding_curve_progress,
                    COALESCE(updated_at, first_discovered_at) as last_update
             FROM tokens
             ORDER BY last_update DESC, invest_score DESC

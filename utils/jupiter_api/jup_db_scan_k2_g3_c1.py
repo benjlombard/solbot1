@@ -221,7 +221,8 @@ class InvestScanner:
             ("launch_timestamp", "TIMESTAMP"),
             ("bonding_curve_status", "TEXT"),
             ("raydium_pool_address", "TEXT"),
-            ("updated_at", "TIMESTAMP") 
+            ("updated_at", "TIMESTAMP"),
+            ("bonding_curve_progress", "REAL DEFAULT 0"),
         ]:
             if col not in cols:
                 cursor.execute(f"ALTER TABLE tokens ADD COLUMN {col} {col_type}")

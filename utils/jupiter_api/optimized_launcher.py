@@ -340,7 +340,6 @@ class OptimizedSolanaScanner:
                 await asyncio.sleep(60)  # Vérifier chaque minute
                 
                 # Statistiques de la queue d'enrichissement
-                from optimized_enricher_integration import token_enricher
                 queue_size = token_enricher.enrichment_queue.qsize()
                 
                 if queue_size > 50:

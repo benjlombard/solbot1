@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -109,48 +110,6 @@
             border-color: var(--accent-neon);
         }
 
-        /* Contrôles auto-refresh */
-        .auto-refresh-controls {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            padding: 0.5rem 1rem;
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 0.9rem;
-        }
-
-        .toggle-switch {
-            position: relative;
-            width: 40px;
-            height: 20px;
-            background: #444;
-            border-radius: 10px;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-
-        .toggle-switch.active {
-            background: var(--accent-neon);
-        }
-
-        .toggle-switch::after {
-            content: '';
-            position: absolute;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: white;
-            top: 2px;
-            left: 2px;
-            transition: transform 0.3s;
-        }
-
-        .toggle-switch.active::after {
-            transform: translateX(20px);
-        }
-
         .refresh-btn {
             width: 40px;
             height: 40px;
@@ -169,15 +128,6 @@
         .refresh-btn:hover {
             transform: rotate(90deg);
             box-shadow: 0 0 15px rgba(0, 255, 157, 0.5);
-        }
-
-        .refresh-btn.spinning {
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
         }
 
         /* Main Layout */
@@ -493,9 +443,6 @@
             font-size: 0.85rem;
             color: var(--text-secondary);
             margin-top: 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
         }
 
         .status-indicator {
@@ -506,11 +453,6 @@
             background: var(--success);
             margin-right: 0.5rem;
             animation: pulse 1.5s infinite;
-        }
-
-        .status-indicator.paused {
-            background: var(--warning);
-            animation: none;
         }
 
         @keyframes pulse {
@@ -596,21 +538,10 @@
         </div>
         
         <div class="nav-actions">
-            <div class="auto-refresh-controls">
-                <span>Auto-refresh:</span>
-                <div class="toggle-switch active" id="autoRefreshToggle" onclick="toggleAutoRefresh()"></div>
-                <select id="refreshInterval" onchange="updateRefreshInterval()">
-                    <option value="5000">5s</option>
-                    <option value="10000">10s</option>
-                    <option value="30000" selected>30s</option>
-                    <option value="60000">1min</option>
-                </select>
-            </div>
-            
             <button class="action-btn" onclick="downloadCSV()">
                 <i class="fas fa-download"></i> Export
             </button>
-            <button class="refresh-btn" id="refreshBtn" onclick="manualRefresh()">
+            <button class="refresh-btn" onclick="manualRefresh()">
                 <i class="fas fa-sync-alt"></i>
             </button>
         </div>
@@ -732,16 +663,8 @@
             </div>
             
             <div class="status-bar">
-                <div>
-                    <span class="status-indicator" id="statusIndicator"></span>
-                    <span>System operational</span>
-                </div>
-                <div>
-                    <span>Last update: <span id="lastUpdate">Never</span></span>
-                </div>
-                <div>
-                    <span id="autoRefreshStatus">Auto-refresh: ON (30s)</span>
-                </div>
+                <span class="status-indicator"></span>
+                System operational • Last update: <span id="lastUpdate">Never</span>
             </div>
         </main>
     </div>
@@ -749,9 +672,6 @@
     <script>
         const API_BASE_URL = 'http://localhost:5000/api';
         let isLoading = false;
-        let isAutoRefreshEnabled = true;
-        let refreshInterval = 30000; // 30 seconds
-        let refreshTimer = null;
 
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', init);
@@ -760,72 +680,6 @@
             const apiConnected = await testConnection();
             if (apiConnected) {
                 await loadData();
-                startAutoRefresh();
-            }
-        }
-
-        // Auto-refresh functions
-        function toggleAutoRefresh() {
-            isAutoRefreshEnabled = !isAutoRefreshEnabled;
-            const toggle = document.getElementById('autoRefreshToggle');
-            const statusIndicator = document.getElementById('statusIndicator');
-            const autoRefreshStatus = document.getElementById('autoRefreshStatus');
-            
-            if (isAutoRefreshEnabled) {
-                toggle.classList.add('active');
-                statusIndicator.classList.remove('paused');
-                startAutoRefresh();
-                console.log('🔄 Auto-refresh enabled');
-            } else {
-                toggle.classList.remove('active');
-                statusIndicator.classList.add('paused');
-                stopAutoRefresh();
-                console.log('⏸️ Auto-refresh paused');
-            }
-            
-            updateAutoRefreshStatus();
-        }
-
-        function updateRefreshInterval() {
-            const select = document.getElementById('refreshInterval');
-            refreshInterval = parseInt(select.value);
-            
-            if (isAutoRefreshEnabled) {
-                stopAutoRefresh();
-                startAutoRefresh();
-            }
-            
-            updateAutoRefreshStatus();
-            console.log(`🔄 Auto-refresh interval updated to ${refreshInterval/1000}s`);
-        }
-
-        function startAutoRefresh() {
-            if (refreshTimer) clearInterval(refreshTimer);
-            
-            if (isAutoRefreshEnabled) {
-                refreshTimer = setInterval(() => {
-                    loadData();
-                }, refreshInterval);
-            }
-        }
-
-        function stopAutoRefresh() {
-            if (refreshTimer) {
-                clearInterval(refreshTimer);
-                refreshTimer = null;
-            }
-        }
-
-        function updateAutoRefreshStatus() {
-            const autoRefreshStatus = document.getElementById('autoRefreshStatus');
-            const intervalText = refreshInterval >= 60000 ? 
-                `${refreshInterval/60000}min` : 
-                `${refreshInterval/1000}s`;
-            
-            if (isAutoRefreshEnabled) {
-                autoRefreshStatus.textContent = `Auto-refresh: ON (${intervalText})`;
-            } else {
-                autoRefreshStatus.textContent = `Auto-refresh: OFF (${intervalText})`;
             }
         }
 
@@ -842,14 +696,8 @@
 
         // Load data from API
         async function loadData() {
-            if (isLoading || !isAutoRefreshEnabled) return;
+            if (isLoading) return;
             isLoading = true;
-            
-            // Show loading state
-            const refreshBtn = document.getElementById('refreshBtn');
-            if (refreshBtn) {
-                refreshBtn.classList.add('spinning');
-            }
             
             try {
                 const response = await fetch(API_BASE_URL + '/dashboard-data');
@@ -866,10 +714,6 @@
                 showGlobalError('Failed to load data: ' + error.message);
             } finally {
                 isLoading = false;
-                // Remove loading state
-                if (refreshBtn) {
-                    refreshBtn.classList.remove('spinning');
-                }
             }
         }
 
@@ -891,8 +735,8 @@
             container.innerHTML = tokens.map(token => {
                 const alertClass = isAlert && token.volumeRatio > 5 ? 'alert-high' : 
                                  isAlert && token.volumeRatio > 2 ? 'alert-medium' : '';
-                const price = token.price ? `${parseFloat(token.price).toFixed(8)}` : 'N/A';
-                const volume = `${Math.round(token.volume || 0).toLocaleString()}`;
+                const price = token.price ? `$${parseFloat(token.price).toFixed(8)}` : 'N/A';
+                const volume = `$${Math.round(token.volume || 0).toLocaleString()}`;
                 const age = token.age ? `${parseFloat(token.age).toFixed(1)}h` : 'N/A';
                 const score = token.score ? parseFloat(token.score).toFixed(1) : 
                              token.volumeRatio ? `${token.volumeRatio}x` : '0';
@@ -936,7 +780,19 @@
 
         // Manual refresh
         async function manualRefresh() {
-            await loadData();
+            const btn = document.querySelector('.refresh-btn');
+            const icon = btn.querySelector('i');
+            icon.classList.remove('fa-sync-alt');
+            icon.classList.add('fa-spinner', 'fa-spin');
+            
+            try {
+                await loadData();
+            } finally {
+                setTimeout(() => {
+                    icon.classList.remove('fa-spinner', 'fa-spin');
+                    icon.classList.add('fa-sync-alt');
+                }, 500);
+            }
         }
 
         // Export functionality
@@ -950,11 +806,8 @@
                 e.preventDefault();
                 downloadCSV();
             }
-            if (e.key === ' ' && e.ctrlKey) {
-                e.preventDefault();
-                toggleAutoRefresh();
-            }
         });
     </script>
 </body>
 </html>
+```
