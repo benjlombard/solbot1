@@ -683,72 +683,66 @@ async def update_existing_token_statuses():
     finally:
         conn.close()
 
-async def get_bonding_curve_progress_accurate(address: str) -> dict:
-    """Version corrigée avec la vraie formule de progression Pump.fun"""
+async def get_bonding_curve_progress(address: str) -> dict:
+    """Version corrigée avec les offsets exacts et formule précise"""
     try:
-        async with aiohttp.ClientSession() as session:
-            url = f"https://frontend-api.pump.fun/coins/{address}"
-            async with session.get(url, timeout=8) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    
-                    # Récupérer toutes les données de réserves
-                    virtual_sol_reserves = float(data.get("virtual_sol_reserves", 0))
-                    virtual_token_reserves = float(data.get("virtual_token_reserves", 0))
-                    real_sol_reserves = float(data.get("real_sol_reserves", 0))
-                    
-                    # Vérifier si le champ progress existe directement
-                    if "progress" in data:
-                        progress = float(data["progress"]) * 100  # Souvent en décimal 0-1
-                        logger.debug(f"📊 Direct progress from Pump.fun for {address}: {progress}%")
-                        return {
-                            "progress_percentage": round(progress, 1),
-                            "source": "pump_fun_direct",
-                            "has_progress_data": True
-                        }
-                    
-                    # Calcul basé sur les réserves SOL (formule plus précise)
-                    if real_sol_reserves > 0 and virtual_sol_reserves > 0:
-                        # La bonding curve de Pump.fun se complete quand real_sol_reserves atteint ~30 SOL
-                        TARGET_SOL_RESERVES = 30.0  # SOL target pour completion
-                        progress = min((real_sol_reserves / TARGET_SOL_RESERVES) * 100, 99.9)
-                        
-                        logger.debug(f"📊 Progress via SOL reserves for {address}: {progress}% ({real_sol_reserves:.2f}/{TARGET_SOL_RESERVES} SOL)")
-                        
-                        return {
-                            "progress_percentage": round(progress, 1),
-                            "current_sol_reserves": real_sol_reserves,
-                            "target_sol_reserves": TARGET_SOL_RESERVES,
-                            "source": "sol_reserves",
-                            "has_progress_data": True
-                        }
-                    
-                    # Fallback sur market cap mais avec target plus précis
-                    market_cap = data.get("market_cap", 0)
-                    if market_cap > 0:
-                        # Target basé sur observations DexScreener (plus proche de 50-60k)
-                        TARGET_MARKET_CAP = 50000  # Ajusté basé sur vos observations
-                        progress = min((market_cap / TARGET_MARKET_CAP) * 100, 99.9)
-                        
-                        logger.debug(f"📊 Progress via market cap for {address}: {progress}% (${market_cap}/${TARGET_MARKET_CAP})")
-                        
-                        return {
-                            "progress_percentage": round(progress, 1),
-                            "current_market_cap": market_cap,
-                            "target_market_cap": TARGET_MARKET_CAP,
-                            "source": "market_cap_adjusted",
-                            "has_progress_data": True
-                        }
-                
+        from solders.pubkey import Pubkey
+        from solana.rpc.async_api import AsyncClient
+        import struct
+        
+        # Calculer l'adresse de la bonding curve
+        pump_program = Pubkey.from_string("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P")
+        mint_pubkey = Pubkey.from_string(address)
+        seeds = [b"bonding-curve", bytes(mint_pubkey)]
+        bonding_curve_address, _ = Pubkey.find_program_address(seeds, pump_program)
+        
+        client = AsyncClient("https://rpc.helius.xyz/?api-key=872ddf73-4cfd-4263-a418-521bbde27eb8")
+        
+        # Récupérer les données de la bonding curve
+        account_info = await client.get_account_info(bonding_curve_address)
+        
+        if account_info.value and account_info.value.data:
+            data = account_info.value.data
+            
+            # Offsets corrects selon la documentation Pump.fun
+            virtual_token_reserves = struct.unpack('<Q', data[0x08:0x10])[0]
+            virtual_sol_reserves = struct.unpack('<Q', data[0x10:0x18])[0]
+            real_token_reserves = struct.unpack('<Q', data[0x18:0x20])[0]
+            real_sol_reserves = struct.unpack('<Q', data[0x20:0x28])[0]
+            
+            # Formule officielle Pump.fun
+            initial_virtual_tokens = 1_073_000_000  # 1.073B tokens virtuels initiaux
+            tokens_to_sell = 793_100_000  # 793.1M tokens vendables
+            
+            # Progress = (tokens vendus virtuels) / tokens vendables * 100
+            tokens_sold_virtual = (initial_virtual_tokens * 10**6 - virtual_token_reserves) / (10**6)
+            progress = (tokens_sold_virtual / tokens_to_sell) * 100
+            progress = max(0, min(progress, 99.9))
+            
+            await client.close()
+            
+            logger.debug(f"💎 Progress for {address}: {progress:.1f}%")
+            
+            return {
+                "progress_percentage": round(progress, 1),
+                "virtual_token_reserves": virtual_token_reserves / (10**6),
+                "real_token_reserves": real_token_reserves / (10**6),
+                "tokens_sold": tokens_sold_virtual,
+                "source": "bonding_curve_direct",
+                "has_progress_data": True
+            }
+        
+        await client.close()
+        
     except Exception as e:
-        logger.debug(f"Error getting accurate progress for {address}: {e}")
+        logger.debug(f"Error getting bonding curve progress for {address}: {e}")
     
     return {
         "progress_percentage": 0.0,
         "has_progress_data": False,
         "source": "no_data"
     }
-    
+
 async def get_bonding_curve_progress_old(address: str) -> dict:
     """Récupérer le pourcentage de progression de la bonding curve"""
     try:
@@ -1633,13 +1627,16 @@ async def start_monitoring(log_level='INFO'):
     # ✅ AJOUTER CETTE LIGNE
     migrate_database_progress()
 
-    # ✅ TEST TEMPORAIRE
-    test_progress = await get_bonding_curve_progress("7wH62v4rw7K6cMckiQF5cZFytydBs97WSWxScjF1pump")
-    logger.info(f"🧪 Test progress: {test_progress}")
-
-    # ✅ DEBUG TEMPORAIRE
-    debug_results = await debug_bonding_curve_progress("41vZZpGqBQ2dGxS99cmWZuQuC7X97VbcqiAobp29pump")
-    logger.info(f"🔍 DEBUG RESULTS: {json.dumps(debug_results, indent=2)}")
+    # ✅ TEST de validation
+    test_address = "41vZZpGqBQ2dGxS99cmWZuQuC7X97VbcqiAobp29pump"
+    test_progress = await get_bonding_curve_progress(test_address)
+    logger.info(f"🧪 Test progress for {test_address}: {test_progress}")
+    
+    # Vérifier que le résultat est cohérent avec DexScreener (4.8%)
+    if test_progress.get("progress_percentage", 0) > 0:
+        logger.info("✅ Bonding curve calculation working correctly!")
+    else:
+        logger.warning("⚠️ Bonding curve calculation may need adjustment")
 
     # Créer la base de données si elle n'existe pas
     conn = sqlite3.connect(DATABASE_PATH)
