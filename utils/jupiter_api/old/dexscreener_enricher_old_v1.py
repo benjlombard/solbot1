@@ -73,7 +73,7 @@ class ContinuousDexScreenerEnricher:
         self.base_url = "https://api.dexscreener.com/latest/dex/tokens"
         self.is_running = False
         
-        # Statistiques avec historique
+        # Statistiques
         self.stats = {
             'total_processed': 0,
             'successful_updates': 0,
@@ -81,9 +81,7 @@ class ContinuousDexScreenerEnricher:
             'no_data_found': 0,
             'database_errors': 0,
             'cycles_completed': 0,
-            'last_successful_tokens': [],
-            'snapshots_created': 0,
-            'snapshot_errors': 0
+            'last_successful_tokens': []
         }
     
     def get_tokens_to_enrich(self, limit: int, strategy: str = "oldest", min_hours_since_update: int = 1) -> List[Dict]:
@@ -116,7 +114,6 @@ class ContinuousDexScreenerEnricher:
                     AND symbol IS NOT NULL 
                     AND symbol != 'UNKNOWN' 
                     AND symbol != ''
-                    AND (status IS NULL OR status IN ('active', 'new'))
                     ORDER BY first_discovered_at DESC
                     LIMIT ?
                 '''
@@ -129,7 +126,6 @@ class ContinuousDexScreenerEnricher:
                     WHERE symbol IS NOT NULL 
                     AND symbol != 'UNKNOWN' 
                     AND symbol != ''
-                    AND (status IS NULL OR status IN ('active', 'new'))
                     {exclude_recent_condition}
                     ORDER BY COALESCE(dexscreener_last_dexscreener_update, '1970-01-01') ASC
                     LIMIT ?
@@ -144,7 +140,6 @@ class ContinuousDexScreenerEnricher:
                     AND symbol IS NOT NULL 
                     AND symbol != 'UNKNOWN' 
                     AND symbol != ''
-                    AND (status IS NULL OR status IN ('active', 'new'))
                     {exclude_recent_condition}
                     ORDER BY first_discovered_at DESC
                     LIMIT ?
@@ -158,7 +153,6 @@ class ContinuousDexScreenerEnricher:
                     WHERE symbol IS NOT NULL 
                     AND symbol != 'UNKNOWN' 
                     AND symbol != ''
-                    AND (status IS NULL OR status IN ('active', 'new'))
                     {exclude_recent_condition}
                     ORDER BY RANDOM()
                     LIMIT ?
@@ -172,7 +166,6 @@ class ContinuousDexScreenerEnricher:
                     WHERE symbol IS NOT NULL 
                     AND symbol != 'UNKNOWN' 
                     AND symbol != ''
-                    AND (status IS NULL OR status NOT IN ('archived', 'blacklisted'))
                     ORDER BY COALESCE(dexscreener_last_dexscreener_update, '1970-01-01') ASC
                     LIMIT ?
                 '''
@@ -308,69 +301,6 @@ class ContinuousDexScreenerEnricher:
         
         return extracted
     
-    def create_token_snapshot(self, address: str, snapshot_reason: str = 'before_dexscreener_update') -> bool:
-        """
-        Créer un snapshot du token dans tokens_hist AVANT l'enrichissement
-        """
-        conn = sqlite3.connect(self.database_path)
-        cursor = conn.cursor()
-        
-        try:
-            # Créer le snapshot en copiant l'état actuel du token
-            snapshot_query = '''
-                INSERT INTO tokens_hist (
-                    address, snapshot_timestamp, symbol, name, decimals, logo_uri,
-                    price_usdc, market_cap, liquidity_usd, volume_24h, price_change_24h,
-                    age_hours, quality_score, rug_score, holders, holder_distribution,
-                    is_tradeable, invest_score, early_bonus, social_bonus, holders_bonus,
-                    first_discovered_at, launch_timestamp, bonding_curve_status,
-                    raydium_pool_address, updated_at, bonding_curve_progress,
-                    dexscreener_pair_created_at, dexscreener_price_usd, dexscreener_market_cap,
-                    dexscreener_liquidity_base, dexscreener_liquidity_quote,
-                    dexscreener_volume_1h, dexscreener_volume_6h, dexscreener_volume_24h,
-                    dexscreener_price_change_1h, dexscreener_price_change_6h, dexscreener_price_change_h24,
-                    dexscreener_txns_1h, dexscreener_txns_6h, dexscreener_txns_24h,
-                    dexscreener_buys_1h, dexscreener_sells_1h, dexscreener_buys_24h, dexscreener_sells_24h,
-                    dexscreener_dexscreener_url, dexscreener_last_dexscreener_update,
-                    status, snapshot_reason
-                )
-                SELECT 
-                    address, datetime('now', 'localtime') as snapshot_timestamp,
-                    symbol, name, decimals, logo_uri,
-                    price_usdc, market_cap, liquidity_usd, volume_24h, price_change_24h,
-                    age_hours, quality_score, rug_score, holders, holder_distribution,
-                    is_tradeable, invest_score, early_bonus, social_bonus, holders_bonus,
-                    first_discovered_at, launch_timestamp, bonding_curve_status,
-                    raydium_pool_address, updated_at, bonding_curve_progress,
-                    dexscreener_pair_created_at, dexscreener_price_usd, dexscreener_market_cap,
-                    dexscreener_liquidity_base, dexscreener_liquidity_quote,
-                    dexscreener_volume_1h, dexscreener_volume_6h, dexscreener_volume_24h,
-                    dexscreener_price_change_1h, dexscreener_price_change_6h, dexscreener_price_change_h24,
-                    dexscreener_txns_1h, dexscreener_txns_6h, dexscreener_txns_24h,
-                    dexscreener_buys_1h, dexscreener_sells_1h, dexscreener_buys_24h, dexscreener_sells_24h,
-                    dexscreener_dexscreener_url, dexscreener_last_dexscreener_update,
-                    COALESCE(status, 'active') as status, ? as snapshot_reason
-                FROM tokens 
-                WHERE address = ?
-            '''
-            
-            cursor.execute(snapshot_query, (snapshot_reason, address))
-            
-            if cursor.rowcount > 0:
-                conn.commit()
-                logger.debug(f"📸 Snapshot créé pour {address} (raison: {snapshot_reason})")
-                return True
-            else:
-                logger.warning(f"⚠️ Token {address} non trouvé pour créer le snapshot")
-                return False
-                
-        except sqlite3.Error as e:
-            logger.error(f"Erreur création snapshot pour {address}: {e}")
-            conn.rollback()
-            return False
-        finally:
-            conn.close()
-    
     def update_token_in_database(self, address: str, dexscreener_data: Dict) -> bool:
         """
         COPIE EXACTE de la méthode du script original qui fonctionne
@@ -447,173 +377,10 @@ class ContinuousDexScreenerEnricher:
             return False
         finally:
             conn.close()
-        """
-        COPIE EXACTE de la méthode du script original qui fonctionne
-        """
-        conn = sqlite3.connect(self.database_path)
-        cursor = conn.cursor()
-        
-        try:
-            update_query = '''
-                UPDATE tokens SET 
-                    dexscreener_pair_created_at = ?,
-                    dexscreener_price_usd = ?,
-                    dexscreener_market_cap = ?,
-                    dexscreener_liquidity_base = ?,
-                    dexscreener_liquidity_quote = ?,
-                    dexscreener_volume_1h = ?,
-                    dexscreener_volume_6h = ?,
-                    dexscreener_volume_24h = ?,
-                    dexscreener_price_change_1h = ?,
-                    dexscreener_price_change_6h = ?,
-                    dexscreener_price_change_h24 = ?,
-                    dexscreener_txns_1h = ?,
-                    dexscreener_txns_6h = ?,
-                    dexscreener_txns_24h = ?,
-                    dexscreener_buys_1h = ?,
-                    dexscreener_sells_1h = ?,
-                    dexscreener_buys_24h = ?,
-                    dexscreener_sells_24h = ?,
-                    dexscreener_dexscreener_url = ?,
-                    dexscreener_last_dexscreener_update = ?,
-                    updated_at = ?
-                WHERE address = ?
-            '''
-            
-            values = (
-                dexscreener_data.get('dexscreener_pair_created_at'),
-                dexscreener_data.get('dexscreener_price_usd'),
-                dexscreener_data.get('dexscreener_market_cap'),
-                dexscreener_data.get('dexscreener_liquidity_base'),
-                dexscreener_data.get('dexscreener_liquidity_quote'),
-                dexscreener_data.get('dexscreener_volume_1h'),
-                dexscreener_data.get('dexscreener_volume_6h'),
-                dexscreener_data.get('dexscreener_volume_24h'),
-                dexscreener_data.get('dexscreener_price_change_1h'),
-                dexscreener_data.get('dexscreener_price_change_6h'),
-                dexscreener_data.get('dexscreener_price_change_h24'),
-                dexscreener_data.get('dexscreener_txns_1h'),
-                dexscreener_data.get('dexscreener_txns_6h'),
-                dexscreener_data.get('dexscreener_txns_24h'),
-                dexscreener_data.get('dexscreener_buys_1h'),
-                dexscreener_data.get('dexscreener_sells_1h'),
-                dexscreener_data.get('dexscreener_buys_24h'),
-                dexscreener_data.get('dexscreener_sells_24h'),
-                dexscreener_data.get('dexscreener_dexscreener_url'),
-                dexscreener_data.get('dexscreener_last_dexscreener_update'),
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                address
-            )
-            
-            cursor.execute(update_query, values)
-            
-            if cursor.rowcount > 0:
-                conn.commit()
-                logger.debug(f"✅ Token {address} mis à jour avec succès")
-                return True
-            else:
-                logger.warning(f"⚠️ Token {address} non trouvé dans la base")
-                return False
-                
-        except sqlite3.Error as e:
-            logger.error(f"Erreur base de données pour {address}: {e}")
-            self.stats['database_errors'] += 1
-            conn.rollback()
-            return False
-        finally:
-            conn.close()
     
-    def count_consecutive_dexscreener_failures(self, address: str) -> int:
-        """
-        Compter les échecs consécutifs de récupération DexScreener dans l'historique
-        """
-        conn = sqlite3.connect(self.database_path)
-        cursor = conn.cursor()
-        
-        try:
-            # Compter les snapshots récents sans données DexScreener
-            query = '''
-                SELECT COUNT(*) as failures
-                FROM tokens_hist 
-                WHERE address = ? 
-                AND snapshot_timestamp > datetime('now', '-7 days', 'localtime')
-                AND (dexscreener_last_dexscreener_update IS NULL 
-                     OR dexscreener_last_dexscreener_update = '')
-                ORDER BY snapshot_timestamp DESC
-            '''
-            
-            cursor.execute(query, (address,))
-            result = cursor.fetchone()
-            
-            return result[0] if result else 0
-            
-        except sqlite3.Error as e:
-            logger.error(f"Erreur comptage échecs pour {address}: {e}")
-            return 0
-        finally:
-            conn.close()
-    
-    def get_token_age_days(self, address: str) -> int:
-        """
-        Obtenir l'âge du token en jours depuis sa première découverte
-        """
-        conn = sqlite3.connect(self.database_path)
-        cursor = conn.cursor()
-        
-        try:
-            query = '''
-                SELECT 
-                    CAST((julianday('now', 'localtime') - julianday(first_discovered_at)) AS INTEGER) as age_days
-                FROM tokens 
-                WHERE address = ?
-            '''
-            
-            cursor.execute(query, (address,))
-            result = cursor.fetchone()
-            
-            return result[0] if result else 0
-            
-        except sqlite3.Error as e:
-            logger.error(f"Erreur calcul âge pour {address}: {e}")
-            return 0
-        finally:
-            conn.close()
-
-    def update_token_status(self, address: str, status: str) -> bool:
-        """
-        Mettre à jour le statut d'un token
-        """
-        conn = sqlite3.connect(self.database_path)
-        cursor = conn.cursor()
-        
-        try:
-            update_query = '''
-                UPDATE tokens SET 
-                    status = ?,
-                    updated_at = datetime('now', 'localtime')
-                WHERE address = ?
-            '''
-            
-            cursor.execute(update_query, (status, address))
-            
-            if cursor.rowcount > 0:
-                conn.commit()
-                logger.debug(f"📝 Status du token {address} mis à jour: {status}")
-                return True
-            else:
-                logger.warning(f"⚠️ Token {address} non trouvé pour mise à jour status")
-                return False
-                
-        except sqlite3.Error as e:
-            logger.error(f"Erreur mise à jour status pour {address}: {e}")
-            conn.rollback()
-            return False
-        finally:
-            conn.close()
-             
     def enrich_token(self, token: Dict) -> bool:
         """
-        COPIE EXACTE de la méthode du script original qui fonctionne + SNAPSHOT
+        COPIE EXACTE de la méthode du script original qui fonctionne
         """
         address = token['address']
         symbol = token.get('symbol', 'UNKNOWN')
@@ -621,35 +388,14 @@ class ContinuousDexScreenerEnricher:
         if self.verbose:
             logger.info(f"🔍 Enrichissement DexScreener: {symbol} ({address[:8]}...)")
         
-        # 1. CRÉER UN SNAPSHOT AVANT L'ENRICHISSEMENT
-        snapshot_created = self.create_token_snapshot(address, 'before_dexscreener_update')
-        if snapshot_created:
-            self.stats['snapshots_created'] += 1
-        else:
-            self.stats['snapshot_errors'] += 1
-            logger.debug(f"⚠️ Impossible de créer le snapshot pour {symbol}, on continue quand même")
-        
-        # 2. ENRICHISSEMENT NORMAL (logique originale inchangée)
         # Récupérer les données DexScreener
         pair_data = self.fetch_dexscreener_data(address)
         
-        if not pair_data:  # Aucune donnée DexScreener
-            # Compter les échecs précédents dans l'historique
-            consecutive_failures = self.count_consecutive_dexscreener_failures(address)
-            token_age_days = self.get_token_age_days(address)
-            
-            if consecutive_failures >= 3:
-                self.update_token_status(address, 'inactive')
-                logger.debug(f"🔴 Token {symbol} marqué comme inactif ({consecutive_failures} échecs)")
-            elif token_age_days > 7 and consecutive_failures >= 1:
-                self.update_token_status(address, 'archived')
-                logger.debug(f"📦 Token {symbol} archivé (âge: {token_age_days}j, échecs: {consecutive_failures})")
-            else:
-                self.update_token_status(address, 'no_dex_data')
-                logger.debug(f"⚪ Token {symbol} sans données DEX (âge: {token_age_days}j, échecs: {consecutive_failures})")
-        
+        if not pair_data:
+            if self.verbose:
+                logger.info(f"⚪ {symbol}: Aucune donnée DexScreener trouvée")
             return False
-
+        
         # Extraire les champs selon votre structure
         dexscreener_fields = self.extract_dexscreener_fields(pair_data)
         
@@ -658,8 +404,7 @@ class ContinuousDexScreenerEnricher:
         
         if success:
             self.stats['successful_updates'] += 1
-            # Remettre le statut à 'active' si enrichissement réussi
-            self.update_token_status(address, 'active')
+            
             # Log des informations clés
             price = dexscreener_fields.get('dexscreener_price_usd', 0)
             volume_24h = dexscreener_fields.get('dexscreener_volume_24h', 0)
@@ -753,7 +498,6 @@ class ContinuousDexScreenerEnricher:
                     logger.info(f"📊 Stats globales: Cycles={self.stats['cycles_completed']} | "
                                f"Total traités={self.stats['total_processed']} | "
                                f"Succès={self.stats['successful_updates']} | "
-                               f"Snapshots={self.stats['snapshots_created']} | "
                                f"Erreurs API={self.stats['api_errors']} | "
                                f"Sans données={self.stats['no_data_found']}")
                 
@@ -785,19 +529,10 @@ class ContinuousDexScreenerEnricher:
         logger.info("=" * 60)
         logger.info(f"✅ Total processed:     {self.stats['total_processed']}")
         logger.info(f"💾 Successful updates:  {self.stats['successful_updates']}")
-        logger.info(f"📸 Snapshots created:   {self.stats['snapshots_created']}")
         logger.info(f"❌ API errors:          {self.stats['api_errors']}")
         logger.info(f"⚪ No data found:       {self.stats['no_data_found']}")
         logger.info(f"🔄 Cycles completed:    {self.stats['cycles_completed']}")
         logger.info(f"📈 Success rate:        {success_rate:.1f}%")
-        
-        # Stats sur l'historique
-        if self.stats['snapshots_created'] > 0:
-            snapshot_rate = (self.stats['snapshots_created'] / max(1, self.stats['total_processed'])) * 100
-            logger.info(f"📸 Snapshot rate:       {snapshot_rate:.1f}%")
-        
-        if self.stats['snapshot_errors'] > 0:
-            logger.info(f"⚠️ Snapshot errors:     {self.stats['snapshot_errors']}")
         
         # Afficher les derniers tokens mis à jour
         if self.stats['last_successful_tokens']:

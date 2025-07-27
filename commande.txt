@@ -4,6 +4,10 @@ python jupiter_db_scanner_k2_g2_c1.py --interval 1 --limit 15 --database tokens.
 python jupiter_db_scanner_k2_g2_c1.py --interval 1 --limit 15 --database tokens.db --early --social --holders-growth --update-interval 2 --log-level INFO
 gitleaks detect --source . --config .gitleaks.toml --verbose --no-git
 git add . && git commit -m "add files" && git push origin main
+
+python dexscreener_enricher.py --interval 1 --batch-size 250 --strategy recent --min-hours 0 --verbose
+
+
 # Tester l'analyse sur le token SOL wrappé
 python main.py --test-rugcheck So11111111111111111111111111111111111111112
 
