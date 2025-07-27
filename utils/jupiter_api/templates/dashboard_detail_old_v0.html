@@ -47,9 +47,9 @@
     .filter-panel .filter-group .time-unit { width: 80px; }
     .filter-panel .filter-group .bonding-filter { width: 120px; }
     
-    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.8rem; }
-    th, td { padding: 0.4rem 0.3rem; border-bottom: 1px solid #2a2a4a; text-align: left; }
-    th { background: #0f3460; position: sticky; top: 0; font-size: 0.75rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: 0.6rem 0.5rem; border-bottom: 1px solid #2a2a4a; text-align: left; font-size: 0.85rem; }
+    th { background: #0f3460; position: sticky; top: 0; }
     .price { color: #00ff88; font-weight: bold; }
     .score { color: #ffaa00; font-weight: bold; }
     .updated-recent { color: #00ff88; font-weight: bold; }
@@ -68,7 +68,7 @@
     .preset-btn:hover { background: #00d4ff; color: #fff; }
     .preset-btn.active { background: #00d4ff; color: #fff; }
 
-    /* Contrôles auto-refresh */
+    /* Contrôles auto-refresh améliorés */
     .auto-refresh-section {
         display: flex;
         align-items: center;
@@ -81,6 +81,12 @@
         margin-left: auto;
     }
 
+    .auto-refresh-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
     .toggle-switch {
         position: relative;
         width: 40px;
@@ -91,7 +97,9 @@
         transition: background 0.3s;
     }
 
-    .toggle-switch.active { background: #00d4ff; }
+    .toggle-switch.active {
+        background: #00d4ff;
+    }
 
     .toggle-switch::after {
         content: '';
@@ -105,9 +113,31 @@
         transition: transform 0.3s;
     }
 
-    .toggle-switch.active::after { transform: translateX(20px); }
+    .toggle-switch.active::after {
+        transform: translateX(20px);
+    }
 
-    /* Statuts bonding curve */
+    .refresh-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        background: #2a2a4a;
+        border-radius: 6px;
+        border: 1px solid #444;
+        font-size: 0.9rem;
+        color: #888;
+    }
+
+    .refresh-indicator.active {
+        color: #00ff88;
+    }
+
+    .refresh-indicator.paused {
+        color: #ffa500;
+    }
+
+    /* Statuts bonding curve améliorés */
     .bonding-status {
         padding: 3px 8px;
         border-radius: 12px;
@@ -119,13 +149,33 @@
         text-align: center;
     }
 
-    .bonding-created { background: linear-gradient(45deg, #4CAF50, #8BC34A); color: #fff; }
-    .bonding-active { background: linear-gradient(45deg, #FF9800, #FFC107); color: #000; }
-    .bonding-completed { background: linear-gradient(45deg, #2196F3, #03A9F4); color: #fff; }
-    .bonding-migrated { background: linear-gradient(45deg, #9C27B0, #E91E63); color: #fff; }
-    .bonding-terminated { background: linear-gradient(45deg, #F44336, #FF5722); color: #fff; }
+    .bonding-created { 
+        background: linear-gradient(45deg, #4CAF50, #8BC34A); 
+        color: #fff; 
+        box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
+    }
+    .bonding-active { 
+        background: linear-gradient(45deg, #FF9800, #FFC107); 
+        color: #000; 
+        box-shadow: 0 2px 4px rgba(255, 152, 0, 0.3);
+    }
+    .bonding-completed { 
+        background: linear-gradient(45deg, #2196F3, #03A9F4); 
+        color: #fff; 
+        box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
+    }
+    .bonding-migrated { 
+        background: linear-gradient(45deg, #9C27B0, #E91E63); 
+        color: #fff; 
+        box-shadow: 0 2px 4px rgba(156, 39, 176, 0.3);
+    }
+    .bonding-terminated { 
+        background: linear-gradient(45deg, #F44336, #FF5722); 
+        color: #fff; 
+        box-shadow: 0 2px 4px rgba(244, 67, 54, 0.3);
+    }
 
-    /* Progress bar */
+    /* Progress bar styles */
     .progress-container {
         width: 80px;
         height: 16px;
@@ -141,6 +191,7 @@
         border-radius: 8px;
         background: linear-gradient(90deg, #ff6b35, #00ff9d);
         transition: width 0.3s ease;
+        position: relative;
     }
 
     .progress-text {
@@ -155,12 +206,19 @@
         z-index: 2;
     }
 
-    .no-progress { color: #666; font-size: 0.7rem; text-align: center; }
+    .progress-container.completed .progress-bar {
+        background: linear-gradient(90deg, #00ff9d, #00d4ff);
+    }
 
-    /* Styles pour les changements de prix */
-    .price-positive { color: #00ff88; }
-    .price-negative { color: #ff6b6b; }
-    .price-neutral { color: #888; }
+    .progress-container.low .progress-bar {
+        background: linear-gradient(90deg, #ff6b35, #ffab00);
+    }
+
+    .no-progress {
+        color: #666;
+        font-size: 0.7rem;
+        text-align: center;
+    }
 
     /* Légende des statuts */
     .status-legend {
@@ -194,45 +252,61 @@
         100% { transform: rotate(360deg); }
     }
 
-    /* Styles pour l'onglet analyse */
-    .analysis-container { padding: 2rem; }
+    /* Styles spécifiques pour l'onglet analyse */
+    .analysis-container {
+        padding: 2rem;
+    }
+    
     .metrics-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
         gap: 1.5rem;
         margin-bottom: 2rem;
     }
+    
     .metric-card {
         background: #1e1e38;
         padding: 1.5rem;
         border-radius: 8px;
         border: 1px solid #2a2a4a;
     }
+    
     .metric-title {
         color: #00d4ff;
         font-size: 1.1rem;
         font-weight: bold;
         margin-bottom: 1rem;
     }
+    
     .metric-value {
         font-size: 2rem;
         font-weight: bold;
         color: #fff;
         margin-bottom: 0.5rem;
     }
+    
     .metric-subtitle {
         color: #888;
         font-size: 0.9rem;
     }
+    
+    .chart-placeholder {
+        background: #1e1e38;
+        border: 1px solid #2a2a4a;
+        border-radius: 8px;
+        padding: 2rem;
+        text-align: center;
+        color: #888;
+        margin: 1rem 0;
+    }
 
-    /* Responsive */
+    /* Responsive pour petits écrans */
     @media (max-width: 768px) {
         .tabs { padding: 0 1rem; }
         .filter-panel { padding: 1rem; }
         .controls { padding: 1rem; }
-        th, td { padding: 0.3rem 0.2rem; font-size: 0.75rem; }
+        th, td { padding: 0.4rem 0.3rem; font-size: 0.8rem; }
         .metrics-grid { grid-template-columns: 1fr; }
-        table { font-size: 0.7rem; }
     }
   </style>
 </head>
@@ -256,8 +330,8 @@
         </select> tokens
     </label>
     
-    <!-- Contrôle auto-refresh -->
-            <div class="auto-refresh-section">
+    <!-- Contrôle auto-refresh amélioré -->
+    <div class="auto-refresh-section">
         <div class="auto-refresh-toggle">
             <label for="autoRefreshEnabled">Auto-refresh:</label>
             <div class="toggle-switch active" id="autoRefreshToggle" onclick="toggleAutoRefresh()"></div>
@@ -417,17 +491,6 @@
         <label>Transactions 24h Min:</label><input type="number" id="dexFilterTxns24hMin" placeholder="Min">
       </div>
       <div class="filter-group">
-        <label>Buys 24h Min:</label><input type="number" id="dexFilterBuys24hMin" placeholder="Min">
-        <label>Sells 24h Max:</label><input type="number" id="dexFilterSells24hMax" placeholder="Max">
-        <label>Liquidity Quote Min:</label><input type="number" id="dexFilterLiquidityQuoteMin" placeholder="Min">
-        <label>Avec données DexScreener:</label>
-        <select id="dexFilterHasData">
-          <option value="">Tous</option>
-          <option value="true">Oui</option>
-          <option value="false">Non</option>
-        </select>
-      </div>
-      <div class="filter-group">
         <label>Dernière MAJ DexScreener:</label>
         <div class="preset-buttons">
           <button class="preset-btn" onclick="setDexTimeFilter(1, 'hours')">1h</button>
@@ -485,8 +548,7 @@
         • Distribution des scores d'investissement<br>
         • Évolution des volumes 24h<br>
         • Répartition par statut bonding curve<br>
-        • Corrélation price vs liquidity<br>
-        • Analyse DexScreener vs données internes
+        • Corrélation price vs liquidity
       </div>
     </div>
   </div>
@@ -507,18 +569,23 @@
 
     // === GESTION DES ONGLETS ===
     function switchTab(tabName, button) {
+      // Masquer tous les contenus d'onglets
       document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
       });
       
+      // Désactiver tous les onglets
       document.querySelectorAll('.tab').forEach(tab => {
         tab.classList.remove('active');
       });
       
+      // Activer l'onglet et le contenu sélectionnés
       document.getElementById(tabName + '-content').classList.add('active');
       button.classList.add('active');
       
       currentTab = tabName;
+      
+      // Rendre la page selon l'onglet actif
       renderPage();
     }
 
@@ -531,65 +598,6 @@
       } else {
         return new Date(dateString.replace(' ', 'T'));
       }
-    }
-
-    function formatLocalDateTime(dateString) {
-      if (!dateString) return 'Inconnue';
-      
-      const date = parseDateTime(dateString);
-      if (!date || isNaN(date.getTime())) return 'Invalide';
-      
-      return date.toLocaleString('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    }
-
-    function getTimeAgo(dateString) {
-      if (!dateString) return { text: 'Inconnue', className: 'updated-old' };
-      
-      const now = new Date();
-      const updateTime = parseDateTime(dateString);
-      
-      if (!updateTime || isNaN(updateTime.getTime())) {
-        return { text: 'Invalide', className: 'updated-old' };
-      }
-      
-      const diffMs = now - updateTime;
-      const diffMinutes = Math.floor(diffMs / (1000 * 60));
-      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-      
-      let text, className;
-      
-      if (diffMinutes < 1) {
-        text = 'À l\'instant';
-        className = 'updated-recent';
-      } else if (diffMinutes < 60) {
-        text = `${diffMinutes}min`;
-        className = diffMinutes < 30 ? 'updated-recent' : 'updated-medium';
-      } else if (diffHours < 24) {
-        text = `${diffHours}h`;
-        className = diffHours < 6 ? 'updated-medium' : 'updated-old';
-      } else {
-        text = `${diffDays}j`;
-        className = 'updated-old';
-      }
-      
-      return { text, className };
-    }
-
-    function formatPriceChange(value) {
-      if (!value || value === 0) return { text: '0.00%', className: 'price-neutral' };
-      
-      const percentage = parseFloat(value).toFixed(2);
-      const className = value > 0 ? 'price-positive' : 'price-negative';
-      const prefix = value > 0 ? '+' : '';
-      
-      return { text: `${prefix}${percentage}%`, className };
     }
 
     // === FONCTIONS AUTO-REFRESH ===
@@ -680,7 +688,7 @@
         }
     }
 
-    // === FONCTIONS PROGRESSION BONDING CURVE ===
+    // === FONCTION PROGRESSION BONDING CURVE ===
     function getBondingProgressDisplay(status, progress) {
         if (!status || !['active', 'created'].includes(status.toLowerCase())) {
             return '<div class="no-progress">N/A</div>';
@@ -723,33 +731,53 @@
                `<span class="bonding-status bonding-unknown">${status}</span>`;
     }
 
-    // === FONCTIONS DE DONNÉES ===
-    async function fetchData() {
-      if (!isAutoRefreshEnabled) {
-        return;
+    function formatLocalDateTime(dateString) {
+      if (!dateString) return 'Inconnue';
+      
+      const date = parseDateTime(dateString);
+      if (!date || isNaN(date.getTime())) return 'Invalide';
+      
+      return date.toLocaleString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    function getTimeAgo(dateString) {
+      if (!dateString) return { text: 'Inconnue', className: 'updated-old' };
+      
+      const now = new Date();
+      const updateTime = parseDateTime(dateString);
+      
+      if (!updateTime || isNaN(updateTime.getTime())) {
+        return { text: 'Invalide', className: 'updated-old' };
       }
       
-      showRefreshIndicator(true);
-      try {
-        const response = await fetch('/api/tokens-detail');
-        if (!response.ok) throw new Error('Réponse API invalide');
-        data = await response.json();
-        filteredData = [...data];
-        currentPage = 1;
-        renderPage();
-        
-        if (currentTab === 'analysis') {
-          updateAnalysis();
-        }
-      } catch (error) {
-        console.error('Erreur lors du chargement des données:', error);
-        const tbody = document.getElementById('baseTbody');
-        if (tbody) {
-          tbody.innerHTML = '<tr><td colspan="13">Erreur lors du chargement des données</td></tr>';
-        }
-      } finally {
-        showRefreshIndicator(false);
+      const diffMs = now - updateTime;
+      const diffMinutes = Math.floor(diffMs / (1000 * 60));
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      
+      let text, className;
+      
+      if (diffMinutes < 1) {
+        text = 'À l\'instant';
+        className = 'updated-recent';
+      } else if (diffMinutes < 60) {
+        text = `${diffMinutes}min`;
+        className = diffMinutes < 30 ? 'updated-recent' : 'updated-medium';
+      } else if (diffHours < 24) {
+        text = `${diffHours}h`;
+        className = diffHours < 6 ? 'updated-medium' : 'updated-old';
+      } else {
+        text = `${diffDays}j`;
+        className = 'updated-old';
       }
+      
+      return { text, className };
     }
 
     function isWithinTimeFilter(dateString, filterValue, filterUnit) {
@@ -780,6 +808,36 @@
       return diffMs <= thresholdMs;
     }
 
+    // === FONCTIONS DE DONNÉES ===
+    async function fetchData() {
+      if (!isAutoRefreshEnabled) {
+        return;
+      }
+      
+      showRefreshIndicator(true);
+      try {
+        const response = await fetch('/api/tokens-detail');
+        if (!response.ok) throw new Error('Réponse API invalide');
+        data = await response.json();
+        filteredData = [...data];
+        currentPage = 1;
+        renderPage();
+        
+        // Mettre à jour l'analyse si on est sur cet onglet
+        if (currentTab === 'analysis') {
+          updateAnalysis();
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement des données:', error);
+        const tbody = document.getElementById('baseTbody');
+        if (tbody) {
+          tbody.innerHTML = '<tr><td colspan="13">Erreur lors du chargement des données</td></tr>';
+        }
+      } finally {
+        showRefreshIndicator(false);
+      }
+    }
+
     // === FONCTIONS DE FILTRAGE ===
     function setTimeFilter(value, unit) {
       document.getElementById('filterTimeValue').value = value;
@@ -802,10 +860,12 @@
     }
 
     function setDexTimeFilter(value, unit) {
+      // Logique pour filtrer les données DexScreener par temps
       applyDexFilters();
     }
 
     function clearDexTimeFilter() {
+      // Logique pour effacer les filtres temps DexScreener
       applyDexFilters();
     }
 
@@ -869,6 +929,7 @@
     }
 
     function applyDexFilters() {
+      // Filtres spécifiques pour l'onglet DexScreener
       const dexFilters = {
         symbol: document.getElementById('dexFilterSymbol').value.toLowerCase().trim(),
         priceMin: document.getElementById('dexFilterPriceMin').value ? parseFloat(document.getElementById('dexFilterPriceMin').value) : null,
@@ -878,16 +939,10 @@
         volume1hMin: document.getElementById('dexFilterVolume1hMin').value ? parseFloat(document.getElementById('dexFilterVolume1hMin').value) : null,
         volume6hMin: document.getElementById('dexFilterVolume6hMin').value ? parseFloat(document.getElementById('dexFilterVolume6hMin').value) : null,
         volume24hMin: document.getElementById('dexFilterVolume24hMin').value ? parseFloat(document.getElementById('dexFilterVolume24hMin').value) : null,
-        txns24hMin: document.getElementById('dexFilterTxns24hMin').value ? parseFloat(document.getElementById('dexFilterTxns24hMin').value) : null,
-        buys24hMin: document.getElementById('dexFilterBuys24hMin').value ? parseFloat(document.getElementById('dexFilterBuys24hMin').value) : null,
-        sells24hMax: document.getElementById('dexFilterSells24hMax').value ? parseFloat(document.getElementById('dexFilterSells24hMax').value) : null,
-        liquidityQuoteMin: document.getElementById('dexFilterLiquidityQuoteMin').value ? parseFloat(document.getElementById('dexFilterLiquidityQuoteMin').value) : null,
-        hasData: document.getElementById('dexFilterHasData').value
+        txns24hMin: document.getElementById('dexFilterTxns24hMin').value ? parseFloat(document.getElementById('dexFilterTxns24hMin').value) : null
       };
 
       filteredData = data.filter(row => {
-        const hasDexData = (row.dexscreener_price_usd || 0) > 0;
-        
         return (
           (!dexFilters.symbol || row.symbol.toLowerCase().includes(dexFilters.symbol)) &&
           (dexFilters.priceMin === null || (row.dexscreener_price_usd || 0) >= dexFilters.priceMin) &&
@@ -897,11 +952,7 @@
           (dexFilters.volume1hMin === null || (row.dexscreener_volume_1h || 0) >= dexFilters.volume1hMin) &&
           (dexFilters.volume6hMin === null || (row.dexscreener_volume_6h || 0) >= dexFilters.volume6hMin) &&
           (dexFilters.volume24hMin === null || (row.dexscreener_volume_24h || 0) >= dexFilters.volume24hMin) &&
-          (dexFilters.txns24hMin === null || (row.dexscreener_txns_24h || 0) >= dexFilters.txns24hMin) &&
-          (dexFilters.buys24hMin === null || (row.dexscreener_buys_24h || 0) >= dexFilters.buys24hMin) &&
-          (dexFilters.sells24hMax === null || (row.dexscreener_sells_24h || 0) <= dexFilters.sells24hMax) &&
-          (dexFilters.liquidityQuoteMin === null || (row.dexscreener_liquidity_quote || 0) >= dexFilters.liquidityQuoteMin) &&
-          (!dexFilters.hasData || (dexFilters.hasData === 'true' ? hasDexData : !hasDexData))
+          (dexFilters.txns24hMin === null || (row.dexscreener_txns_24h || 0) >= dexFilters.txns24hMin)
         );
       });
 
@@ -967,20 +1018,13 @@
         tbody.innerHTML = '<tr><td colspan="22" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
       } else {
         tbody.innerHTML = rows.map(r => {
-          // ✅ MISE À JOUR: Utiliser l'URL générée par l'API ou construire l'URL
-          const dexUrl = r.dexscreener_url || `https://dexscreener.com/solana/${r.address}`;
-          const dexUrlDisplay = (r.dexscreener_price_usd || 0) > 0 ? 
+          const dexUrl = r.dexscreener_dexscreener_url || '#';
+          const dexUrlDisplay = dexUrl !== '#' ? 
             `<a href="${dexUrl}" target="_blank">🔗 Voir</a>` : 
             'N/A';
           
-          // ✅ MISE À JOUR: Utiliser les vraies colonnes de la base de données
           const pairCreatedAt = formatLocalDateTime(r.dexscreener_pair_created_at);
-          const lastDexUpdate = formatLocalDateTime(r.last_dexscreener_update || r.updated_at);
-          
-          // ✅ MISE À JOUR: Formatage des changements de prix avec couleurs
-          const priceChange1h = formatPriceChange(r.dexscreener_price_change_1h);
-          const priceChange6h = formatPriceChange(r.dexscreener_price_change_6h);
-          const priceChange24h = formatPriceChange(r.dexscreener_price_change_h24);
+          const lastDexUpdate = formatLocalDateTime(r.dexscreener_last_dexscreener_update);
           
           return `
             <tr>
@@ -993,9 +1037,9 @@
               <td>${Math.round(r.dexscreener_volume_1h || 0).toLocaleString()}</td>
               <td>${Math.round(r.dexscreener_volume_6h || 0).toLocaleString()}</td>
               <td>${Math.round(r.dexscreener_volume_24h || 0).toLocaleString()}</td>
-              <td class="${priceChange1h.className}">${priceChange1h.text}</td>
-              <td class="${priceChange6h.className}">${priceChange6h.text}</td>
-              <td class="${priceChange24h.className}">${priceChange24h.text}</td>
+              <td style="color: ${(r.dexscreener_price_change_1h || 0) >= 0 ? '#00ff88' : '#ff6b6b'}">${(r.dexscreener_price_change_1h || 0).toFixed(2)}%</td>
+              <td style="color: ${(r.dexscreener_price_change_6h || 0) >= 0 ? '#00ff88' : '#ff6b6b'}">${(r.dexscreener_price_change_6h || 0).toFixed(2)}%</td>
+              <td style="color: ${(r.dexscreener_price_change_h24 || 0) >= 0 ? '#00ff88' : '#ff6b6b'}">${(r.dexscreener_price_change_h24 || 0).toFixed(2)}%</td>
               <td>${r.dexscreener_txns_1h || 0}</td>
               <td>${r.dexscreener_txns_6h || 0}</td>
               <td>${r.dexscreener_txns_24h || 0}</td>
@@ -1020,7 +1064,7 @@
         return;
       }
 
-      // ✅ MISE À JOUR: Calculer les métriques avec les données DexScreener
+      // Calculer les métriques d'analyse
       const totalTokens = filteredData.length;
       const avgScore = filteredData.reduce((sum, token) => sum + (token.invest_score || 0), 0) / totalTokens;
       const avgLiquidity = filteredData.reduce((sum, token) => sum + (token.liquidity_usd || 0), 0) / totalTokens;
@@ -1031,21 +1075,9 @@
       const activeTokens = filteredData.filter(token => token.bonding_curve_status === 'active').length;
       const migratedTokens = filteredData.filter(token => token.bonding_curve_status === 'migrated').length;
       
-      // ✅ NOUVELLES MÉTRIQUES DEXSCREENER
-      const tokensWithDexData = filteredData.filter(token => (token.dexscreener_price_usd || 0) > 0).length;
       const totalDexVolume = filteredData.reduce((sum, token) => sum + (token.dexscreener_volume_24h || 0), 0);
-      const avgDexPrice = tokensWithDexData > 0 ? 
-        filteredData.filter(token => (token.dexscreener_price_usd || 0) > 0)
-          .reduce((sum, token) => sum + (token.dexscreener_price_usd || 0), 0) / tokensWithDexData : 0;
-      
-      const avgDexMarketCap = tokensWithDexData > 0 ?
-        filteredData.filter(token => (token.dexscreener_market_cap || 0) > 0)
-          .reduce((sum, token) => sum + (token.dexscreener_market_cap || 0), 0) / 
-          filteredData.filter(token => (token.dexscreener_market_cap || 0) > 0).length : 0;
-      
-      const totalDexTxns24h = filteredData.reduce((sum, token) => sum + (token.dexscreener_txns_24h || 0), 0);
-      const totalDexBuys24h = filteredData.reduce((sum, token) => sum + (token.dexscreener_buys_24h || 0), 0);
-      const totalDexSells24h = filteredData.reduce((sum, token) => sum + (token.dexscreener_sells_24h || 0), 0);
+      const avgDexPrice = filteredData.filter(token => (token.dexscreener_price_usd || 0) > 0)
+        .reduce((sum, token, _, arr) => sum + (token.dexscreener_price_usd || 0) / arr.length, 0);
 
       metricsContainer.innerHTML = `
         <div class="metric-card">
@@ -1067,33 +1099,21 @@
         </div>
         
         <div class="metric-card">
-          <div class="metric-title">📈 Avec Données DexScreener</div>
-          <div class="metric-value">${tokensWithDexData}</div>
-          <div class="metric-subtitle">${((tokensWithDexData/totalTokens)*100).toFixed(1)}% des tokens</div>
-        </div>
-        
-        <div class="metric-card">
           <div class="metric-title">💧 Liquidité Moyenne</div>
           <div class="metric-value">${(avgLiquidity/1000).toFixed(1)}K</div>
           <div class="metric-subtitle">Liquidité USD moyenne</div>
         </div>
         
         <div class="metric-card">
-          <div class="metric-title">📊 Volume DexScreener 24h</div>
-          <div class="metric-value">${(totalDexVolume/1000000).toFixed(2)}M</div>
-          <div class="metric-subtitle">Volume total DexScreener</div>
+          <div class="metric-title">📈 Volume Moyen 24h</div>
+          <div class="metric-value">${(avgVolume/1000).toFixed(1)}K</div>
+          <div class="metric-subtitle">Volume moyen par token</div>
         </div>
         
         <div class="metric-card">
-          <div class="metric-title">💰 Prix Moyen DexScreener</div>
-          <div class="metric-value">${avgDexPrice.toFixed(6)}</div>
-          <div class="metric-subtitle">Prix moyen USD</div>
-        </div>
-        
-        <div class="metric-card">
-          <div class="metric-title">🎯 Market Cap Moyen</div>
-          <div class="metric-value">${(avgDexMarketCap/1000000).toFixed(2)}M</div>
-          <div class="metric-subtitle">Market cap moyen DexScreener</div>
+          <div class="metric-title">👥 Holders Moyen</div>
+          <div class="metric-value">${Math.round(avgHolders)}</div>
+          <div class="metric-subtitle">Nombre de détenteurs</div>
         </div>
         
         <div class="metric-card">
@@ -1109,15 +1129,15 @@
         </div>
         
         <div class="metric-card">
-          <div class="metric-title">📊 Transactions 24h</div>
-          <div class="metric-value">${Math.round(totalDexTxns24h/1000)}K</div>
-          <div class="metric-subtitle">Total transactions DexScreener</div>
+          <div class="metric-title">📊 Volume DexScreener</div>
+          <div class="metric-value">${(totalDexVolume/1000000).toFixed(2)}M</div>
+          <div class="metric-subtitle">Volume total 24h</div>
         </div>
         
         <div class="metric-card">
-          <div class="metric-title">💚 Ratio Buys/Sells 24h</div>
-          <div class="metric-value">${totalDexSells24h > 0 ? (totalDexBuys24h/totalDexSells24h).toFixed(2) : '∞'}</div>
-          <div class="metric-subtitle">${totalDexBuys24h} buys / ${totalDexSells24h} sells</div>
+          <div class="metric-title">💰 Prix Moyen DS</div>
+          <div class="metric-value">${avgDexPrice.toFixed(6)}</div>
+          <div class="metric-subtitle">Prix moyen DexScreener</div>
         </div>
       `;
     }
@@ -1156,7 +1176,6 @@
       document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
       document.getElementById('filterTimeUnit').value = '';
       document.getElementById('filterBondingStatus').value = '';
-      document.getElementById('dexFilterHasData').value = '';
       document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
       applyFilters();
     }
@@ -1166,7 +1185,6 @@
       document.getElementById('filterTimeUnit').value = '';
       document.getElementById('filterBondingStatus').value = '';
       document.getElementById('filterDiscoveredAt').value = '';
-      document.getElementById('dexFilterHasData').value = '';
       document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
       filteredData = [...data];
       currentPage = 1;
