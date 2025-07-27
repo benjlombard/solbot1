@@ -107,6 +107,323 @@ class TokenAPI:
         finally:
             conn.close()
 
+
+# Ajouter ces routes à votre fichier flask_api.py existant
+
+@app.route('/dashboard/history')
+def dashboard_history():
+    """Servir le dashboard historique"""
+    return render_template('dashboard_history.html')
+
+@app.route('/api/token-chart-data/<address>')
+def get_token_chart_data(address):
+    """Données formatées pour les graphiques Chart.js"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        days = request.args.get('days', 7, type=int)
+        
+        cursor.execute('''
+            SELECT 
+                snapshot_timestamp,
+                price_usdc,
+                dexscreener_price_usd,
+                dexscreener_volume_24h,
+                volume_24h,
+                dexscreener_liquidity_quote,
+                liquidity_usd,
+                invest_score,
+                holders,
+                bonding_curve_progress,
+                dexscreener_txns_24h,
+                dexscreener_buys_24h,
+                dexscreener_sells_24h,
+                market_cap,
+                dexscreener_market_cap
+            FROM tokens_hist 
+            WHERE address = ? 
+            AND snapshot_timestamp > datetime('now', '-{} days', 'localtime')
+            ORDER BY snapshot_timestamp ASC
+        '''.format(days), (address,))
+        
+        data = cursor.fetchall()
+        
+        # Formater pour Chart.js
+        labels = []
+        datasets = {
+            'price': [],
+            'volume': [],
+            'liquidity': [],
+            'score': [],
+            'holders': [],
+            'progress': [],
+            'transactions': [],
+            'buys': [],
+            'sells': [],
+            'market_cap': []
+        }
+        
+        for row in data:
+            # Formater le timestamp
+            timestamp = datetime.fromisoformat(row['snapshot_timestamp'].replace('Z', '+00:00'))
+            labels.append(timestamp.strftime('%d/%m %H:%M'))
+            
+            # Utiliser le prix DexScreener en priorité, sinon prix USDC
+            price = row['dexscreener_price_usd'] or row['price_usdc'] or 0
+            datasets['price'].append(price)
+            
+            # Volume: DexScreener en priorité
+            volume = row['dexscreener_volume_24h'] or row['volume_24h'] or 0
+            datasets['volume'].append(volume)
+            
+            # Liquidité: DexScreener en priorité
+            liquidity = row['dexscreener_liquidity_quote'] or row['liquidity_usd'] or 0
+            datasets['liquidity'].append(liquidity)
+            
+            # Market Cap: DexScreener en priorité
+            market_cap = row['dexscreener_market_cap'] or row['market_cap'] or 0
+            datasets['market_cap'].append(market_cap)
+            
+            datasets['score'].append(row['invest_score'] or 0)
+            datasets['holders'].append(row['holders'] or 0)
+            datasets['progress'].append(row['bonding_curve_progress'] or 0)
+            datasets['transactions'].append(row['dexscreener_txns_24h'] or 0)
+            datasets['buys'].append(row['dexscreener_buys_24h'] or 0)
+            datasets['sells'].append(row['dexscreener_sells_24h'] or 0)
+        
+        conn.close()
+        
+        return jsonify({
+            'labels': labels,
+            'datasets': datasets,
+            'data_points': len(labels)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting chart data for {address}: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/token-history-stats/<address>')
+def get_token_history_stats(address):
+    """Statistiques détaillées sur l'historique d'un token"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        days = request.args.get('days', 7, type=int)
+        
+        # Récupérer toutes les données historiques
+        cursor.execute('''
+            SELECT 
+                snapshot_timestamp,
+                price_usdc,
+                dexscreener_price_usd,
+                dexscreener_volume_24h,
+                volume_24h,
+                dexscreener_liquidity_quote,
+                liquidity_usd,
+                invest_score,
+                holders,
+                bonding_curve_progress,
+                bonding_curve_status,
+                status,
+                snapshot_reason,
+                market_cap,
+                dexscreener_market_cap,
+                rug_score
+            FROM tokens_hist 
+            WHERE address = ? 
+            AND snapshot_timestamp > datetime('now', '-{} days', 'localtime')
+            ORDER BY snapshot_timestamp ASC
+        '''.format(days), (address,))
+        
+        data = [dict(row) for row in cursor.fetchall()]
+        
+        if not data:
+            return jsonify({
+                'error': 'No historical data found',
+                'data_points': 0
+            })
+        
+        # Calculer les statistiques
+        prices = []
+        volumes = []
+        scores = [row['invest_score'] for row in data if row['invest_score'] is not None]
+        holders_list = [row['holders'] for row in data if row['holders'] is not None]
+        
+        # Prix: priorité DexScreener
+        for row in data:
+            price = row['dexscreener_price_usd'] or row['price_usdc']
+            if price and price > 0:
+                prices.append(price)
+        
+        # Volume: priorité DexScreener
+        for row in data:
+            volume = row['dexscreener_volume_24h'] or row['volume_24h']
+            if volume and volume > 0:
+                volumes.append(volume)
+        
+        stats = {
+            'data_points': len(data),
+            'period_days': days,
+            'first_snapshot': data[0]['snapshot_timestamp'],
+            'last_snapshot': data[-1]['snapshot_timestamp'],
+            'snapshot_frequency_hours': round((days * 24) / max(len(data) - 1, 1), 2) if len(data) > 1 else 0,
+        }
+        
+        # Statistiques de prix
+        if prices:
+            stats['price_stats'] = {
+                'min': round(min(prices), 8),
+                'max': round(max(prices), 8),
+                'avg': round(sum(prices) / len(prices), 8),
+                'first': round(prices[0], 8),
+                'last': round(prices[-1], 8),
+                'change_pct': round(((prices[-1] - prices[0]) / prices[0]) * 100, 2) if prices[0] > 0 else 0,
+                'volatility': round((max(prices) - min(prices)) / max(prices) * 100, 2) if max(prices) > 0 else 0
+            }
+        
+        # Statistiques de volume
+        if volumes:
+            stats['volume_stats'] = {
+                'min': round(min(volumes)),
+                'max': round(max(volumes)),
+                'avg': round(sum(volumes) / len(volumes)),
+                'total': round(sum(volumes)),
+                'last': round(volumes[-1])
+            }
+        
+        # Statistiques de score
+        if scores:
+            stats['score_stats'] = {
+                'min': round(min(scores), 2),
+                'max': round(max(scores), 2),
+                'avg': round(sum(scores) / len(scores), 2),
+                'first': round(scores[0], 2),
+                'last': round(scores[-1], 2),
+                'change': round(scores[-1] - scores[0], 2)
+            }
+        
+        # Statistiques de holders
+        if holders_list:
+            stats['holders_stats'] = {
+                'min': min(holders_list),
+                'max': max(holders_list),
+                'first': holders_list[0],
+                'last': holders_list[-1],
+                'change': holders_list[-1] - holders_list[0],
+                'growth_pct': round(((holders_list[-1] - holders_list[0]) / max(holders_list[0], 1)) * 100, 2)
+            }
+        
+        # Analyse des changements de statut
+        status_changes = []
+        bonding_changes = []
+        
+        for i in range(1, len(data)):
+            if data[i]['status'] != data[i-1]['status']:
+                status_changes.append({
+                    'timestamp': data[i]['snapshot_timestamp'],
+                    'from': data[i-1]['status'],
+                    'to': data[i]['status']
+                })
+            
+            if data[i]['bonding_curve_status'] != data[i-1]['bonding_curve_status']:
+                bonding_changes.append({
+                    'timestamp': data[i]['snapshot_timestamp'],
+                    'from': data[i-1]['bonding_curve_status'],
+                    'to': data[i]['bonding_curve_status']
+                })
+        
+        stats['status_changes'] = status_changes
+        stats['bonding_changes'] = bonding_changes
+        
+        # Répartition des raisons de snapshot
+        snapshot_reasons = {}
+        for row in data:
+            reason = row['snapshot_reason'] or 'unknown'
+            snapshot_reasons[reason] = snapshot_reasons.get(reason, 0) + 1
+        
+        stats['snapshot_reasons'] = snapshot_reasons
+        
+        conn.close()
+        
+        return jsonify(stats)
+        
+    except Exception as e:
+        logger.error(f"Error getting history stats for {address}: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/token-trends/<address>')
+def get_token_trends(address):
+    """Récupérer les tendances historiques d'un token spécifique"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Paramètres de requête
+        days = request.args.get('days', 7, type=int)
+        limit = request.args.get('limit', 100, type=int)
+        
+        # Récupérer les données historiques
+        cursor.execute('''
+            SELECT 
+                snapshot_timestamp,
+                price_usdc,
+                dexscreener_price_usd,
+                market_cap,
+                dexscreener_market_cap,
+                liquidity_usd,
+                dexscreener_liquidity_quote,
+                volume_24h,
+                dexscreener_volume_24h,
+                holders,
+                invest_score,
+                rug_score,
+                bonding_curve_progress,
+                dexscreener_txns_24h,
+                dexscreener_buys_24h,
+                dexscreener_sells_24h,
+                bonding_curve_status,
+                status,
+                snapshot_reason
+            FROM tokens_hist 
+            WHERE address = ? 
+            AND snapshot_timestamp > datetime('now', '-{} days', 'localtime')
+            ORDER BY snapshot_timestamp ASC
+            LIMIT ?
+        '''.format(days), (address, limit))
+        
+        historical_data = [dict(row) for row in cursor.fetchall()]
+        
+        # Récupérer les infos de base du token
+        cursor.execute('''
+            SELECT symbol, name, address, first_discovered_at
+            FROM tokens 
+            WHERE address = ?
+        ''', (address,))
+        
+        token_row = cursor.fetchone()
+        token_info = dict(token_row) if token_row else {}
+        
+        conn.close()
+        
+        return jsonify({
+            'token_info': token_info,
+            'historical_data': historical_data,
+            'data_points': len(historical_data),
+            'period_days': days
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting trends for {address}: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+
 # Mise à jour de l'endpoint tokens-detail pour inclure DexScreener
 @app.route('/api/tokens-detail')
 def get_tokens_detail():
@@ -170,6 +487,314 @@ def get_tokens_detail():
         return jsonify({"error": "Internal server error"}), 500
     finally:
         conn.close()
+
+@app.route('/api/token-has-history/<address>')
+def check_token_history(address):
+    """Vérifier si un token a des données historiques"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT COUNT(*) FROM tokens_hist 
+            WHERE address = ?
+        ''', (address,))
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        return jsonify({
+            'has_history': count > 0,
+            'data_points': count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking history for {address}: {e}")
+        return jsonify({"has_history": False, "data_points": 0}), 500
+
+@app.route('/api/trends-summary')
+def get_trends_summary():
+    """Récupérer un résumé des tendances pour tous les tokens actifs"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Paramètres
+        hours = request.args.get('hours', 24, type=int)
+        min_snapshots = request.args.get('min_snapshots', 2, type=int)
+        
+        # Récupérer les tokens avec suffisamment de données historiques
+        cursor.execute('''
+            SELECT 
+                t.address,
+                t.symbol,
+                t.name,
+                COUNT(th.snapshot_timestamp) as snapshot_count,
+                MIN(th.snapshot_timestamp) as first_snapshot,
+                MAX(th.snapshot_timestamp) as last_snapshot,
+                
+                -- Prix: première et dernière valeur
+                (SELECT price_usdc FROM tokens_hist th2 
+                 WHERE th2.address = t.address 
+                 AND th2.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                 ORDER BY th2.snapshot_timestamp ASC LIMIT 1) as price_start,
+                 
+                (SELECT price_usdc FROM tokens_hist th2 
+                 WHERE th2.address = t.address 
+                 AND th2.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                 ORDER BY th2.snapshot_timestamp DESC LIMIT 1) as price_end,
+                
+                -- Volume: moyenne et tendance
+                AVG(th.dexscreener_volume_24h) as avg_volume,
+                MAX(th.dexscreener_volume_24h) as max_volume,
+                
+                -- Liquidité: tendance
+                (SELECT dexscreener_liquidity_quote FROM tokens_hist th2 
+                 WHERE th2.address = t.address 
+                 AND th2.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                 ORDER BY th2.snapshot_timestamp ASC LIMIT 1) as liquidity_start,
+                 
+                (SELECT dexscreener_liquidity_quote FROM tokens_hist th2 
+                 WHERE th2.address = t.address 
+                 AND th2.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                 ORDER BY th2.snapshot_timestamp DESC LIMIT 1) as liquidity_end,
+                
+                -- Score d'investissement: tendance
+                (SELECT invest_score FROM tokens_hist th2 
+                 WHERE th2.address = t.address 
+                 AND th2.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                 ORDER BY th2.snapshot_timestamp ASC LIMIT 1) as score_start,
+                 
+                (SELECT invest_score FROM tokens_hist th2 
+                 WHERE th2.address = t.address 
+                 AND th2.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                 ORDER BY th2.snapshot_timestamp DESC LIMIT 1) as score_end,
+                
+                -- Progression bonding curve
+                MAX(th.bonding_curve_progress) as max_bonding_progress,
+                
+                -- Holders: tendance
+                (SELECT holders FROM tokens_hist th2 
+                 WHERE th2.address = t.address 
+                 AND th2.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                 ORDER BY th2.snapshot_timestamp DESC LIMIT 1) as current_holders,
+                
+                t.bonding_curve_status,
+                t.status
+                
+            FROM tokens t
+            JOIN tokens_hist th ON t.address = th.address
+            WHERE th.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+            AND t.symbol IS NOT NULL 
+            AND t.symbol != 'UNKNOWN'
+            GROUP BY t.address, t.symbol, t.name
+            HAVING COUNT(th.snapshot_timestamp) >= ?
+            ORDER BY snapshot_count DESC, MAX(th.snapshot_timestamp) DESC
+            LIMIT 50
+        '''.format(hours, hours, hours, hours, hours, hours), (min_snapshots,))
+        
+        tokens_summary = []
+        for row in cursor.fetchall():
+            row_dict = dict(row)
+            
+            # Calculer les variations en pourcentage
+            price_change = 0
+            if row_dict['price_start'] and row_dict['price_end'] and row_dict['price_start'] > 0:
+                price_change = ((row_dict['price_end'] - row_dict['price_start']) / row_dict['price_start']) * 100
+            
+            liquidity_change = 0
+            if row_dict['liquidity_start'] and row_dict['liquidity_end'] and row_dict['liquidity_start'] > 0:
+                liquidity_change = ((row_dict['liquidity_end'] - row_dict['liquidity_start']) / row_dict['liquidity_start']) * 100
+            
+            score_change = 0
+            if row_dict['score_start'] and row_dict['score_end']:
+                score_change = row_dict['score_end'] - row_dict['score_start']
+            
+            # Déterminer la tendance générale
+            trend_score = 0
+            if price_change > 0: trend_score += 1
+            if liquidity_change > 0: trend_score += 1
+            if score_change > 0: trend_score += 1
+            
+            if trend_score >= 2:
+                trend = "bullish"
+            elif trend_score <= 1 and (price_change < -10 or score_change < -5):
+                trend = "bearish"
+            else:
+                trend = "neutral"
+            
+            row_dict.update({
+                'price_change_pct': round(price_change, 2),
+                'liquidity_change_pct': round(liquidity_change, 2),
+                'score_change': round(score_change, 2),
+                'trend': trend,
+                'trend_score': trend_score
+            })
+            
+            tokens_summary.append(row_dict)
+        
+        conn.close()
+        
+        return jsonify({
+            'tokens': tokens_summary,
+            'period_hours': hours,
+            'total_tokens': len(tokens_summary)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting trends summary: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route('/api/trending-tokens')
+def get_trending_tokens():
+    """Récupérer les tokens avec les meilleures tendances récentes"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        hours = request.args.get('hours', 6, type=int)
+        limit = request.args.get('limit', 20, type=int)
+        
+        # Requête pour trouver les tokens avec les meilleures performances récentes
+        cursor.execute('''
+            WITH recent_performance AS (
+                SELECT 
+                    t.address,
+                    t.symbol,
+                    t.name,
+                    
+                    -- Prix: première et dernière valeur
+                    (SELECT COALESCE(dexscreener_price_usd, price_usdc) FROM tokens_hist th 
+                     WHERE th.address = t.address 
+                     AND th.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                     AND COALESCE(th.dexscreener_price_usd, th.price_usdc) > 0
+                     ORDER BY th.snapshot_timestamp ASC LIMIT 1) as price_start,
+                     
+                    (SELECT COALESCE(dexscreener_price_usd, price_usdc) FROM tokens_hist th 
+                     WHERE th.address = t.address 
+                     AND th.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                     AND COALESCE(th.dexscreener_price_usd, th.price_usdc) > 0
+                     ORDER BY th.snapshot_timestamp DESC LIMIT 1) as price_end,
+                    
+                    -- Volume récent
+                    AVG(COALESCE(th.dexscreener_volume_24h, th.volume_24h, 0)) as avg_volume,
+                    MAX(COALESCE(th.dexscreener_volume_24h, th.volume_24h, 0)) as max_volume,
+                    
+                    -- Score d'investissement
+                    (SELECT invest_score FROM tokens_hist th 
+                     WHERE th.address = t.address 
+                     AND th.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                     AND th.invest_score IS NOT NULL
+                     ORDER BY th.snapshot_timestamp ASC LIMIT 1) as score_start,
+                     
+                    (SELECT invest_score FROM tokens_hist th 
+                     WHERE th.address = t.address 
+                     AND th.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                     AND th.invest_score IS NOT NULL
+                     ORDER BY th.snapshot_timestamp DESC LIMIT 1) as score_end,
+                    
+                    -- Données actuelles du token principal
+                    t.price_usdc,
+                    t.dexscreener_price_usd,
+                    t.invest_score,
+                    t.volume_24h,
+                    t.dexscreener_volume_24h,
+                    t.liquidity_usd,
+                    t.dexscreener_liquidity_quote,
+                    t.holders,
+                    t.bonding_curve_status,
+                    t.bonding_curve_progress,
+                    
+                    COUNT(th.snapshot_timestamp) as snapshot_count
+                    
+                FROM tokens t
+                JOIN tokens_hist th ON t.address = th.address
+                WHERE th.snapshot_timestamp > datetime('now', '-{} hours', 'localtime')
+                AND t.symbol IS NOT NULL 
+                AND t.symbol != 'UNKNOWN'
+                AND t.symbol != ''
+                AND (t.status IS NULL OR t.status IN ('active', 'new'))
+                GROUP BY t.address
+                HAVING COUNT(th.snapshot_timestamp) >= 2
+            )
+            SELECT *,
+                -- Calculer les variations
+                CASE 
+                    WHEN price_start > 0 AND price_end > 0 
+                    THEN ((price_end - price_start) / price_start) * 100 
+                    ELSE 0 
+                END as price_change_pct,
+                
+                CASE 
+                    WHEN score_start IS NOT NULL AND score_end IS NOT NULL 
+                    THEN score_end - score_start 
+                    ELSE 0 
+                END as score_change,
+                
+                -- Score de tendance composite
+                (
+                    CASE 
+                        WHEN price_start > 0 AND price_end > 0 
+                        THEN ((price_end - price_start) / price_start) * 100 * 2  -- Pondération prix x2
+                        ELSE 0 
+                    END +
+                    CASE 
+                        WHEN score_start IS NOT NULL AND score_end IS NOT NULL 
+                        THEN (score_end - score_start) * 1  -- Pondération score x1
+                        ELSE 0 
+                    END +
+                    CASE 
+                        WHEN avg_volume > 10000 THEN 5  -- Bonus pour volume élevé
+                        WHEN avg_volume > 1000 THEN 2
+                        ELSE 0 
+                    END
+                ) as trend_score
+                
+            FROM recent_performance
+            WHERE price_start > 0 AND price_end > 0  -- Avoir des données de prix valides
+            ORDER BY trend_score DESC, price_change_pct DESC
+            LIMIT ?
+        '''.format(hours, hours, hours, hours, hours), (limit,))
+        
+        trending_tokens = []
+        for row in cursor.fetchall():
+            row_dict = dict(row)
+            
+            # Déterminer la tendance
+            trend_score = row_dict['trend_score']
+            price_change = row_dict['price_change_pct']
+            
+            if trend_score > 10 and price_change > 20:
+                trend = "hot"
+            elif trend_score > 5 and price_change > 10:
+                trend = "bullish"
+            elif trend_score < -5 and price_change < -10:
+                trend = "bearish"
+            else:
+                trend = "neutral"
+            
+            row_dict['trend'] = trend
+            row_dict['current_price'] = row_dict['dexscreener_price_usd'] or row_dict['price_usdc']
+            row_dict['current_volume'] = row_dict['dexscreener_volume_24h'] or row_dict['volume_24h']
+            row_dict['current_liquidity'] = row_dict['dexscreener_liquidity_quote'] or row_dict['liquidity_usd']
+            
+            trending_tokens.append(row_dict)
+        
+        conn.close()
+        
+        return jsonify({
+            'trending_tokens': trending_tokens,
+            'period_hours': hours,
+            'total_found': len(trending_tokens)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting trending tokens: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
 
 # Nouvel endpoint spécifique aux données DexScreener
 @app.route('/api/dexscreener-data')
@@ -428,14 +1053,19 @@ def index():
         "endpoints": [
             "/api/stats",
             "/api/tokens-detail",
-            "/api/dexscreener-data",
+            "/api/dexscreener-data", 
+            "/api/token-chart-data/<address>",
+            "/api/token-history-stats/<address>",
+            "/api/token-trends/<address>",
             "/api/dashboard-data",
             "/api/performance",
             "/api/health",
             "/dashboard",
-            "/dashboard/detail"
+            "/dashboard/detail",
+            "/dashboard/history"
         ]
     })
+
 
 if __name__ == '__main__':
     logging.basicConfig(

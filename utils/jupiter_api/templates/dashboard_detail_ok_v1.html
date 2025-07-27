@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>📊 Token Detail Report</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard_detail.css') }}">
+</head>
+<body>
+  <!-- Navigation -->
+  <div class="nav">
+    <h1>📊 Token Detail Report</h1>
+    <a href="/dashboard">← Retour au Dashboard</a>
+  </div>
+
+  <!-- Contrôles -->
+  <div class="controls">
+    <button onclick="reloadData()">🔄 Actualiser</button>
+    <button onclick="resetFilters()">🧹 Réinitialiser Filtres</button>
+    <label>Afficher
+        <select id="perPage" onchange="changePerPage()">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+        </select> tokens
+    </label>
+    
+    <!-- Contrôle auto-refresh -->
+    <div class="auto-refresh-section">
+        <div class="auto-refresh-toggle">
+            <label for="autoRefreshEnabled">Auto-refresh:</label>
+            <div class="toggle-switch active" id="autoRefreshToggle" onclick="toggleAutoRefresh()"></div>
+        </div>
+        
+        <select id="refreshInterval" onchange="updateRefreshInterval()">
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+            <option value="30000" selected>30s</option>
+            <option value="60000">1min</option>
+            <option value="300000">5min</option>
+        </select>
+        
+        <div class="refresh-indicator active" id="refreshIndicator">
+            <span>🔄</span>
+            <span id="refreshStatus">Auto-refresh: 30s</span>
+        </div>
+    </div>
+  </div>
+
+  <!-- Onglets -->
+  <div class="tabs-container">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('base', this)">📊 Données de Base</button>
+      <button class="tab" onclick="switchTab('dexscreener', this)">📈 DexScreener</button>
+      <button class="tab" onclick="switchTab('analysis', this)">🔬 Analyse</button>
+    </div>
+  </div>
+
+  <!-- Contenu Onglet Données de Base -->
+  <div id="base-content" class="tab-content active">
+    <!-- Légende des statuts -->
+    <div class="status-legend">
+      <div class="legend-item">
+          <span class="bonding-status bonding-created">Created</span>
+          <span>Nouveau token détecté</span>
+      </div>
+      <div class="legend-item">
+          <span class="bonding-status bonding-active">Active</span>
+          <span>Bonding curve en cours</span>
+      </div>
+      <div class="legend-item">
+          <span class="bonding-status bonding-completed">Completed</span>
+          <span>Bonding curve terminée</span>
+      </div>
+      <div class="legend-item">
+          <span class="bonding-status bonding-migrated">Migrated</span>
+          <span>Migré vers Raydium</span>
+      </div>
+      <div class="legend-item">
+          <span class="bonding-status bonding-terminated">Terminated</span>
+          <span>Bonding curve arrêtée</span>
+      </div>
+    </div>
+
+    <!-- Panneau des filtres -->
+    <div class="filter-panel">
+      <!-- Filtres temporels avec boutons présets -->
+      <div class="filter-group">
+        <label>🕒 Mis à jour depuis:</label>
+        <div class="preset-buttons">
+          <button class="preset-btn" onclick="setTimeFilter(15, 'minutes',this)">15min</button>
+          <button class="preset-btn" onclick="setTimeFilter(30, 'minutes',this)">30min</button>
+          <button class="preset-btn" onclick="setTimeFilter(1, 'hours',this)">1h</button>
+          <button class="preset-btn" onclick="setTimeFilter(6, 'hours',this)">6h</button>
+          <button class="preset-btn" onclick="setTimeFilter(24, 'hours',this)">24h</button>
+          <button class="preset-btn" onclick="clearTimeFilter(this)">Tout</button>
+        </div>
+        <input type="number" id="filterTimeValue" class="time-filter" placeholder="Valeur" min="1">
+        <select id="filterTimeUnit" class="time-unit">
+          <option value="">-</option>
+          <option value="minutes">Minutes</option>
+          <option value="hours">Heures</option>
+          <option value="days">Jours</option>
+        </select>
+      </div>
+      
+      <div class="filter-group">
+        <label>Symbol:</label><input type="text" id="filterSymbol" placeholder="Symbol (e.g., DNT)">
+        
+        <!-- Nouveau filtre Bonding Curve -->
+        <label>🔗 Bonding Curve:</label>
+        <select id="filterBondingStatus" class="bonding-filter">
+          <option value="">Tous les statuts</option>
+          <option value="created">Created (Nouveau)</option>
+          <option value="active">Active (En cours)</option>
+          <option value="completed">Completed (Terminée)</option>
+          <option value="migrated">Migrated (Migrée)</option>
+          <option value="terminated">Terminated (Arrêtée)</option>
+          <option value="unknown">Unknown (Inconnu)</option>
+        </select>
+        
+        <label>📊 Progress Min (%):</label><input type="number" id="filterProgressMin" placeholder="Min %" min="0" max="100" step="1" style="width: 80px;">
+        <label>Progress Max (%):</label><input type="number" id="filterProgressMax" placeholder="Max %" min="0" max="100" step="1" style="width: 80px;">
+        
+        <label>Price Min ($):</label><input type="number" id="filterPriceMin" placeholder="Min" step="0.000001">
+        <label>Price Max ($):</label><input type="number" id="filterPriceMax" placeholder="Max" step="0.000001">
+      </div>
+      
+      <div class="filter-group">
+        <label>Score Min:</label><input type="number" id="filterScoreMin" placeholder="Min" step="0.1">
+        <label>Score Max:</label><input type="number" id="filterScoreMax" placeholder="Max" step="0.1">
+        <label>Liquidity Min ($):</label><input type="number" id="filterLiquidityMin" placeholder="Min 5000" title="Recommandé: ≥ 5,000 $">
+        <label>Liquidity Max ($):</label><input type="number" id="filterLiquidityMax" placeholder="Max">
+        <label>Volume Min ($):</label><input type="number" id="filterVolumeMin" placeholder="Min 100000" title="Recommandé: ≥ 100,000 $">
+        <label>Volume Max ($):</label><input type="number" id="filterVolumeMax" placeholder="Max">
+      </div>
+      
+      <div class="filter-group">
+        <label>Holders Min:</label><input type="number" id="filterHoldersMin" placeholder="Min 500" title="Recommandé: ≥ 500">
+        <label>Holders Max:</label><input type="number" id="filterHoldersMax" placeholder="Max">
+        <label>Age Min (h):</label><input type="number" id="filterAgeMin" placeholder="Min 6" step="0.1" title="Recommandé: ≥ 6 heures">
+        <label>Age Max (h):</label><input type="number" id="filterAgeMax" placeholder="Max" step="0.1">
+        <label>Risk Min:</label><input type="number" id="filterRiskMin" placeholder="Min">
+        <label>Risk Max:</label><input type="number" id="filterRiskMax" placeholder="Max 50" title="Recommandé: ≤ 50">
+        <label>Date Découverte:</label><input type="date" id="filterDiscoveredAt" placeholder="Discovered At">
+      </div>
+    </div>
+
+    <!-- Tableau données de base -->
+    <table id="baseTable">
+      <thead>
+        <tr>
+          <th>⭐</th>
+          <th>Symbol</th>
+          <th>Price ($)</th>
+          <th>Score</th>
+          <th>Liquidity ($)</th>
+          <th>Volume 24h ($)</th>
+          <th>Holders</th>
+          <th>Age (h)</th>
+          <th>Risk</th>
+          <th>Bonding Curve</th>
+          <th>Progress</th>
+          <th>Dernière MAJ</th>
+          <th>Découvert</th>
+        </tr>
+      </thead>
+      <tbody id="baseTbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Contenu Onglet DexScreener -->
+  <div id="dexscreener-content" class="tab-content">
+    <div class="filter-panel">
+      <div class="filter-group">
+        <label>Symbol:</label><input type="text" id="dexFilterSymbol" placeholder="Symbol">
+        <label>📊 Status:</label> <select id="dexFilterStatus" class="status-filter"> <option value="">Tous les status</option> <option value="active">Active</option> <option value="inactive">Inactive</option> <option value="no_dex_data">No Dex Data</option> <option value="archived">Archived</option> <option value="blacklisted">Blacklisted</option> </select>
+        <label>Prix DexScreener Min ($):</label><input type="number" id="dexFilterPriceMin" placeholder="Min" step="0.000001">
+        <label>Prix DexScreener Max ($):</label><input type="number" id="dexFilterPriceMax" placeholder="Max" step="0.000001">
+        <label>Market Cap Min ($):</label><input type="number" id="dexFilterMarketCapMin" placeholder="Min">
+        <label>Market Cap Max ($):</label><input type="number" id="dexFilterMarketCapMax" placeholder="Max">
+      </div>
+      <div class="filter-group">
+        <label>Volume 1h Min:</label><input type="number" id="dexFilterVolume1hMin" placeholder="Min">
+        <label>Volume 6h Min:</label><input type="number" id="dexFilterVolume6hMin" placeholder="Min">
+        <label>Volume 24h Min:</label><input type="number" id="dexFilterVolume24hMin" placeholder="Min">
+        <label>Transactions 24h Min:</label><input type="number" id="dexFilterTxns24hMin" placeholder="Min">
+      </div>
+      <div class="filter-group">
+        <label>Buys 24h Min:</label><input type="number" id="dexFilterBuys24hMin" placeholder="Min">
+        <label>Sells 24h Max:</label><input type="number" id="dexFilterSells24hMax" placeholder="Max">
+        <label>Liquidity Quote Min:</label><input type="number" id="dexFilterLiquidityQuoteMin" placeholder="Min">
+        <label>Avec données DexScreener:</label>
+        <select id="dexFilterHasData">
+          <option value="">Tous</option>
+          <option value="true">Oui</option>
+          <option value="false">Non</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Dernière MAJ DexScreener:</label>
+        <div class="preset-buttons">
+          <button class="preset-btn" onclick="setDexTimeFilter(5, 'minutes', this)">5min</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(30, 'minutes', this)">30min</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(1, 'hours', this)">1h</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(6, 'hours', this)">6h</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(24, 'hours', this)">24h</button>
+          <button class="preset-btn" onclick="clearDexTimeFilter(this)">Tout</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tableau DexScreener -->
+    <table id="dexscreenerTable">
+      <thead>
+        <tr>
+          <th>⭐</th>
+          <th>Symbol / Actions</th>
+          <th>Status</th>
+          <th>Prix DS ($)</th>
+          <th>Market Cap ($)</th>
+          <th>Liq. Base</th>
+          <th>Liq. Quote ($)</th>
+          <th>Vol 1h ($)</th>
+          <th>Vol 6h ($)</th>
+          <th>Vol 24h ($)</th>
+          <th>Δ Prix 1h (%)</th>
+          <th>Δ Prix 6h (%)</th>
+          <th>Δ Prix 24h (%)</th>
+          <th>Txns 1h</th>
+          <th>Txns 6h</th>
+          <th>Txns 24h</th>
+          <th>Buys 1h</th>
+          <th>Sells 1h</th>
+          <th>Buys 24h</th>
+          <th>Sells 24h</th>
+          <th>Progress</th>
+          <th>URL DexScreener</th>
+          <th>Créé le</th>
+          <th>MAJ DS</th>
+        </tr>
+      </thead>
+      <tbody id="dexscreenerTbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Contenu Onglet Analyse -->
+  <div id="analysis-content" class="tab-content">
+    <div class="analysis-container">
+      <h2>📊 Analyse des Données</h2>
+      
+      <div class="metrics-grid" id="analysisMetrics">
+        <!-- Les métriques seront générées dynamiquement -->
+      </div>
+      
+      <div class="chart-placeholder">
+        📈 Graphiques d'analyse en temps réel
+        <br><br>
+        • Distribution des scores d'investissement<br>
+        • Évolution des volumes 24h<br>
+        • Répartition par statut bonding curve<br>
+        • Corrélation price vs liquidity<br>
+        • Analyse DexScreener vs données internes
+      </div>
+    </div>
+  </div>
+
+  <!-- Pagination -->
+  <div class="pagination">
+    <button id="prevBtn" onclick="prevPage()">Précédent</button>
+    <span id="pageInfo"></span>
+    <button id="nextBtn" onclick="nextPage()">Suivant</button>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/dashboard_detail.js') }}"></script>
+</body>
+</html>
