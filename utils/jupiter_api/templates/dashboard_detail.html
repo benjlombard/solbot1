@@ -1,238 +1,571 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>📊 Token Detail Report</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { margin: 0; font-family: "Segoe UI", sans-serif; background: #0f0f23; color: #fff; }
-    .nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; background: #1e1e38; }
-    .nav a { color: #00d4ff; text-decoration: none; }
-    .controls { display: flex; gap: 1rem; align-items: center; padding: 1rem 2rem; background: #16213e; flex-wrap: wrap; }
-    
-    /* Système d'onglets */
-    .tabs-container { background: #16213e; border-bottom: 1px solid #2a2a4a; }
-    .tabs { display: flex; padding: 0 2rem; gap: 0.5rem; }
-    .tab { 
-      padding: 1rem 1.5rem; 
-      background: transparent; 
-      border: none; 
-      color: #888; 
-      cursor: pointer; 
+    :root {
+      --primary: #00d4ff;
+      --primary-dark: #00aaff;
+      --secondary: #2a2a4a;
+      --background: #0f0f23;
+      --text: #ffffff;
+      --text-muted: #aaaaaa;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: var(--background);
+      color: var(--text);
+      transition: background 0.3s ease, color 0.3s ease;
+    }
+
+    body.light-theme {
+      --background: #f5f5f5;
+      --secondary: #e0e0e0;
+      --text: #333333;
+      --text-muted: #666666;
+    }
+
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      background: var(--secondary);
+      border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+    }
+
+    .nav h1 {
+      letter-spacing: 0.02em;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .nav a, .nav button {
+      color: var(--primary);
+      text-decoration: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    .controls {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem 2rem;
+      background: var(--secondary);
+      flex-wrap: wrap;
+    }
+
+    .controls button {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      border: none;
+      background: var(--primary);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .controls button:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    .controls button:active {
+      transform: translateY(0);
+    }
+
+    .tabs-container {
+      background: var(--secondary);
+      border-bottom: 1px solid var(--primary-dark);
+    }
+
+    .tabs {
+      display: flex;
+      padding: 0 2rem;
+      gap: 0.5rem;
+    }
+
+    .tab {
+      padding: 1rem 1.5rem;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
       border-bottom: 3px solid transparent;
       font-size: 0.9rem;
       font-weight: 500;
       transition: all 0.3s ease;
     }
-    .tab:hover { color: #00d4ff; }
-    .tab.active { 
-      color: #00d4ff; 
-      border-bottom-color: #00d4ff; 
+
+    .tab:hover {
+      color: var(--primary);
+    }
+
+    .tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
       background: rgba(0, 212, 255, 0.1);
     }
-    
-    /* Contenu des onglets */
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-    
-    .filter-panel { padding: 1rem 2rem; background: #16213e; border-bottom: 1px solid #2a2a4a; }
-    .filter-panel .filter-group { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
-    .filter-panel .filter-group label { margin-right: 0.5rem; color: #00d4ff; font-size: 0.9rem; }
-    .filter-panel .filter-group input, .filter-panel .filter-group select { 
-      padding: 0.4rem; border: none; border-radius: 4px; background: #2a2a4a; color: #fff; width: 100px; font-size: 0.9rem; 
-    }
-    .filter-panel .filter-group input:focus, .filter-panel .filter-group select:focus { 
-      outline: none; border: 1px solid #00d4ff; 
-    }
-    .filter-panel .filter-group .time-filter { width: 120px; }
-    .filter-panel .filter-group .time-unit { width: 80px; }
-    .filter-panel .filter-group .bonding-filter { width: 120px; }
-    
-    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.8rem; }
-    th, td { padding: 0.4rem 0.3rem; border-bottom: 1px solid #2a2a4a; text-align: left; }
-    th { background: #0f3460; position: sticky; top: 0; font-size: 0.75rem; }
-    .price { color: #00ff88; font-weight: bold; }
-    .score { color: #ffaa00; font-weight: bold; }
-    .updated-recent { color: #00ff88; font-weight: bold; }
-    .updated-old { color: #ff6b6b; }
-    .updated-medium { color: #ffaa00; }
-    .pagination { display: flex; gap: 0.5rem; padding: 1rem 2rem; justify-content: space-between; }
-    .pagination button { padding: 0.4rem 0.8rem; border: none; border-radius: 4px; background: #00d4ff; color: #fff; cursor: pointer; }
-    .pagination button:disabled { background: #444; cursor: not-allowed; }
-    .fav { color: gold; cursor: pointer; }
-    .no-data { text-align: center; padding: 1rem; color: #888; }
-    .preset-buttons { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
-    .preset-btn { 
-      padding: 0.3rem 0.6rem; border: none; border-radius: 3px; background: #2a2a4a; 
-      color: #00d4ff; cursor: pointer; font-size: 0.8rem; 
-    }
-    .preset-btn:hover { background: #00d4ff; color: #fff; }
-    .preset-btn.active { background: #00d4ff; color: #fff; }
 
-    /* Contrôles auto-refresh */
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .filter-panel {
+      padding: 1rem 2rem;
+      background: var(--secondary);
+      border-bottom: 1px solid var(--primary-dark);
+    }
+
+    .filter-panel .filter-group {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .filter-panel .filter-group label {
+      margin-right: 0.5rem;
+      color: var(--primary);
+      font-size: 0.9rem;
+      align-self: center;
+    }
+
+    .filter-panel .filter-group input,
+    .filter-panel .filter-group select {
+      padding: 0.4rem;
+      border: none;
+      border-radius: 4px;
+      background: var(--background);
+      color: var(--text);
+      width: 100px;
+      font-size: 0.9rem;
+    }
+
+    .filter-panel .filter-group input:focus,
+    .filter-panel .filter-group select:focus {
+      outline: none;
+      border: 1px solid var(--primary);
+      box-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+    }
+
+    .filter-panel .filter-group .time-filter {
+      width: 120px;
+    }
+
+    .filter-panel .filter-group .time-unit {
+      width: 80px;
+    }
+
+    .filter-panel .filter-group .bonding-filter,
+    .filter-panel .filter-group .status-filter {
+      width: 140px;
+    }
+
+    .filter-active {
+      border: 2px solid var(--primary) !important;
+      box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+      background: rgba(0, 212, 255, 0.1);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.8rem;
+    }
+
+    th, td {
+      padding: 0.6rem 0.8rem;
+      border-bottom: 1px solid var(--primary-dark);
+      text-align: left;
+    }
+
+    th {
+      background: #0f3460;
+      position: sticky;
+      top: 0;
+      font-size: 0.75rem;
+    }
+
+    table tr:hover {
+      background: rgba(0, 212, 255, 0.1);
+      transition: background 0.2s ease;
+    }
+
+    .price {
+      color: #00ff88;
+      font-weight: bold;
+    }
+
+    .score {
+      color: #ffaa00;
+      font-weight: bold;
+    }
+
+    .updated-recent {
+      color: #00ff88;
+      font-weight: bold;
+    }
+
+    .updated-old {
+      color: #ff6b6b;
+    }
+
+    .updated-medium {
+      color: #ffaa00;
+    }
+
+    .pagination {
+      display: flex;
+      gap: 0.5rem;
+      padding: 1rem 2rem;
+      justify-content: space-between;
+    }
+
+    .pagination button {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      background: var(--primary);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .pagination button:disabled {
+      background: var(--text-muted);
+      cursor: not-allowed;
+    }
+
+    .fav {
+      color: gold;
+      cursor: pointer;
+    }
+
+    .no-data {
+      text-align: center;
+      padding: 1rem;
+      color: var(--text-muted);
+    }
+
+    .preset-buttons {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .preset-btn {
+      padding: 0.3rem 0.6rem;
+      border-radius: 3px;
+      background: var(--background);
+      color: var(--primary);
+      cursor: pointer;
+      font-size: 0.8rem;
+      border: 1px solid var(--primary-dark);
+      transition: all 0.2s ease;
+    }
+
+    .preset-btn:hover {
+      background: var(--primary);
+      color: var(--text);
+    }
+
+    .preset-btn.active {
+      background: var(--primary);
+      color: var(--text);
+      border: 1px solid var(--primary-dark);
+      box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+      transform: scale(1.05);
+    }
+
     .auto-refresh-section {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        padding: 0.5rem 1rem;
-        background: #2a2a4a;
-        border: 1px solid #444;
-        border-radius: 6px;
-        font-size: 0.9rem;
-        margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.5rem 1rem;
+      background: var(--secondary);
+      border: 1px solid var(--primary-dark);
+      border-radius: 6px;
+      font-size: 0.9rem;
+      margin-left: auto;
     }
 
     .toggle-switch {
-        position: relative;
-        width: 40px;
-        height: 20px;
-        background: #444;
-        border-radius: 10px;
-        cursor: pointer;
-        transition: background 0.3s;
+      position: relative;
+      width: 40px;
+      height: 20px;
+      background: var(--text-muted);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.3s;
     }
 
-    .toggle-switch.active { background: #00d4ff; }
+    .toggle-switch.active {
+      background: var(--primary);
+    }
 
     .toggle-switch::after {
-        content: '';
-        position: absolute;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: white;
-        top: 2px;
-        left: 2px;
-        transition: transform 0.3s;
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--text);
+      top: 2px;
+      left: 2px;
+      transition: transform 0.3s;
     }
 
-    .toggle-switch.active::after { transform: translateX(20px); }
+    .toggle-switch.active::after {
+      transform: translateX(20px);
+    }
 
-    /* Statuts bonding curve */
     .bonding-status {
-        padding: 3px 8px;
-        border-radius: 12px;
-        font-size: 0.7rem;
-        font-weight: bold;
-        text-transform: uppercase;
-        display: inline-block;
-        min-width: 60px;
-        text-align: center;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 0.7rem;
+      font-weight: bold;
+      text-transform: uppercase;
+      display: inline-block;
+      min-width: 60px;
+      text-align: center;
     }
 
-    .bonding-created { background: linear-gradient(45deg, #4CAF50, #8BC34A); color: #fff; }
-    .bonding-active { background: linear-gradient(45deg, #FF9800, #FFC107); color: #000; }
-    .bonding-completed { background: linear-gradient(45deg, #2196F3, #03A9F4); color: #fff; }
-    .bonding-migrated { background: linear-gradient(45deg, #9C27B0, #E91E63); color: #fff; }
-    .bonding-terminated { background: linear-gradient(45deg, #F44336, #FF5722); color: #fff; }
+    .bonding-created {
+      background: linear-gradient(45deg, #4CAF50, #8BC34A);
+      color: #fff;
+    }
 
-    /* Progress bar */
+    .bonding-active {
+      background: linear-gradient(45deg, #FF9800, #FFC107);
+      color: #000;
+    }
+
+    .bonding-completed {
+      background: linear-gradient(45deg, #2196F3, #03A9F4);
+      color: #fff;
+    }
+
+    .bonding-migrated {
+      background: linear-gradient(45deg, #9C27B0, #E91E63);
+      color: #fff;
+    }
+
+    .bonding-terminated {
+      background: linear-gradient(45deg, #F44336, #FF5722);
+      color: #fff;
+    }
+
     .progress-container {
-        width: 80px;
-        height: 16px;
-        background: #2a2a4a;
-        border-radius: 8px;
-        overflow: hidden;
-        position: relative;
-        border: 1px solid #444;
+      width: 80px;
+      height: 16px;
+      background: var(--secondary);
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid var(--primary-dark);
     }
 
     .progress-bar {
-        height: 100%;
-        border-radius: 8px;
-        background: linear-gradient(90deg, #ff6b35, #00ff9d);
-        transition: width 0.3s ease;
+      height: 100%;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #ff6b35, #00ff9d);
+      transition: width 0.3s ease;
     }
 
     .progress-text {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        font-size: 0.65rem;
-        font-weight: bold;
-        color: #fff;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-        z-index: 2;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 0.65rem;
+      font-weight: bold;
+      color: var(--text);
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+      z-index: 2;
     }
 
-    .no-progress { color: #666; font-size: 0.7rem; text-align: center; }
+    .no-progress {
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      text-align: center;
+    }
 
-    /* Styles pour les changements de prix */
-    .price-positive { color: #00ff88; }
-    .price-negative { color: #ff6b6b; }
-    .price-neutral { color: #888; }
+    .price-positive {
+      color: #00ff88;
+    }
 
-    /* Légende des statuts */
+    .price-negative {
+      color: #ff6b6b;
+    }
+
+    .price-neutral {
+      color: var(--text-muted);
+    }
+
     .status-legend {
-        display: flex;
-        gap: 1rem;
-        padding: 0.5rem 1rem;
-        background: rgba(42, 42, 74, 0.5);
-        border-radius: 6px;
-        margin-bottom: 1rem;
-        flex-wrap: wrap;
-        font-size: 0.8rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.5rem;
+      padding: 1rem;
+      background: var(--secondary);
+      border-radius: 8px;
+      margin: 1rem 2rem;
+      font-size: 0.85rem;
     }
 
     .legend-item {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
 
     .spinner {
-        width: 16px;
-        height: 16px;
-        border: 2px solid #444;
-        border-top: 2px solid #00ff88;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
+      width: 24px;
+      height: 24px;
+      border: 3px solid var(--secondary);
+      border-top: 3px solid var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 0.5rem;
     }
 
     @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
 
-    /* Styles pour l'onglet analyse */
-    .analysis-container { padding: 2rem; }
+    .analysis-container {
+      padding: 2rem;
+    }
+
     .metrics-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 1.5rem;
-        margin-bottom: 2rem;
-    }
-    .metric-card {
-        background: #1e1e38;
-        padding: 1.5rem;
-        border-radius: 8px;
-        border: 1px solid #2a2a4a;
-    }
-    .metric-title {
-        color: #00d4ff;
-        font-size: 1.1rem;
-        font-weight: bold;
-        margin-bottom: 1rem;
-    }
-    .metric-value {
-        font-size: 2rem;
-        font-weight: bold;
-        color: #fff;
-        margin-bottom: 0.5rem;
-    }
-    .metric-subtitle {
-        color: #888;
-        font-size: 0.9rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1.5rem;
+      margin-bottom: 2rem;
     }
 
-    /* Responsive */
+    .metric-card {
+      background: var(--secondary);
+      padding: 1.5rem;
+      border-radius: 8px;
+      border: 1px solid var(--primary-dark);
+    }
+
+    .metric-title {
+      color: var(--primary);
+      font-size: 1.1rem;
+      font-weight: bold;
+      margin-bottom: 1rem;
+    }
+
+    .metric-value {
+      font-size: 2rem;
+      font-weight: bold;
+      color: var(--text);
+      margin-bottom: 0.5rem;
+    }
+
+    .metric-subtitle {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    .token-status {
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 0.7rem;
+      font-weight: bold;
+      text-transform: uppercase;
+      display: inline-block;
+      min-width: 60px;
+      text-align: center;
+    }
+
+    .status-active {
+      background: linear-gradient(45deg, #4CAF50, #8BC34A);
+      color: #fff;
+    }
+
+    .status-inactive {
+      background: linear-gradient(45deg, #FF9800, #FFC107);
+      color: #000;
+    }
+
+    .status-no_dex_data {
+      background: linear-gradient(45deg, #607D8B, #90A4AE);
+      color: #fff;
+    }
+
+    .status-archived {
+      background: linear-gradient(45deg, #9E9E9E, #BDBDBD);
+      color: #000;
+    }
+
+    .status-blacklisted {
+      background: linear-gradient(45deg, #F44336, #FF5722);
+      color: #fff;
+    }
+
+    .status-unknown {
+      background: linear-gradient(45deg, #424242, #616161);
+      color: #fff;
+    }
+
     @media (max-width: 768px) {
-        .tabs { padding: 0 1rem; }
-        .filter-panel { padding: 1rem; }
-        .controls { padding: 1rem; }
-        th, td { padding: 0.3rem 0.2rem; font-size: 0.75rem; }
-        .metrics-grid { grid-template-columns: 1fr; }
-        table { font-size: 0.7rem; }
+      .nav {
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .controls {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .filter-group {
+        flex-direction: column;
+      }
+
+      .filter-panel input,
+      .filter-panel select {
+        width: 100%;
+      }
+
+      .tabs {
+        flex-wrap: wrap;
+        padding: 0 1rem;
+      }
+
+      .filter-panel {
+        padding: 1rem;
+      }
+
+      th, td {
+        padding: 0.3rem 0.2rem;
+        font-size: 0.75rem;
+      }
+
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+
+      table {
+        font-size: 0.7rem;
+      }
     }
   </style>
 </head>
@@ -240,107 +573,102 @@
   <!-- Navigation -->
   <div class="nav">
     <h1>📊 Token Detail Report</h1>
-    <a href="/dashboard">← Retour au Dashboard</a>
+    <div>
+      <a href="/dashboard">← Retour au Dashboard</a>
+      <button onclick="toggleTheme()" aria-label="Basculer entre mode sombre et clair">🌙</button>
+    </div>
   </div>
 
   <!-- Contrôles -->
   <div class="controls">
-    <button onclick="reloadData()">🔄 Actualiser</button>
-    <button onclick="resetFilters()">🧹 Réinitialiser Filtres</button>
+    <button onclick="reloadData()" aria-label="Actualiser les données">🔄 Actualiser</button>
+    <button onclick="resetFilters()" aria-label="Réinitialiser les filtres">🧹 Réinitialiser Filtres</button>
+    <button onclick="exportToCSV()" aria-label="Exporter les données en CSV">📥 Exporter en CSV</button>
     <label>Afficher
-        <select id="perPage" onchange="changePerPage()">
-            <option value="10">10</option>
-            <option value="20">20</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-        </select> tokens
+      <select id="perPage" onchange="changePerPage()" aria-label="Nombre de tokens par page">
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select> tokens
     </label>
-    
-    <!-- Contrôle auto-refresh -->
-            <div class="auto-refresh-section">
-        <div class="auto-refresh-toggle">
-            <label for="autoRefreshEnabled">Auto-refresh:</label>
-            <div class="toggle-switch active" id="autoRefreshToggle" onclick="toggleAutoRefresh()"></div>
-        </div>
-        
-        <select id="refreshInterval" onchange="updateRefreshInterval()">
-            <option value="5000">5s</option>
-            <option value="10000">10s</option>
-            <option value="30000" selected>30s</option>
-            <option value="60000">1min</option>
-            <option value="300000">5min</option>
-        </select>
-        
-        <div class="refresh-indicator active" id="refreshIndicator">
-            <span>🔄</span>
-            <span id="refreshStatus">Auto-refresh: 30s</span>
-        </div>
+    <div class="auto-refresh-section">
+      <div class="auto-refresh-toggle">
+        <label for="autoRefreshEnabled">Auto-refresh:</label>
+        <div class="toggle-switch active" id="autoRefreshToggle" onclick="toggleAutoRefresh()"></div>
+      </div>
+      <select id="refreshInterval" onchange="updateRefreshInterval()" aria-label="Intervalle de rafraîchissement automatique">
+        <option value="5000">5s</option>
+        <option value="10000">10s</option>
+        <option value="30000" selected>30s</option>
+        <option value="60000">1min</option>
+        <option value="300000">5min</option>
+      </select>
+      <div class="refresh-indicator active" id="refreshIndicator">
+        <span>🔄</span>
+        <span id="refreshStatus">Auto-refresh: 30s</span>
+      </div>
     </div>
   </div>
 
   <!-- Onglets -->
   <div class="tabs-container">
     <div class="tabs">
-      <button class="tab active" onclick="switchTab('base', this)">📊 Données de Base</button>
-      <button class="tab" onclick="switchTab('dexscreener', this)">📈 DexScreener</button>
-      <button class="tab" onclick="switchTab('analysis', this)">🔬 Analyse</button>
+      <button class="tab active" onclick="switchTab('base', this)" aria-label="Afficher les données de base">📊 Données de Base</button>
+      <button class="tab" onclick="switchTab('dexscreener', this)" aria-label="Afficher les données DexScreener">📈 DexScreener</button>
+      <button class="tab" onclick="switchTab('analysis', this)" aria-label="Afficher l'analyse des données">🔬 Analyse</button>
     </div>
   </div>
 
   <!-- Contenu Onglet Données de Base -->
   <div id="base-content" class="tab-content active">
-    <!-- Légende des statuts -->
     <div class="status-legend">
       <div class="legend-item">
-          <span class="bonding-status bonding-created">Created</span>
-          <span>Nouveau token détecté</span>
+        <span class="bonding-status bonding-created">Created</span>
+        <span>Nouveau token détecté</span>
       </div>
       <div class="legend-item">
-          <span class="bonding-status bonding-active">Active</span>
-          <span>Bonding curve en cours</span>
+        <span class="bonding-status bonding-active">Active</span>
+        <span>Bonding curve en cours</span>
       </div>
       <div class="legend-item">
-          <span class="bonding-status bonding-completed">Completed</span>
-          <span>Bonding curve terminée</span>
+        <span class="bonding-status bonding-completed">Completed</span>
+        <span>Bonding curve terminée</span>
       </div>
       <div class="legend-item">
-          <span class="bonding-status bonding-migrated">Migrated</span>
-          <span>Migré vers Raydium</span>
+        <span class="bonding-status bonding-migrated">Migrated</span>
+        <span>Migré vers Raydium</span>
       </div>
       <div class="legend-item">
-          <span class="bonding-status bonding-terminated">Terminated</span>
-          <span>Bonding curve arrêtée</span>
+        <span class="bonding-status bonding-terminated">Terminated</span>
+        <span>Bonding curve arrêtée</span>
       </div>
     </div>
 
-    <!-- Panneau des filtres -->
     <div class="filter-panel">
-      <!-- Filtres temporels avec boutons présets -->
       <div class="filter-group">
         <label>🕒 Mis à jour depuis:</label>
         <div class="preset-buttons">
-          <button class="preset-btn" onclick="setTimeFilter(15, 'minutes')">15min</button>
-          <button class="preset-btn" onclick="setTimeFilter(30, 'minutes')">30min</button>
-          <button class="preset-btn" onclick="setTimeFilter(1, 'hours')">1h</button>
-          <button class="preset-btn" onclick="setTimeFilter(6, 'hours')">6h</button>
-          <button class="preset-btn" onclick="setTimeFilter(24, 'hours')">24h</button>
-          <button class="preset-btn" onclick="clearTimeFilter()">Tout</button>
+          <button class="preset-btn" onclick="setTimeFilter(15, 'minutes', this)" aria-label="Filtrer les mises à jour des dernières 15 minutes">15min</button>
+          <button class="preset-btn" onclick="setTimeFilter(30, 'minutes', this)" aria-label="Filtrer les mises à jour des dernières 30 minutes">30min</button>
+          <button class="preset-btn" onclick="setTimeFilter(1, 'hours', this)" aria-label="Filtrer les mises à jour des dernières 1 heure">1h</button>
+          <button class="preset-btn" onclick="setTimeFilter(6, 'hours', this)" aria-label="Filtrer les mises à jour des dernières 6 heures">6h</button>
+          <button class="preset-btn" onclick="setTimeFilter(24, 'hours', this)" aria-label="Filtrer les mises à jour des dernières 24 heures">24h</button>
+          <button class="preset-btn" onclick="clearTimeFilter(this)" aria-label="Supprimer le filtre de temps">Tout</button>
         </div>
-        <input type="number" id="filterTimeValue" class="time-filter" placeholder="Valeur" min="1">
-        <select id="filterTimeUnit" class="time-unit">
+        <input type="number" id="filterTimeValue" class="time-filter" placeholder="Valeur" min="1" aria-label="Valeur du filtre de temps">
+        <select id="filterTimeUnit" class="time-unit" aria-label="Unité de temps pour le filtre">
           <option value="">-</option>
           <option value="minutes">Minutes</option>
           <option value="hours">Heures</option>
           <option value="days">Jours</option>
         </select>
       </div>
-      
       <div class="filter-group">
-        <label>Symbol:</label><input type="text" id="filterSymbol" placeholder="Symbol (e.g., DNT)">
-        
-        <!-- Nouveau filtre Bonding Curve -->
+        <label>Symbol:</label>
+        <input type="text" id="filterSymbol" placeholder="Symbol (e.g., DNT)" aria-label="Filtrer par symbole">
         <label>🔗 Bonding Curve:</label>
-        <select id="filterBondingStatus" class="bonding-filter">
+        <select id="filterBondingStatus" class="bonding-filter" aria-label="Filtrer par statut de bonding curve">
           <option value="">Tous les statuts</option>
           <option value="created">Created (Nouveau)</option>
           <option value="active">Active (En cours)</option>
@@ -349,51 +677,63 @@
           <option value="terminated">Terminated (Arrêtée)</option>
           <option value="unknown">Unknown (Inconnu)</option>
         </select>
-        
-        <label>📊 Progress Min (%):</label><input type="number" id="filterProgressMin" placeholder="Min %" min="0" max="100" step="1" style="width: 80px;">
-        <label>Progress Max (%):</label><input type="number" id="filterProgressMax" placeholder="Max %" min="0" max="100" step="1" style="width: 80px;">
-        
-        <label>Price Min ($):</label><input type="number" id="filterPriceMin" placeholder="Min" step="0.000001">
-        <label>Price Max ($):</label><input type="number" id="filterPriceMax" placeholder="Max" step="0.000001">
+        <label>Progress Min (%):</label>
+        <input type="number" id="filterProgressMin" placeholder="Min %" min="0" max="100" step="1" style="width: 80px;" aria-label="Progression minimale de bonding curve">
+        <label>Progress Max (%):</label>
+        <input type="number" id="filterProgressMax" placeholder="Max %" min="0" max="100" step="1" style="width: 80px;" aria-label="Progression maximale de bonding curve">
+        <label>Price Min ($):</label>
+        <input type="number" id="filterPriceMin" placeholder="Min" step="0.000001" aria-label="Prix minimum">
+        <label>Price Max ($):</label>
+        <input type="number" id="filterPriceMax" placeholder="Max" step="0.000001" aria-label="Prix maximum">
       </div>
-      
       <div class="filter-group">
-        <label>Score Min:</label><input type="number" id="filterScoreMin" placeholder="Min" step="0.1">
-        <label>Score Max:</label><input type="number" id="filterScoreMax" placeholder="Max" step="0.1">
-        <label>Liquidity Min ($):</label><input type="number" id="filterLiquidityMin" placeholder="Min 5000" title="Recommandé: ≥ 5,000 $">
-        <label>Liquidity Max ($):</label><input type="number" id="filterLiquidityMax" placeholder="Max">
-        <label>Volume Min ($):</label><input type="number" id="filterVolumeMin" placeholder="Min 100000" title="Recommandé: ≥ 100,000 $">
-        <label>Volume Max ($):</label><input type="number" id="filterVolumeMax" placeholder="Max">
+        <label>Score Min:</label>
+        <input type="number" id="filterScoreMin" placeholder="Min" step="0.1" aria-label="Score minimum">
+        <label>Score Max:</label>
+        <input type="number" id="filterScoreMax" placeholder="Max" step="0.1" aria-label="Score maximum">
+        <label>Liquidity Min ($):</label>
+        <input type="number" id="filterLiquidityMin" placeholder="Min 5000" title="Recommandé: ≥ 5,000 $" aria-label="Liquidité minimale">
+        <label>Liquidity Max ($):</label>
+        <input type="number" id="filterLiquidityMax" placeholder="Max" aria-label="Liquidité maximale">
+        <label>Volume Min ($):</label>
+        <input type="number" id="filterVolumeMin" placeholder="Min 100000" title="Recommandé: ≥ 100,000 $" aria-label="Volume minimum">
+        <label>Volume Max ($):</label>
+        <input type="number" id="filterVolumeMax" placeholder="Max" aria-label="Volume maximum">
       </div>
-      
       <div class="filter-group">
-        <label>Holders Min:</label><input type="number" id="filterHoldersMin" placeholder="Min 500" title="Recommandé: ≥ 500">
-        <label>Holders Max:</label><input type="number" id="filterHoldersMax" placeholder="Max">
-        <label>Age Min (h):</label><input type="number" id="filterAgeMin" placeholder="Min 6" step="0.1" title="Recommandé: ≥ 6 heures">
-        <label>Age Max (h):</label><input type="number" id="filterAgeMax" placeholder="Max" step="0.1">
-        <label>Risk Min:</label><input type="number" id="filterRiskMin" placeholder="Min">
-        <label>Risk Max:</label><input type="number" id="filterRiskMax" placeholder="Max 50" title="Recommandé: ≤ 50">
-        <label>Date Découverte:</label><input type="date" id="filterDiscoveredAt" placeholder="Discovered At">
+        <label>Holders Min:</label>
+        <input type="number" id="filterHoldersMin" placeholder="Min 500" title="Recommandé: ≥ 500" aria-label="Nombre minimum de holders">
+        <label>Holders Max:</label>
+        <input type="number" id="filterHoldersMax" placeholder="Max" aria-label="Nombre maximum de holders">
+        <label>Age Min (h):</label>
+        <input type="number" id="filterAgeMin" placeholder="Min 6" step="0.1" title="Recommandé: ≥ 6 heures" aria-label="Âge minimum en heures">
+        <label>Age Max (h):</label>
+        <input type="number" id="filterAgeMax" placeholder="Max" step="0.1" aria-label="Âge maximum en heures">
+        <label>Risk Min:</label>
+        <input type="number" id="filterRiskMin" placeholder="Min" aria-label="Risque minimum">
+        <label>Risk Max:</label>
+        <input type="number" id="filterRiskMax" placeholder="Max 50" title="Recommandé: ≤ 50" aria-label="Risque maximum">
+        <label>Date Découverte:</label>
+        <input type="date" id="filterDiscoveredAt" placeholder="Discovered At" aria-label="Date de découverte">
       </div>
     </div>
 
-    <!-- Tableau données de base -->
-    <table id="baseTable">
+    <table id="baseTable" aria-label="Tableau des données de base des tokens">
       <thead>
         <tr>
           <th>⭐</th>
           <th>Symbol</th>
-          <th>Price ($)</th>
-          <th>Score</th>
-          <th>Liquidity ($)</th>
-          <th>Volume 24h ($)</th>
+          <th title="Prix en USD">Price ($)</th>
+          <th title="Score d'investissement basé sur l'analyse algorithmique">Score</th>
+          <th title="Liquidité en USD">Liquidity ($)</th>
+          <th title="Volume des dernières 24 heures">Volume 24h ($)</th>
           <th>Holders</th>
-          <th>Age (h)</th>
-          <th>Risk</th>
-          <th>Bonding Curve</th>
-          <th>Progress</th>
-          <th>Dernière MAJ</th>
-          <th>Découvert</th>
+          <th title="Âge du token en heures">Age (h)</th>
+          <th title="Niveau de risque (100 - rug_score)">Risk</th>
+          <th title="Statut de la bonding curve">Bonding Curve</th>
+          <th title="Progression de la bonding curve">Progress</th>
+          <th title="Dernière mise à jour">Dernière MAJ</th>
+          <th title="Date de découverte">Découvert</th>
         </tr>
       </thead>
       <tbody id="baseTbody"></tbody>
@@ -404,24 +744,45 @@
   <div id="dexscreener-content" class="tab-content">
     <div class="filter-panel">
       <div class="filter-group">
-        <label>Symbol:</label><input type="text" id="dexFilterSymbol" placeholder="Symbol">
-        <label>Prix DexScreener Min ($):</label><input type="number" id="dexFilterPriceMin" placeholder="Min" step="0.000001">
-        <label>Prix DexScreener Max ($):</label><input type="number" id="dexFilterPriceMax" placeholder="Max" step="0.000001">
-        <label>Market Cap Min ($):</label><input type="number" id="dexFilterMarketCapMin" placeholder="Min">
-        <label>Market Cap Max ($):</label><input type="number" id="dexFilterMarketCapMax" placeholder="Max">
+        <label>Symbol:</label>
+        <input type="text" id="dexFilterSymbol" placeholder="Symbol" aria-label="Filtrer par symbole">
+        <label>📊 Status:</label>
+        <select id="dexFilterStatus" class="status-filter" aria-label="Filtrer par statut">
+          <option value="">Tous les status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="no_dex_data">No Dex Data</option>
+          <option value="archived">Archived</option>
+          <option value="blacklisted">Blacklisted</option>
+        </select>
+        <label>Prix DexScreener Min ($):</label>
+        <input type="number" id="dexFilterPriceMin" placeholder="Min" step="0.000001" aria-label="Prix minimum DexScreener">
+        <label>Prix DexScreener Max ($):</label>
+        <input type="number" id="dexFilterPriceMax" placeholder="Max" step="0.000001" aria-label="Prix maximum DexScreener">
+        <label>Market Cap Min ($):</label>
+        <input type="number" id="dexFilterMarketCapMin" placeholder="Min" aria-label="Market cap minimum">
+        <label>Market Cap Max ($):</label>
+        <input type="number" id="dexFilterMarketCapMax" placeholder="Max" aria-label="Market cap maximum">
       </div>
       <div class="filter-group">
-        <label>Volume 1h Min:</label><input type="number" id="dexFilterVolume1hMin" placeholder="Min">
-        <label>Volume 6h Min:</label><input type="number" id="dexFilterVolume6hMin" placeholder="Min">
-        <label>Volume 24h Min:</label><input type="number" id="dexFilterVolume24hMin" placeholder="Min">
-        <label>Transactions 24h Min:</label><input type="number" id="dexFilterTxns24hMin" placeholder="Min">
+        <label>Volume 1h Min:</label>
+        <input type="number" id="dexFilterVolume1hMin" placeholder="Min" aria-label="Volume minimum 1h">
+        <label>Volume 6h Min:</label>
+        <input type="number" id="dexFilterVolume6hMin" placeholder="Min" aria-label="Volume minimum 6h">
+        <label>Volume 24h Min:</label>
+        <input type="number" id="dexFilterVolume24hMin" placeholder="Min" aria-label="Volume minimum 24h">
+        <label>Transactions 24h Min:</label>
+        <input type="number" id="dexFilterTxns24hMin" placeholder="Min" aria-label="Transactions minimum 24h">
       </div>
       <div class="filter-group">
-        <label>Buys 24h Min:</label><input type="number" id="dexFilterBuys24hMin" placeholder="Min">
-        <label>Sells 24h Max:</label><input type="number" id="dexFilterSells24hMax" placeholder="Max">
-        <label>Liquidity Quote Min:</label><input type="number" id="dexFilterLiquidityQuoteMin" placeholder="Min">
+        <label>Buys 24h Min:</label>
+        <input type="number" id="dexFilterBuys24hMin" placeholder="Min" aria-label="Achats minimum 24h">
+        <label>Sells 24h Max:</label>
+        <input type="number" id="dexFilterSells24hMax" placeholder="Max" aria-label="Ventes maximum 24h">
+        <label>Liquidity Quote Min:</label>
+        <input type="number" id="dexFilterLiquidityQuoteMin" placeholder="Min" aria-label="Liquidité quote minimum">
         <label>Avec données DexScreener:</label>
-        <select id="dexFilterHasData">
+        <select id="dexFilterHasData" aria-label="Filtrer par disponibilité des données DexScreener">
           <option value="">Tous</option>
           <option value="true">Oui</option>
           <option value="false">Non</option>
@@ -430,40 +791,42 @@
       <div class="filter-group">
         <label>Dernière MAJ DexScreener:</label>
         <div class="preset-buttons">
-          <button class="preset-btn" onclick="setDexTimeFilter(1, 'hours')">1h</button>
-          <button class="preset-btn" onclick="setDexTimeFilter(6, 'hours')">6h</button>
-          <button class="preset-btn" onclick="setDexTimeFilter(24, 'hours')">24h</button>
-          <button class="preset-btn" onclick="clearDexTimeFilter()">Tout</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(5, 'minutes', this)" aria-label="Filtrer les mises à jour DexScreener des dernières 5 minutes">5m</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(30, 'minutes', this)" aria-label="Filtrer les mises à jour DexScreener des dernières 30 minutes">30m</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(1, 'hours', this)" aria-label="Filtrer les mises à jour DexScreener des dernières 1 heure">1h</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(6, 'hours', this)" aria-label="Filtrer les mises à jour DexScreener des dernières 6 heures">6h</button>
+          <button class="preset-btn" onclick="setDexTimeFilter(24, 'hours', this)" aria-label="Filtrer les mises à jour DexScreener des dernières 24 heures">24h</button>
+          <button class="preset-btn" onclick="clearDexTimeFilter(this)" aria-label="Supprimer le filtre de temps DexScreener">Tout</button>
         </div>
       </div>
     </div>
 
-    <!-- Tableau DexScreener -->
-    <table id="dexscreenerTable">
+    <table id="dexscreenerTable" aria-label="Tableau des données DexScreener">
       <thead>
         <tr>
           <th>⭐</th>
           <th>Symbol</th>
-          <th>Prix DS ($)</th>
-          <th>Market Cap ($)</th>
-          <th>Liq. Base</th>
-          <th>Liq. Quote ($)</th>
-          <th>Vol 1h ($)</th>
-          <th>Vol 6h ($)</th>
-          <th>Vol 24h ($)</th>
-          <th>Δ Prix 1h (%)</th>
-          <th>Δ Prix 6h (%)</th>
-          <th>Δ Prix 24h (%)</th>
-          <th>Txns 1h</th>
-          <th>Txns 6h</th>
-          <th>Txns 24h</th>
-          <th>Buys 1h</th>
-          <th>Sells 1h</th>
-          <th>Buys 24h</th>
-          <th>Sells 24h</th>
-          <th>URL DexScreener</th>
-          <th>Créé le</th>
-          <th>MAJ DS</th>
+          <th title="Statut du token">Status</th>
+          <th title="Prix DexScreener en USD">Prix DS ($)</th>
+          <th title="Capitalisation boursière">Market Cap ($)</th>
+          <th title="Liquidité de la devise de base">Liq. Base</th>
+          <th title="Liquidité de la devise de cotation">Liq. Quote ($)</th>
+          <th title="Volume des dernières 1 heure">Vol 1h ($)</th>
+          <th title="Volume des dernières 6 heures">Vol 6h ($)</th>
+          <th title="Volume des dernières 24 heures">Vol 24h ($)</th>
+          <th title="Changement de prix sur 1 heure">Δ Prix 1h (%)</th>
+          <th title="Changement de prix sur 6 heures">Δ Prix 6h (%)</th>
+          <th title="Changement de prix sur 24 heures">Δ Prix 24h (%)</th>
+          <th title="Transactions sur 1 heure">Txns 1h</th>
+          <th title="Transactions sur 6 heures">Txns 6h</th>
+          <th title="Transactions sur 24 heures">Txns 24h</th>
+          <th title="Achats sur 1 heure">Buys 1h</th>
+          <th title="Ventes sur 1 heure">Sells 1h</th>
+          <th title="Achats sur 24 heures">Buys 24h</th>
+          <th title="Ventes sur 24 heures">Sells 24h</th>
+          <th title="Lien vers DexScreener">URL DexScreener</th>
+          <th title="Date de création de la paire">Créé le</th>
+          <th title="Dernière mise à jour DexScreener">MAJ DS</th>
         </tr>
       </thead>
       <tbody id="dexscreenerTbody"></tbody>
@@ -474,28 +837,16 @@
   <div id="analysis-content" class="tab-content">
     <div class="analysis-container">
       <h2>📊 Analyse des Données</h2>
-      
-      <div class="metrics-grid" id="analysisMetrics">
-        <!-- Les métriques seront générées dynamiquement -->
-      </div>
-      
-      <div class="chart-placeholder">
-        📈 Graphiques d'analyse en temps réel
-        <br><br>
-        • Distribution des scores d'investissement<br>
-        • Évolution des volumes 24h<br>
-        • Répartition par statut bonding curve<br>
-        • Corrélation price vs liquidity<br>
-        • Analyse DexScreener vs données internes
-      </div>
+      <div class="metrics-grid" id="analysisMetrics"></div>
+      <canvas id="scoreDistributionChart" style="max-height: 300px;"></canvas>
     </div>
   </div>
 
   <!-- Pagination -->
   <div class="pagination">
-    <button id="prevBtn" onclick="prevPage()">Précédent</button>
+    <button id="prevBtn" onclick="prevPage()" aria-label="Page précédente">Précédent</button>
     <span id="pageInfo"></span>
-    <button id="nextBtn" onclick="nextPage()">Suivant</button>
+    <button id="nextBtn" onclick="nextPage()" aria-label="Page suivante">Suivant</button>
   </div>
 
   <script>
@@ -504,20 +855,14 @@
     let refreshTimer = null;
     let isAutoRefreshEnabled = true;
     let currentTab = 'base';
+    let cachedData = null;
 
     // === GESTION DES ONGLETS ===
     function switchTab(tabName, button) {
-      document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-      });
-      
-      document.querySelectorAll('.tab').forEach(tab => {
-        tab.classList.remove('active');
-      });
-      
+      document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
       document.getElementById(tabName + '-content').classList.add('active');
       button.classList.add('active');
-      
       currentTab = tabName;
       renderPage();
     }
@@ -525,7 +870,6 @@
     // === FONCTIONS UTILITAIRES ===
     function parseDateTime(dateString) {
       if (!dateString) return null;
-      
       if (dateString.includes('T') || dateString.includes('Z')) {
         return new Date(dateString);
       } else {
@@ -535,10 +879,8 @@
 
     function formatLocalDateTime(dateString) {
       if (!dateString) return 'Inconnue';
-      
       const date = parseDateTime(dateString);
       if (!date || isNaN(date.getTime())) return 'Invalide';
-      
       return date.toLocaleString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
@@ -550,21 +892,16 @@
 
     function getTimeAgo(dateString) {
       if (!dateString) return { text: 'Inconnue', className: 'updated-old' };
-      
       const now = new Date();
       const updateTime = parseDateTime(dateString);
-      
       if (!updateTime || isNaN(updateTime.getTime())) {
         return { text: 'Invalide', className: 'updated-old' };
       }
-      
       const diffMs = now - updateTime;
       const diffMinutes = Math.floor(diffMs / (1000 * 60));
       const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
       const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-      
       let text, className;
-      
       if (diffMinutes < 1) {
         text = 'À l\'instant';
         className = 'updated-recent';
@@ -578,175 +915,153 @@
         text = `${diffDays}j`;
         className = 'updated-old';
       }
-      
       return { text, className };
     }
 
     function formatPriceChange(value) {
       if (!value || value === 0) return { text: '0.00%', className: 'price-neutral' };
-      
       const percentage = parseFloat(value).toFixed(2);
       const className = value > 0 ? 'price-positive' : 'price-negative';
       const prefix = value > 0 ? '+' : '';
-      
       return { text: `${prefix}${percentage}%`, className };
     }
 
     // === FONCTIONS AUTO-REFRESH ===
     function toggleAutoRefresh() {
-        isAutoRefreshEnabled = !isAutoRefreshEnabled;
-        const toggle = document.getElementById('autoRefreshToggle');
-        const indicator = document.getElementById('refreshIndicator');
-        
-        if (isAutoRefreshEnabled) {
-            toggle.classList.add('active');
-            indicator.classList.remove('paused');
-            indicator.classList.add('active');
-            startAutoRefresh();
-        } else {
-            toggle.classList.remove('active');
-            indicator.classList.remove('active');
-            indicator.classList.add('paused');
-            stopAutoRefresh();
-        }
-        
-        updateRefreshStatus();
+      isAutoRefreshEnabled = !isAutoRefreshEnabled;
+      const toggle = document.getElementById('autoRefreshToggle');
+      const indicator = document.getElementById('refreshIndicator');
+      if (isAutoRefreshEnabled) {
+        toggle.classList.add('active');
+        indicator.classList.remove('paused');
+        indicator.classList.add('active');
+        startAutoRefresh();
+      } else {
+        toggle.classList.remove('active');
+        indicator.classList.remove('active');
+        indicator.classList.add('paused');
+        stopAutoRefresh();
+      }
+      updateRefreshStatus();
     }
 
     function updateRefreshInterval() {
-        const select = document.getElementById('refreshInterval');
-        refreshInterval = parseInt(select.value);
-        
-        if (isAutoRefreshEnabled) {
-            stopAutoRefresh();
-            startAutoRefresh();
-        }
-        
-        updateRefreshStatus();
+      const select = document.getElementById('refreshInterval');
+      refreshInterval = parseInt(select.value);
+      if (isAutoRefreshEnabled) {
+        stopAutoRefresh();
+        startAutoRefresh();
+      }
+      updateRefreshStatus();
     }
 
     function startAutoRefresh() {
-        if (refreshTimer) clearInterval(refreshTimer);
-        
-        if (isAutoRefreshEnabled) {
-            refreshTimer = setInterval(() => {
-                fetchData();
-            }, refreshInterval);
-        }
+      if (refreshTimer) clearInterval(refreshTimer);
+      if (isAutoRefreshEnabled) {
+        refreshTimer = setInterval(() => {
+          fetchData();
+        }, refreshInterval);
+      }
     }
 
     function stopAutoRefresh() {
-        if (refreshTimer) {
-            clearInterval(refreshTimer);
-            refreshTimer = null;
-        }
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
     }
 
     function updateRefreshStatus() {
-        const statusElement = document.getElementById('refreshStatus');
-        const intervalText = refreshInterval >= 60000 ? 
-            `${refreshInterval/60000}min` : 
-            `${refreshInterval/1000}s`;
-        
-        if (isAutoRefreshEnabled) {
-            statusElement.textContent = `Auto-refresh: ${intervalText}`;
-        } else {
-            statusElement.textContent = `Paused (${intervalText})`;
-        }
+      const statusElement = document.getElementById('refreshStatus');
+      const intervalText = refreshInterval >= 60000 ? 
+        `${refreshInterval/60000}min` : 
+        `${refreshInterval/1000}s`;
+      statusElement.textContent = isAutoRefreshEnabled ? 
+        `Auto-refresh: ${intervalText}` : 
+        `Paused (${intervalText})`;
     }
 
     function showRefreshIndicator(active) {
-        const indicator = document.getElementById('refreshIndicator');
-        if (!indicator) return;
-        
-        if (active && isAutoRefreshEnabled) {
-            indicator.innerHTML = `
-                <div class="spinner"></div>
-                <span>Actualisation...</span>
-            `;
-        } else {
-            const intervalText = refreshInterval >= 60000 ? 
-                `${refreshInterval/60000}min` : 
-                `${refreshInterval/1000}s`;
-            
-            const statusText = isAutoRefreshEnabled ? 
-                `Auto-refresh: ${intervalText}` : 
-                `Paused (${intervalText})`;
-                
-            indicator.innerHTML = `
-                <span>${isAutoRefreshEnabled ? '🔄' : '⏸️'}</span>
-                <span>${statusText}</span>
-            `;
-        }
+      const indicator = document.getElementById('refreshIndicator');
+      if (!indicator) return;
+      if (active && isAutoRefreshEnabled) {
+        indicator.innerHTML = `
+          <div class="spinner"></div>
+          <span>Actualisation...</span>
+        `;
+      } else {
+        const intervalText = refreshInterval >= 60000 ? 
+          `${refreshInterval/60000}min` : 
+          `${refreshInterval/1000}s`;
+        const statusText = isAutoRefreshEnabled ? 
+          `Auto-refresh: ${intervalText}` : 
+          `Paused (${intervalText})`;
+        indicator.innerHTML = `
+          <span>${isAutoRefreshEnabled ? '🔄' : '⏸️'}</span>
+          <span>${statusText}</span>
+        `;
+      }
     }
 
     // === FONCTIONS PROGRESSION BONDING CURVE ===
     function getBondingProgressDisplay(status, progress) {
-        if (!status || !['active', 'created'].includes(status.toLowerCase())) {
-            return '<div class="no-progress">N/A</div>';
-        }
-        
-        const progressValue = parseFloat(progress) || 0;
-        
-        if (progressValue <= 0) {
-            return '<div class="no-progress">0%</div>';
-        }
-        
-        let progressClass = '';
-        if (progressValue >= 90) {
-            progressClass = 'completed';
-        } else if (progressValue < 30) {
-            progressClass = 'low';
-        }
-        
-        return `
-            <div class="progress-container ${progressClass}" title="Progression: ${progressValue}%">
-                <div class="progress-bar" style="width: ${Math.min(progressValue, 100)}%"></div>
-                <div class="progress-text">${progressValue}%</div>
-            </div>
-        `;
+      if (!status || !['active', 'created'].includes(status.toLowerCase())) {
+        return '<div class="no-progress">N/A</div>';
+      }
+      const progressValue = parseFloat(progress) || 0;
+      if (progressValue <= 0) {
+        return '<div class="no-progress">0%</div>';
+      }
+      let progressClass = '';
+      if (progressValue >= 90) {
+        progressClass = 'completed';
+      } else if (progressValue < 30) {
+        progressClass = 'low';
+      }
+      return `
+        <div class="progress-container ${progressClass}" title="Progression: ${progressValue}%">
+          <div class="progress-bar" style="width: ${Math.min(progressValue, 100)}%"></div>
+          <div class="progress-text">${progressValue}%</div>
+        </div>
+      `;
     }
 
     function getBondingCurveDisplay(status) {
-        if (!status) return '<span class="bonding-status bonding-unknown">Unknown</span>';
-        
-        const statusLower = String(status).toLowerCase().trim();
-        const statusMap = {
-            'created': '<span class="bonding-status bonding-created">Created</span>',
-            'active': '<span class="bonding-status bonding-active">Active</span>',
-            'completed': '<span class="bonding-status bonding-completed">Completed</span>',
-            'migrated': '<span class="bonding-status bonding-migrated">Migrated</span>',
-            'terminated': '<span class="bonding-status bonding-terminated">Terminated</span>'
-        };
-        
-        return statusMap[statusLower] || 
-               `<span class="bonding-status bonding-unknown">${status}</span>`;
+      if (!status) return '<span class="bonding-status bonding-unknown">Unknown</span>';
+      const statusLower = String(status).toLowerCase().trim();
+      const statusMap = {
+        'created': '<span class="bonding-status bonding-created">Created</span>',
+        'active': '<span class="bonding-status bonding-active">Active</span>',
+        'completed': '<span class="bonding-status bonding-completed">Completed</span>',
+        'migrated': '<span class="bonding-status bonding-migrated">Migrated</span>',
+        'terminated': '<span class="bonding-status bonding-terminated">Terminated</span>'
+      };
+      return statusMap[statusLower] || 
+             `<span class="bonding-status bonding-unknown">${status}</span>`;
     }
 
     // === FONCTIONS DE DONNÉES ===
-    async function fetchData() {
-      if (!isAutoRefreshEnabled) {
+    async function fetchData(page = 1, pageSize = perPage) {
+      if (cachedData && isAutoRefreshEnabled) {
+        data = cachedData;
+        filteredData = [...data];
+        renderPage();
         return;
       }
-      
       showRefreshIndicator(true);
       try {
-        const response = await fetch('/api/tokens-detail');
+        const response = await fetch(`/api/tokens-detail?page=${page}&pageSize=${pageSize}`);
         if (!response.ok) throw new Error('Réponse API invalide');
-        data = await response.json();
+        const result = await response.json();
+        data = result.data || result;
+        cachedData = data;
         filteredData = [...data];
-        currentPage = 1;
+        currentPage = page;
         renderPage();
-        
-        if (currentTab === 'analysis') {
-          updateAnalysis();
-        }
+        if (currentTab === 'analysis') updateAnalysis();
       } catch (error) {
         console.error('Erreur lors du chargement des données:', error);
-        const tbody = document.getElementById('baseTbody');
-        if (tbody) {
-          tbody.innerHTML = '<tr><td colspan="13">Erreur lors du chargement des données</td></tr>';
-        }
+        document.getElementById('baseTbody').innerHTML = '<tr><td colspan="13">Erreur lors du chargement des données</td></tr>';
       } finally {
         showRefreshIndicator(false);
       }
@@ -754,14 +1069,10 @@
 
     function isWithinTimeFilter(dateString, filterValue, filterUnit) {
       if (!dateString || !filterValue || !filterUnit) return true;
-      
       const now = new Date();
       const updateTime = parseDateTime(dateString);
-      
       if (!updateTime || isNaN(updateTime.getTime())) return false;
-      
       const diffMs = now - updateTime;
-      
       let thresholdMs;
       switch (filterUnit) {
         case 'minutes':
@@ -776,37 +1087,96 @@
         default:
           return true;
       }
-      
       return diffMs <= thresholdMs;
     }
 
     // === FONCTIONS DE FILTRAGE ===
-    function setTimeFilter(value, unit) {
+    function setTimeFilter(value, unit, btn) {
       document.getElementById('filterTimeValue').value = value;
       document.getElementById('filterTimeUnit').value = unit;
-      
-      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-      event.target.classList.add('active');
-      
+      document.querySelectorAll('#base-content .preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
       applyFilters();
     }
 
-    function clearTimeFilter() {
+    function clearTimeFilter(btn) {
       document.getElementById('filterTimeValue').value = '';
       document.getElementById('filterTimeUnit').value = '';
-      
-      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-      event.target.classList.add('active');
-      
+      document.querySelectorAll('#base-content .preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
       applyFilters();
     }
 
-    function setDexTimeFilter(value, unit) {
+    function setDexTimeFilter(value, unit, btn) {
+      window.dexTimeValue = value;
+      window.dexTimeUnit = unit;
+      document.querySelectorAll('#dexscreener-content .preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
       applyDexFilters();
     }
 
-    function clearDexTimeFilter() {
+    function clearDexTimeFilter(btn) {
+      window.dexTimeValue = null;
+      window.dexTimeUnit = null;
+      document.querySelectorAll('#dexscreener-content .preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
       applyDexFilters();
+    }
+
+    function updateFilterCount() {
+      const filterCount = document.querySelector('.filter-count');
+      if (filterCount) filterCount.remove();
+      const activeFilters = document.querySelectorAll(
+        '#base-content .filter-panel input:not(:empty), ' +
+        '#base-content .filter-panel select:not(:empty), ' +
+        '#dexscreener-content .filter-panel input:not(:empty), ' +
+        '#dexscreener-content .filter-panel select:not(:empty), ' +
+        '.preset-btn.active'
+      ).length;
+      const filterCountSpan = document.createElement('span');
+      filterCountSpan.className = 'filter-count';
+      filterCountSpan.textContent = `Filtres actifs: ${activeFilters}`;
+      filterCountSpan.style.cssText = 'margin-left: 1rem; font-size: 0.9rem; color: var(--primary);';
+      document.querySelector('.controls').appendChild(filterCountSpan);
+    }
+
+    function highlightActiveFilters() {
+      const baseInputs = [
+        'filterSymbol', 'filterBondingStatus', 'filterProgressMin', 'filterProgressMax',
+        'filterPriceMin', 'filterPriceMax', 'filterScoreMin', 'filterScoreMax',
+        'filterLiquidityMin', 'filterLiquidityMax', 'filterVolumeMin', 'filterVolumeMax',
+        'filterHoldersMin', 'filterHoldersMax', 'filterAgeMin', 'filterAgeMax',
+        'filterRiskMin', 'filterRiskMax', 'filterDiscoveredAt', 'filterTimeValue', 'filterTimeUnit'
+      ];
+
+      baseInputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.value.trim() !== '') {
+          el.classList.add('filter-active');
+        } else {
+          el.classList.remove('filter-active');
+        }
+      });
+
+      const dexInputs = [
+        'dexFilterSymbol', 'dexFilterStatus', 'dexFilterPriceMin', 'dexFilterPriceMax',
+        'dexFilterMarketCapMin', 'dexFilterMarketCapMax', 'dexFilterVolume1hMin',
+        'dexFilterVolume6hMin', 'dexFilterVolume24hMin', 'dexFilterTxns24hMin',
+        'dexFilterBuys24hMin', 'dexFilterSells24hMax', 'dexFilterLiquidityQuoteMin', 'dexFilterHasData'
+      ];
+
+      dexInputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.value.trim() !== '') {
+          el.classList.add('filter-active');
+        } else {
+          el.classList.remove('filter-active');
+        }
+      });
+
+      document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.classList[btn.classList.contains('active') ? 'add' : 'remove']('filter-active');
+      });
     }
 
     function applyFilters() {
@@ -839,7 +1209,6 @@
         const updatedAt = row.updated_at || row.first_discovered_at;
         const rowBondingStatus = (row.bonding_curve_status || '').toLowerCase();
         const progressValue = parseFloat(row.bonding_curve_progress) || 0;
-        
         return (
           (!filters.symbol || row.symbol.toLowerCase().includes(filters.symbol)) &&
           (!filters.bondingStatus || rowBondingStatus === filters.bondingStatus) &&
@@ -866,11 +1235,14 @@
 
       currentPage = 1;
       renderPage();
+      updateFilterCount();
+      highlightActiveFilters();
     }
 
     function applyDexFilters() {
       const dexFilters = {
         symbol: document.getElementById('dexFilterSymbol').value.toLowerCase().trim(),
+        status: document.getElementById('dexFilterStatus').value.toLowerCase().trim(),
         priceMin: document.getElementById('dexFilterPriceMin').value ? parseFloat(document.getElementById('dexFilterPriceMin').value) : null,
         priceMax: document.getElementById('dexFilterPriceMax').value ? parseFloat(document.getElementById('dexFilterPriceMax').value) : null,
         marketCapMin: document.getElementById('dexFilterMarketCapMin').value ? parseFloat(document.getElementById('dexFilterMarketCapMin').value) : null,
@@ -887,9 +1259,10 @@
 
       filteredData = data.filter(row => {
         const hasDexData = (row.dexscreener_price_usd || 0) > 0;
-        
+        const lastDexUpdate = row.last_dexscreener_update || row.updated_at;
         return (
           (!dexFilters.symbol || row.symbol.toLowerCase().includes(dexFilters.symbol)) &&
+          (!dexFilters.status || row.status.toLowerCase() === dexFilters.status) &&
           (dexFilters.priceMin === null || (row.dexscreener_price_usd || 0) >= dexFilters.priceMin) &&
           (dexFilters.priceMax === null || (row.dexscreener_price_usd || 0) <= dexFilters.priceMax) &&
           (dexFilters.marketCapMin === null || (row.dexscreener_market_cap || 0) >= dexFilters.marketCapMin) &&
@@ -901,19 +1274,21 @@
           (dexFilters.buys24hMin === null || (row.dexscreener_buys_24h || 0) >= dexFilters.buys24hMin) &&
           (dexFilters.sells24hMax === null || (row.dexscreener_sells_24h || 0) <= dexFilters.sells24hMax) &&
           (dexFilters.liquidityQuoteMin === null || (row.dexscreener_liquidity_quote || 0) >= dexFilters.liquidityQuoteMin) &&
-          (!dexFilters.hasData || (dexFilters.hasData === 'true' ? hasDexData : !hasDexData))
+          (!dexFilters.hasData || (dexFilters.hasData === 'true' ? hasDexData : !hasDexData)) &&
+          (!window.dexTimeValue || !window.dexTimeUnit || isWithinTimeFilter(lastDexUpdate, window.dexTimeValue, window.dexTimeUnit))
         );
       });
 
       currentPage = 1;
       renderPage();
+      updateFilterCount();
+      highlightActiveFilters();
     }
 
     // === FONCTIONS D'AFFICHAGE ===
     function renderPage() {
       const start = (currentPage - 1) * perPage;
       const rows = filteredData.slice(start, start + perPage);
-      
       if (currentTab === 'base') {
         renderBaseTable(rows);
       } else if (currentTab === 'dexscreener') {
@@ -921,13 +1296,11 @@
       } else if (currentTab === 'analysis') {
         updateAnalysis();
       }
-      
       updatePagination();
     }
 
     function renderBaseTable(rows) {
       const tbody = document.getElementById('baseTbody');
-      
       if (rows.length === 0) {
         tbody.innerHTML = '<tr><td colspan="13" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
       } else {
@@ -938,7 +1311,6 @@
           const fullUpdateTime = formatLocalDateTime(updatedAt);
           const bondingCurveDisplay = getBondingCurveDisplay(r.bonding_curve_status);
           const progressDisplay = getBondingProgressDisplay(r.bonding_curve_status, r.bonding_curve_progress);
-          
           return `
             <tr>
               <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
@@ -962,30 +1334,24 @@
 
     function renderDexScreenerTable(rows) {
       const tbody = document.getElementById('dexscreenerTbody');
-      
       if (rows.length === 0) {
         tbody.innerHTML = '<tr><td colspan="22" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
       } else {
         tbody.innerHTML = rows.map(r => {
-          // ✅ MISE À JOUR: Utiliser l'URL générée par l'API ou construire l'URL
           const dexUrl = r.dexscreener_url || `https://dexscreener.com/solana/${r.address}`;
           const dexUrlDisplay = (r.dexscreener_price_usd || 0) > 0 ? 
             `<a href="${dexUrl}" target="_blank">🔗 Voir</a>` : 
             'N/A';
-          
-          // ✅ MISE À JOUR: Utiliser les vraies colonnes de la base de données
           const pairCreatedAt = formatLocalDateTime(r.dexscreener_pair_created_at);
           const lastDexUpdate = formatLocalDateTime(r.last_dexscreener_update || r.updated_at);
-          
-          // ✅ MISE À JOUR: Formatage des changements de prix avec couleurs
           const priceChange1h = formatPriceChange(r.dexscreener_price_change_1h);
           const priceChange6h = formatPriceChange(r.dexscreener_price_change_6h);
           const priceChange24h = formatPriceChange(r.dexscreener_price_change_h24);
-          
           return `
             <tr>
               <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
               <td><strong>${r.symbol}</strong></td>
+              <td>${getTokenStatusDisplay(r.status)}</td>
               <td class="price">${(r.dexscreener_price_usd || 0).toFixed(8)}</td>
               <td>${Math.round(r.dexscreener_market_cap || 0).toLocaleString()}</td>
               <td>${(r.dexscreener_liquidity_base || 0).toFixed(2)}</td>
@@ -1012,37 +1378,43 @@
       }
     }
 
+    function getTokenStatusDisplay(status) {
+      if (!status) return '<span class="token-status status-unknown">Unknown</span>';
+      const statusLower = String(status).toLowerCase().trim();
+      const statusMap = {
+        'active': '<span class="token-status status-active">Active</span>',
+        'inactive': '<span class="token-status status-inactive">Inactive</span>',
+        'no_dex_data': '<span class="token-status status-no_dex_data">No Dex</span>',
+        'archived': '<span class="token-status status-archived">Archived</span>',
+        'blacklisted': '<span class="token-status status-blacklisted">Blacklisted</span>'
+      };
+      return statusMap[statusLower] || `<span class="token-status status-unknown">${status}</span>`;
+    }
+
     function updateAnalysis() {
       const metricsContainer = document.getElementById('analysisMetrics');
-      
       if (filteredData.length === 0) {
         metricsContainer.innerHTML = '<div class="metric-card"><div class="metric-title">Aucune donnée à analyser</div></div>';
         return;
       }
 
-      // ✅ MISE À JOUR: Calculer les métriques avec les données DexScreener
       const totalTokens = filteredData.length;
       const avgScore = filteredData.reduce((sum, token) => sum + (token.invest_score || 0), 0) / totalTokens;
       const avgLiquidity = filteredData.reduce((sum, token) => sum + (token.liquidity_usd || 0), 0) / totalTokens;
       const avgVolume = filteredData.reduce((sum, token) => sum + (token.volume_24h || 0), 0) / totalTokens;
       const avgHolders = filteredData.reduce((sum, token) => sum + (token.holders || 0), 0) / totalTokens;
-      
       const highScoreTokens = filteredData.filter(token => (token.invest_score || 0) >= 80).length;
       const activeTokens = filteredData.filter(token => token.bonding_curve_status === 'active').length;
       const migratedTokens = filteredData.filter(token => token.bonding_curve_status === 'migrated').length;
-      
-      // ✅ NOUVELLES MÉTRIQUES DEXSCREENER
       const tokensWithDexData = filteredData.filter(token => (token.dexscreener_price_usd || 0) > 0).length;
       const totalDexVolume = filteredData.reduce((sum, token) => sum + (token.dexscreener_volume_24h || 0), 0);
       const avgDexPrice = tokensWithDexData > 0 ? 
         filteredData.filter(token => (token.dexscreener_price_usd || 0) > 0)
           .reduce((sum, token) => sum + (token.dexscreener_price_usd || 0), 0) / tokensWithDexData : 0;
-      
       const avgDexMarketCap = tokensWithDexData > 0 ?
         filteredData.filter(token => (token.dexscreener_market_cap || 0) > 0)
           .reduce((sum, token) => sum + (token.dexscreener_market_cap || 0), 0) / 
           filteredData.filter(token => (token.dexscreener_market_cap || 0) > 0).length : 0;
-      
       const totalDexTxns24h = filteredData.reduce((sum, token) => sum + (token.dexscreener_txns_24h || 0), 0);
       const totalDexBuys24h = filteredData.reduce((sum, token) => sum + (token.dexscreener_buys_24h || 0), 0);
       const totalDexSells24h = filteredData.reduce((sum, token) => sum + (token.dexscreener_sells_24h || 0), 0);
@@ -1053,73 +1425,94 @@
           <div class="metric-value">${totalTokens}</div>
           <div class="metric-subtitle">Dans la sélection actuelle</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">⭐ Score Moyen</div>
           <div class="metric-value">${avgScore.toFixed(1)}</div>
           <div class="metric-subtitle">Score d'investissement</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">🏆 Tokens Premium</div>
           <div class="metric-value">${highScoreTokens}</div>
           <div class="metric-subtitle">${((highScoreTokens/totalTokens)*100).toFixed(1)}% avec score ≥80</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">📈 Avec Données DexScreener</div>
           <div class="metric-value">${tokensWithDexData}</div>
           <div class="metric-subtitle">${((tokensWithDexData/totalTokens)*100).toFixed(1)}% des tokens</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">💧 Liquidité Moyenne</div>
           <div class="metric-value">${(avgLiquidity/1000).toFixed(1)}K</div>
           <div class="metric-subtitle">Liquidité USD moyenne</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">📊 Volume DexScreener 24h</div>
           <div class="metric-value">${(totalDexVolume/1000000).toFixed(2)}M</div>
           <div class="metric-subtitle">Volume total DexScreener</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">💰 Prix Moyen DexScreener</div>
           <div class="metric-value">${avgDexPrice.toFixed(6)}</div>
           <div class="metric-subtitle">Prix moyen USD</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">🎯 Market Cap Moyen</div>
           <div class="metric-value">${(avgDexMarketCap/1000000).toFixed(2)}M</div>
           <div class="metric-subtitle">Market cap moyen DexScreener</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">🔄 Tokens Actifs</div>
           <div class="metric-value">${activeTokens}</div>
           <div class="metric-subtitle">${((activeTokens/totalTokens)*100).toFixed(1)}% en bonding curve</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">🚀 Tokens Migrés</div>
           <div class="metric-value">${migratedTokens}</div>
           <div class="metric-subtitle">${((migratedTokens/totalTokens)*100).toFixed(1)}% sur Raydium</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">📊 Transactions 24h</div>
           <div class="metric-value">${Math.round(totalDexTxns24h/1000)}K</div>
           <div class="metric-subtitle">Total transactions DexScreener</div>
         </div>
-        
         <div class="metric-card">
           <div class="metric-title">💚 Ratio Buys/Sells 24h</div>
           <div class="metric-value">${totalDexSells24h > 0 ? (totalDexBuys24h/totalDexSells24h).toFixed(2) : '∞'}</div>
           <div class="metric-subtitle">${totalDexBuys24h} buys / ${totalDexSells24h} sells</div>
         </div>
       `;
+
+      // Graphique de distribution des scores
+      const scoreRanges = { '0-20': 0, '21-40': 0, '41-60': 0, '61-80': 0, '81-100': 0 };
+      filteredData.forEach(token => {
+        const score = token.invest_score || 0;
+        if (score <= 20) scoreRanges['0-20']++;
+        else if (score <= 40) scoreRanges['21-40']++;
+        else if (score <= 60) scoreRanges['41-60']++;
+        else if (score <= 80) scoreRanges['61-80']++;
+        else scoreRanges['81-100']++;
+      });
+
+      const ctx = document.getElementById('scoreDistributionChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(scoreRanges),
+          datasets: [{
+            label: 'Distribution des Scores',
+            data: Object.values(scoreRanges),
+            backgroundColor: 'rgba(0, 212, 255, 0.5)',
+            borderColor: '#00d4ff',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: { beginAtZero: true }
+          }
+        }
+      });
     }
 
     function updatePagination() {
@@ -1152,59 +1545,155 @@
 
     // === FONCTIONS DE CONTRÔLE ===
     function reloadData() {
+      cachedData = null; // Reset cache
       fetchData();
       document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
       document.getElementById('filterTimeUnit').value = '';
       document.getElementById('filterBondingStatus').value = '';
       document.getElementById('dexFilterHasData').value = '';
+      document.getElementById('dexFilterStatus').value = '';
       document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
       applyFilters();
     }
 
     function resetFilters() {
-      document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
-      document.getElementById('filterTimeUnit').value = '';
-      document.getElementById('filterBondingStatus').value = '';
-      document.getElementById('filterDiscoveredAt').value = '';
-      document.getElementById('dexFilterHasData').value = '';
-      document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-      filteredData = [...data];
-      currentPage = 1;
-      renderPage();
+        document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
+        document.getElementById('filterTimeUnit').value = '';
+        document.getElementById('filterBondingStatus').value = '';
+        document.getElementById('filterDiscoveredAt').value = '';
+        document.getElementById('dexFilterHasData').value = '';
+        document.getElementById('dexFilterStatus').value = '';
+        document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+        window.dexTimeValue = null;
+        window.dexTimeUnit = null;
+        filteredData = [...data];
+        currentPage = 1;
+        applyFilters();
+        applyDexFilters();
     }
 
-    async function toggleFav(address) {
-      await fetch(`/api/favorites/${address}`, { method: 'POST' });
-      alert('Ajouté aux favoris !');
+    // === FONCTIONS FAVORIS ===
+    function toggleFav(address) {
+    // Placeholder pour la gestion des favoris (à implémenter selon votre backend)
+    console.log(`Toggle favorite for address: ${address}`);
+    // Exemple : envoyer une requête au backend pour sauvegarder les favoris
+    // fetch(`/api/favorites/toggle/${address}`, { method: 'POST' });
     }
 
-    // === ÉVÉNEMENTS ===
-    let debounceTimeout;
-    
-    // Filtres onglet base
-    document.querySelectorAll('#base-content .filter-panel input, #base-content .filter-panel select').forEach(input => {
-      input.addEventListener('input', () => {
-        clearTimeout(debounceTimeout);
-        debounceTimeout = setTimeout(() => {
-          applyFilters();
-        }, 300);
-      });
+    // === FONCTIONS D'EXPORTATION CSV ===
+    function exportToCSV() {
+    const headers = currentTab === 'base' ? [
+        'Symbol', 'Price ($)', 'Score', 'Liquidity ($)', 'Volume 24h ($)', 'Holders',
+        'Age (h)', 'Risk', 'Bonding Curve', 'Progress', 'Dernière MAJ', 'Découvert'
+    ] : [
+        'Symbol', 'Status', 'Prix DS ($)', 'Market Cap ($)', 'Liq. Base', 'Liq. Quote ($)',
+        'Vol 1h ($)', 'Vol 6h ($)', 'Vol 24h ($)', 'Δ Prix 1h (%)', 'Δ Prix 6h (%)',
+        'Δ Prix 24h (%)', 'Txns 1h', 'Txns 6h', 'Txns 24h', 'Buys 1h', 'Sells 1h',
+        'Buys 24h', 'Sells 24h', 'URL DexScreener', 'Créé le', 'MAJ DS'
+    ];
+
+    const rows = filteredData.map(row => {
+        if (currentTab === 'base') {
+        return [
+            row.symbol,
+            (+row.price_usdc || 0).toFixed(8),
+            (+row.invest_score || 0).toFixed(1),
+            Math.round(row.liquidity_usd || 0),
+            Math.round(row.volume_24h || 0),
+            row.holders || 0,
+            (+row.age_hours || 0).toFixed(1),
+            Math.round(100 - (row.rug_score || 50)),
+            row.bonding_curve_status || 'Unknown',
+            parseFloat(row.bonding_curve_progress) || 0,
+            formatLocalDateTime(row.updated_at || row.first_discovered_at),
+            formatLocalDateTime(row.first_discovered_at)
+        ];
+        } else {
+        return [
+            row.symbol,
+            row.status || 'Unknown',
+            (row.dexscreener_price_usd || 0).toFixed(8),
+            Math.round(row.dexscreener_market_cap || 0),
+            (row.dexscreener_liquidity_base || 0).toFixed(2),
+            Math.round(row.dexscreener_liquidity_quote || 0),
+            Math.round(row.dexscreener_volume_1h || 0),
+            Math.round(row.dexscreener_volume_6h || 0),
+            Math.round(row.dexscreener_volume_24h || 0),
+            (row.dexscreener_price_change_1h || 0).toFixed(2),
+            (row.dexscreener_price_change_6h || 0).toFixed(2),
+            (row.dexscreener_price_change_h24 || 0).toFixed(2),
+            row.dexscreener_txns_1h || 0,
+            row.dexscreener_txns_6h || 0,
+            row.dexscreener_txns_24h || 0,
+            row.dexscreener_buys_1h || 0,
+            row.dexscreener_sells_1h || 0,
+            row.dexscreener_buys_24h || 0,
+            row.dexscreener_sells_24h || 0,
+            row.dexscreener_url || `https://dexscreener.com/solana/${row.address}`,
+            formatLocalDateTime(row.dexscreener_pair_created_at),
+            formatLocalDateTime(row.last_dexscreener_update || row.updated_at)
+        ];
+        }
     });
 
-    // Filtres onglet DexScreener
-    document.querySelectorAll('#dexscreener-content .filter-panel input, #dexscreener-content .filter-panel select').forEach(input => {
-      input.addEventListener('input', () => {
-        clearTimeout(debounceTimeout);
-        debounceTimeout = setTimeout(() => {
-          applyDexFilters();
-        }, 300);
-      });
-    });
+  const csvContent = [
+    headers.join(','),
+    ...rows.map(row => row.map(val => `"${val}"`).join(','))
+  ].join('\n');
 
-    // === INITIALISATION ===
-    fetchData();
-    startAutoRefresh();
-    updateRefreshStatus();
+  const blob = new Blob([csvContent], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `token_report_${currentTab}_${new Date().toISOString()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// === FONCTIONS DE THEME ===
+function toggleTheme() {
+  document.body.classList.toggle('light-theme');
+  localStorage.setItem('theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
+}
+
+// === DEBOUNCING POUR LES FILTRES ===
+function debounce(func, wait) {
+  let timeout;
+  return function (...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func.apply(this, args), wait);
+  };
+}
+
+const applyFiltersDebounced = debounce(applyFilters, 300);
+const applyDexFiltersDebounced = debounce(applyDexFilters, 300);
+
+// === INITIALISATION ===
+function init() {
+  // Charger le thème sauvegardé
+  if (localStorage.getItem('theme') === 'light') {
+    document.body.classList.add('light-theme');
+  }
+
+  // Ajouter les écouteurs d'événements pour les filtres
+  document.querySelectorAll('#base-content .filter-panel input, #base-content .filter-panel select').forEach(input => {
+    input.addEventListener('input', applyFiltersDebounced);
+  });
+
+  document.querySelectorAll('#dexscreener-content .filter-panel input, #dexscreener-content .filter-panel select').forEach(input => {
+    input.addEventListener('input', applyDexFiltersDebounced);
+  });
+
+  // Initialiser l'auto-refresh
+  startAutoRefresh();
+  updateRefreshStatus();
+
+  // Charger les données initiales
+  fetchData();
+}
+
+// Appeler l'initialisation au chargement de la page
+document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
 </html>

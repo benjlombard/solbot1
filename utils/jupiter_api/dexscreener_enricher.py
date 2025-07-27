@@ -60,7 +60,7 @@ class RateLimiter:
 class ContinuousDexScreenerEnricher:
     """Version continue de l'enrichisseur DexScreener - LOGIQUE IDENTIQUE AU SCRIPT ORIGINAL"""
     
-    def __init__(self, database_path: str = "../tokens.db", check_interval_minutes: int = 15, 
+    def __init__(self, database_path: str = "tokens.db", check_interval_minutes: int = 15, 
                  batch_size: int = 50, min_hours_since_update: int = 1, 
                  strategy: str = "oldest", verbose: bool = True):
         self.database_path = database_path
@@ -818,7 +818,7 @@ def main():
     """Fonction principale"""
     parser = argparse.ArgumentParser(description="Continuous DexScreener Data Enricher")
     
-    parser.add_argument("--database", default="../tokens.db", help="Chemin vers la base de données")
+    parser.add_argument("--database", default="tokens.db", help="Chemin vers la base de données")
     parser.add_argument("--batch-size", type=int, default=50, help="Nombre de tokens par cycle")
     parser.add_argument("--interval", type=int, default=15, help="Intervalle entre cycles (minutes)")
     parser.add_argument("--strategy", choices=['oldest', 'never_updated', 'recent', 'random', 'force_all'], 

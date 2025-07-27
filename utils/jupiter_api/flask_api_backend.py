@@ -121,6 +121,7 @@ def get_tokens_detail():
             SELECT address, symbol, name, price_usdc, invest_score, liquidity_usd,
                    volume_24h, holders, age_hours, rug_score, is_tradeable,
                    updated_at, first_discovered_at, bonding_curve_status, bonding_curve_progress,
+                   status,
                    -- Colonnes DexScreener
                    dexscreener_pair_created_at,
                    dexscreener_price_usd,
