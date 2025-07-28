@@ -652,3 +652,5 @@ th {
   text-align: center;
   line-height: 1.6;
 }
+
+/* Styles pour le rug score */ .rug-score { padding: 3px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: bold; display: inline-block; text-align: center; min-width: 40px; } .rug-good { background: linear-gradient(45deg, #4CAF50, #8BC34A); color: #fff; } .rug-medium { background: linear-gradient(45deg, #FF9800, #FFC107); color: #000; } .rug-bad { background: linear-gradient(45deg, #F44336, #FF5722); color: #fff; }

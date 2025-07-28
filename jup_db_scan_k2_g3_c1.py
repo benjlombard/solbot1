@@ -369,10 +369,22 @@ class InvestScanner:
             return {"price_usdc": 0, "has_price": False}
 
     async def get_rugcheck_score(self, address: str) -> Dict:
+        """RugCheck optimisé - VERSION CORRIGÉE"""
         url = f"https://api.rugcheck.xyz/v1/tokens/{address}/report"
         async with aiohttp.ClientSession(connector=TCPConnector(limit=50)) as session:
             data = await self.fetch_json(url, session, api_type="rugcheck")
-            return {"rug_score": data.get("score", 0)} if data else {"rug_score": 0}
+            
+            if data:
+                # CORRECTION: Utiliser score_normalised
+                normalized_score = data.get("score_normalised", None)
+                raw_score = data.get("score", 50)
+                
+                final_score = normalized_score if normalized_score is not None else raw_score
+                final_score = max(0, min(100, final_score))
+                
+                return {"rug_score": final_score}
+            
+            return {"rug_score": 50}
 
     async def get_holders(self, address: str) -> int:
         url = f"https://public-api.solscan.io/token/holders?tokenAddress={address}&limit=1"

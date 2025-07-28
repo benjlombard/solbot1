@@ -189,13 +189,30 @@ class BatchTokenEnricher:
         return {"is_tradeable": False}
     
     async def _get_rugcheck_score(self, address: str) -> Dict:
-        """RugCheck optimisé"""
+        """RugCheck optimisé - VERSION CORRIGÉE"""
         url = f"https://api.rugcheck.xyz/v1/tokens/{address}/report"
         data = await self._rate_limited_fetch(url, "rugcheck")
         
         if data:
-            return {"rug_score": data.get("score", 50)}
-        return {"rug_score": 50}
+            # CORRECTION: Utiliser score_normalised au lieu de score
+            normalized_score = data.get("score_normalised", None)
+            raw_score = data.get("score", 50)
+            
+            # Si score_normalised existe, l'utiliser, sinon fallback sur raw_score
+            final_score = normalized_score if normalized_score is not None else raw_score
+            
+            # S'assurer que le score est dans la plage 0-100
+            final_score = max(0, min(100, final_score))
+            
+            return {
+                "rug_score": final_score,
+                "has_rugcheck_data": True
+            }
+        
+        return {
+            "rug_score": 50,  # Score neutre par défaut
+            "has_rugcheck_data": False
+        }
     
     async def _get_holders_helius(self, address: str) -> Dict:
         """Holders via Helius - version simplifiée"""

@@ -182,17 +182,34 @@ class TokenEnricher:
         return {"price_usdc": 0, "is_tradeable_jupiter": False}
 
     async def get_rugcheck_score(self, address: str) -> Dict:
-        """Récupérer le score de sécurité depuis RugCheck"""
+        """Récupérer le score de sécurité depuis RugCheck - VERSION CORRIGÉE"""
         url = f"https://api.rugcheck.xyz/v1/tokens/{address}/report"
         data = await self._fetch_json(url, "rugcheck")
         
         if data:
+            # CORRECTION: Utiliser score_normalised au lieu de score
+            normalized_score = data.get("score_normalised", None)
+            raw_score = data.get("score", 50)
+            
+            # Si score_normalised existe, l'utiliser, sinon fallback sur raw_score
+            final_score = normalized_score if normalized_score is not None else raw_score
+            
+            # S'assurer que le score est dans la plage 0-100
+            final_score = max(0, min(100, final_score))
+            
             return {
-                "rug_score": data.get("score", 0),
-                "quality_score": min(100, max(0, data.get("score", 50)))
+                "rug_score": final_score,
+                "rug_score_raw": raw_score,
+                "rug_score_normalized": normalized_score,
+                "quality_score": final_score,  # Pour compatibilité
+                "has_rugcheck_data": True
             }
         
-        return {"rug_score": 50, "quality_score": 50}
+        return {
+            "rug_score": 50,  # Score neutre par défaut
+            "quality_score": 50,
+            "has_rugcheck_data": False
+        }
 
     async def get_holders_count(self, address: str) -> int:
         """Récupérer le nombre de holders depuis Solscan"""

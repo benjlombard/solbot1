@@ -334,14 +334,21 @@ class OptimizedTokenEnricher:
         return {}
     
     async def _fetch_rugcheck(self, address: str) -> Dict:
-        """RugCheck rapide"""
+        """RugCheck optimisé - VERSION CORRIGÉE"""
         url = f"https://api.rugcheck.xyz/v1/tokens/{address}/report"
         try:
             async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     if data:
-                        return {"rug_score": data.get("score", 50)}
+                        # CORRECTION: Utiliser score_normalised
+                        normalized_score = data.get("score_normalised", None)
+                        raw_score = data.get("score", 50)
+                        
+                        final_score = normalized_score if normalized_score is not None else raw_score
+                        final_score = max(0, min(100, final_score))
+                        
+                        return {"rug_score": final_score}
         except:
             pass
         return {"rug_score": 50}
