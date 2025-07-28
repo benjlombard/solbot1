@@ -121,7 +121,7 @@
       
       <div class="filter-group">
         <label>Symbol:</label><input type="text" id="filterSymbol" placeholder="Symbol (e.g., DNT)">
-        <label>🛡️ Rug Score Min:</label><input type="number" id="dexFilterRugScoreMin" placeholder="Min 50" min="0" max="100" step="1" style="width: 80px;" title="Score de sécurité minimum (0-100)"> <label>Rug Score Max:</label><input type="number" id="dexFilterRugScoreMax" placeholder="Max" min="0" max="100" step="1" style="width: 80px;">
+        
         
         
         <!-- Nouveau filtre Bonding Curve -->
@@ -191,6 +191,10 @@
     <div class="filter-panel">
       <div class="filter-group">
         <label>Symbol:</label><input type="text" id="dexFilterSymbol" placeholder="Symbol">
+        <label>🛡️ Rug Score Min:</label>
+          <input type="number" id="dexFilterRugScoreMin" placeholder="70 (risky tokens)" min="0" max="100" step="1" style="width: 80px;" title="Score minimum - plus haut = plus risqué">
+        <label>🛡️ Rug Score Max:</label>
+          <input type="number" id="dexFilterRugScoreMax" placeholder="30 (good tokens)" min="0" max="100" step="1" style="width: 80px;" title="Score maximum - plus bas = mieux">
         <label>📊 Status:</label> <select id="dexFilterStatus" class="status-filter"> <option value="">Tous les status</option> <option value="active">Active</option> <option value="inactive">Inactive</option> <option value="no_dex_data">No Dex Data</option> <option value="archived">Archived</option> <option value="blacklisted">Blacklisted</option> </select>
         <label>Prix DexScreener Min ($):</label><input type="number" id="dexFilterPriceMin" placeholder="Min" step="0.000001">
         <label>Prix DexScreener Max ($):</label><input type="number" id="dexFilterPriceMax" placeholder="Max" step="0.000001">

@@ -428,7 +428,8 @@ function applyDexFilters() {
     buys24hMin: document.getElementById('dexFilterBuys24hMin').value ? parseFloat(document.getElementById('dexFilterBuys24hMin').value) : null,
     sells24hMax: document.getElementById('dexFilterSells24hMax').value ? parseFloat(document.getElementById('dexFilterSells24hMax').value) : null,
     liquidityQuoteMin: document.getElementById('dexFilterLiquidityQuoteMin').value ? parseFloat(document.getElementById('dexFilterLiquidityQuoteMin').value) : null,
-    rugScoreMin: document.getElementById('dexFilterRugScoreMin').value ? parseFloat(document.getElementById('dexFilterRugScoreMin').value) : null, rugScoreMax: document.getElementById('dexFilterRugScoreMax').value ? parseFloat(document.getElementById('dexFilterRugScoreMax').value) : null,
+    rugScoreMin: document.getElementById('dexFilterRugScoreMin').value ? parseFloat(document.getElementById('dexFilterRugScoreMin').value) : null, 
+    rugScoreMax: document.getElementById('dexFilterRugScoreMax').value ? parseFloat(document.getElementById('dexFilterRugScoreMax').value) : null,
     hasData: document.getElementById('dexFilterHasData').value,
     buySellRatio1hMin: document.getElementById('dexFilterBuySellRatio1h').value ? parseFloat(document.getElementById('dexFilterBuySellRatio1h').value) : null,
   buySellRatio24hMin: document.getElementById('dexFilterBuySellRatio24h').value ? parseFloat(document.getElementById('dexFilterBuySellRatio24h').value) : null,
@@ -482,7 +483,8 @@ function applyDexFilters() {
       (dexFilters.buys24hMin === null || (row.dexscreener_buys_24h || 0) >= dexFilters.buys24hMin) &&
       (dexFilters.sells24hMax === null || (row.dexscreener_sells_24h || 0) <= dexFilters.sells24hMax) &&
       (dexFilters.liquidityQuoteMin === null || (row.dexscreener_liquidity_quote || 0) >= dexFilters.liquidityQuoteMin) &&
-      (dexFilters.rugScoreMin === null || (row.rug_score || 50) >= dexFilters.rugScoreMin) && (dexFilters.rugScoreMax === null || (row.rug_score || 50) <= dexFilters.rugScoreMax) &&
+      (dexFilters.rugScoreMin === null || (row.rug_score || 50) >= dexFilters.rugScoreMin) && 
+      (dexFilters.rugScoreMax === null || (row.rug_score || 50) <= dexFilters.rugScoreMax) &&
       (!dexFilters.hasData || (dexFilters.hasData === 'true' ? hasDexData : !hasDexData)) &&
       (!window.dexTimeValue || !window.dexTimeUnit || isWithinTimeFilter(lastDexUpdate, window.dexTimeValue, window.dexTimeUnit)) &&
       (dexFilters.buySellRatio1hMin === null || 
@@ -728,7 +730,17 @@ function renderDexScreenerTable(rows) {
       
       // Ajout de la colonne Progress
       const progressDisplay = getBondingProgressDisplay(r.bonding_curve_status, r.bonding_curve_progress);
-      const rugScore = r.rug_score || 50; const rugScoreClass = rugScore >= 70 ? 'rug-good' : rugScore >= 40 ? 'rug-medium' : 'rug-bad'; const rugScoreDisplay = `<span class="rug-score ${rugScoreClass}" title="Score de sécurité: ${rugScore}/100">${rugScore}</span>`;
+      const rugScore = r.rug_score || 50; 
+      const rugScoreClass = rugScore <= 30 ? 'rug-good' : rugScore <= 60 ? 'rug-medium' : 'rug-bad';
+      const rugcheckUrl = `https://rugcheck.xyz/tokens/${r.address}`;
+      const rugScoreDisplay = `
+        <div style="display: flex; align-items: center; gap: 4px; justify-content: center;">
+          <span class="rug-score ${rugScoreClass}" title="Score RugCheck: ${rugScore}/100 (plus bas = mieux)">${rugScore}</span>
+          <a href="${rugcheckUrl}" target="_blank" style="color: #00d4ff; text-decoration: none; font-size: 0.8rem;" title="Vérifier sur RugCheck.xyz">
+            🔍
+          </a>
+        </div>
+      `;
       return `
         <tr>
           <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
@@ -990,7 +1002,8 @@ function highlightActiveFilters() {
     'filterPriceMin', 'filterPriceMax', 'filterScoreMin', 'filterScoreMax',
     'filterLiquidityMin', 'filterLiquidityMax', 'filterVolumeMin', 'filterVolumeMax',
     'filterHoldersMin', 'filterHoldersMax', 'filterAgeMin', 'filterAgeMax',
-    'filterRiskMin', 'filterRiskMax', 'filterDiscoveredAt', 'filterTimeValue', 'filterTimeUnit', 'dexFilterRugScoreMin', 'dexFilterRugScoreMax'
+    'filterRiskMin', 'filterRiskMax', 'filterDiscoveredAt', 'filterTimeValue', 
+    'filterTimeUnit', 'dexFilterRugScoreMin', 'dexFilterRugScoreMax'
   ];
 
   baseInputs.forEach(id => {
