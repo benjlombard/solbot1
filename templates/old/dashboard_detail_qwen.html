@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Bot Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0a0f;
+            --bg-card: #121218;
+            --bg-sidebar: #0f0f15;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b0;
+            --accent-green: #00ff9d;
+            --accent-orange: #ff6b35;
+            --accent-purple: #7e57ff;
+            --border-color: #2a2a3a;
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Navigation */
+        .navbar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem 2.5rem;
+            background: rgba(10, 10, 15, 0.8);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .logo {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 1.8rem;
+            background: linear-gradient(90deg, var(--accent-green), var(--accent-orange));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: var(--transition);
+        }
+
+        .nav-links a:hover {
+            color: var(--accent-green);
+        }
+
+        .user-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            border: none;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .btn-primary {
+            background: linear-gradient(90deg, var(--accent-green), #00cc7a);
+            color: #000;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 255, 157, 0.2);
+        }
+
+        /* Main Layout */
+        .container {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            min-height: calc(100vh - 80px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-sidebar);
+            padding: 2rem 1.5rem;
+            border-right: 1px solid var(--border-color);
+        }
+
+        .sidebar h3 {
+            font-family: 'Space Grotesk', sans-serif;
+            margin-bottom: 1.5rem;
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .categories {
+            list-style: none;
+        }
+
+        .categories li {
+            margin-bottom: 1rem;
+        }
+
+        .categories a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            padding: 0.7rem 1rem;
+            border-radius: 8px;
+            transition: var(--transition);
+        }
+
+        .categories a:hover, .categories a.active {
+            background: rgba(126, 87, 255, 0.1);
+            color: var(--accent-purple);
+        }
+
+        .categories a.active {
+            border-left: 3px solid var(--accent-purple);
+        }
+
+        /* Main Content */
+        .main-content {
+            padding: 2.5rem;
+            background: url('https://images.unsplash.com/photo-1620336655052-b57986f5a26a?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2000&q=80') no-repeat center center;
+            background-size: cover;
+        }
+
+        .hero-overlay {
+            background: rgba(10, 10, 15, 0.85);
+            backdrop-filter: blur(5px);
+            padding: 3rem;
+            border-radius: 16px;
+            max-width: 800px;
+        }
+
+        .hero h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+        }
+
+        .hero p {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            max-width: 600px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.5rem;
+            margin-top: 3rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: var(--transition);
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--accent-purple);
+        }
+
+        .stat-card h3 {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-card .value {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, var(--accent-green), var(--accent-orange));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .token-table {
+            background: var(--bg-card);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-top: 3rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .table-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-header h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.5rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 1rem 1.5rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        tr:hover td {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .token-symbol {
+            font-weight: 600;
+            color: var(--accent-green);
+        }
+
+        .positive {
+            color: var(--accent-green);
+        }
+
+        .negative {
+            color: var(--accent-orange);
+        }
+
+        .status {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .status.active {
+            background: rgba(0, 255, 157, 0.15);
+            color: var(--accent-green);
+        }
+
+        .status.completed {
+            background: rgba(126, 87, 255, 0.15);
+            color: var(--accent-purple);
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+            
+            .sidebar {
+                display: none;
+            }
+            
+            .navbar {
+                padding: 1rem;
+            }
+            
+            .main-content {
+                padding: 1.5rem;
+            }
+            
+            .hero-overlay {
+                padding: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="logo">SOLBOT</div>
+        <div class="nav-links">
+            <a href="#" class="active">Dashboard</a>
+            <a href="#">Tokens</a>
+            <a href="#">Analytics</a>
+            <a href="#">Settings</a>
+        </div>
+        <div class="user-actions">
+            <button class="btn btn-secondary">Connect Wallet</button>
+            <button class="btn btn-primary">New Alert</button>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <h3>Categories</h3>
+            <ul class="categories">
+                <li><a href="#" class="active">🎯 All Tokens</a></li>
+                <li><a href="#">🔥 Trending</a></li>
+                <li><a href="#">💎 New Listings</a></li>
+                <li><a href="#">💰 High Volume</a></li>
+                <li><a href="#">📊 Top Gainers</a></li>
+                <li><a href="#">📉 Top Losers</a></li>
+                <li><a href="#">🔒 Low Risk</a></li>
+                <li><a href="#">⭐ Favorites</a></li>
+            </ul>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="hero-overlay">
+                <div class="hero">
+                    <h1>Solana Token Intelligence</h1>
+                    <p>Real-time monitoring and analytics for Solana tokens. Track performance, detect trends, and execute trades with precision.</p>
+                    <button class="btn btn-primary">Start Monitoring</button>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>TOTAL TOKENS</h3>
+                        <div class="value">24,582</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>ACTIVE ALERTS</h3>
+                        <div class="value">142</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>24H VOLUME</h3>
+                        <div class="value">$1.2B</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>NEW TODAY</h3>
+                        <div class="value">1,204</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="token-table">
+                <div class="table-header">
+                    <h2>Token Performance</h2>
+                    <div>
+                        <button class="btn btn-secondary">Export</button>
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Token</th>
+                            <th>Price</th>
+                            <th>24h Change</th>
+                            <th>Volume</th>
+                            <th>Liquidity</th>
+                            <th>Status</th>
+                            <th>Last Update</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="token-symbol">BONK</td>
+                            <td>$0.000024</td>
+                            <td class="positive">+42.5%</td>
+                            <td>$45.2M</td>
+                            <td>$12.4M</td>
+                            <td><span class="status active">Active</span></td>
+                            <td>2 min ago</td>
+                        </tr>
+                        <tr>
+                            <td class="token-symbol">WIF</td>
+                            <td>$0.185</td>
+                            <td class="positive">+18.2%</td>
+                            <td>$32.1M</td>
+                            <td>$8.7M</td>
+                            <td><span class="status active">Active</span></td>
+                            <td>5 min ago</td>
+                        </tr>
+                        <tr>
+                            <td class="token-symbol">SOLC</td>
+                            <td>$0.0056</td>
+                            <td class="negative">-12.7%</td>
+                            <td>$18.5M</td>
+                            <td>$4.2M</td>
+                            <td><span class="status completed">Completed</span></td>
+                            <td>15 min ago</td>
+                        </tr>
+                        <tr>
+                            <td class="token-symbol">MEW</td>
+                            <td>$0.0124</td>
+                            <td class="positive">+67.3%</td>
+                            <td>$28.9M</td>
+                            <td>$6.8M</td>
+                            <td><span class="status active">Active</span></td>
+                            <td>8 min ago</td>
+                        </tr>
+                        <tr>
+                            <td class="token-symbol">CORAL</td>
+                            <td>$0.00034</td>
+                            <td class="negative">-5.4%</td>
+                            <td>$5.6M</td>
+                            <td>$1.9M</td>
+                            <td><span class="status active">Active</span></td>
+                            <td>12 min ago</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Simple interactivity for demonstration
+        document.addEventListener('DOMContentLoaded', function() {
+            const navLinks = document.querySelectorAll('.nav-links a');
+            const categoryLinks = document.querySelectorAll('.categories a');
+            
+            navLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    navLinks.forEach(l => l.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+            
+            categoryLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    categoryLinks.forEach(l => l.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+        });
+    </script>
+</body>
+</html>

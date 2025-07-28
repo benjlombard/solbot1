@@ -1,0 +1,545 @@
+{
+  "generated_at": "2025-07-27 10:25:44",
+  "analysis_period_hours": 1,
+  "status_analysis": {
+    "current_distribution": [
+      {
+        "status": "active",
+        "count": 2360,
+        "percentage": 69.66
+      },
+      {
+        "status": "no_dex_data",
+        "count": 809,
+        "percentage": 23.88
+      },
+      {
+        "status": "inactive",
+        "count": 219,
+        "percentage": 6.46
+      }
+    ],
+    "recent_changes_24h": [
+      {
+        "status": "active",
+        "count": 4114
+      }
+    ]
+  },
+  "update_frequency_analysis": {
+    "update_status": [
+      {
+        "update_status": "Has Updates",
+        "count": 2360
+      },
+      {
+        "update_status": "Never Updated",
+        "count": 1028
+      }
+    ],
+    "update_recency": [
+      {
+        "recency": "Last Hour",
+        "count": 277
+      },
+      {
+        "recency": "Last 6 Hours",
+        "count": 440
+      },
+      {
+        "recency": "Last 24 Hours",
+        "count": 1643
+      },
+      {
+        "recency": "Never",
+        "count": 1028
+      }
+    ],
+    "update_frequency": [
+      {
+        "update_count": 1,
+        "tokens_count": 1120
+      },
+      {
+        "update_count": 2,
+        "tokens_count": 33
+      },
+      {
+        "update_count": 3,
+        "tokens_count": 63
+      },
+      {
+        "update_count": 4,
+        "tokens_count": 179
+      },
+      {
+        "update_count": 5,
+        "tokens_count": 12
+      },
+      {
+        "update_count": 6,
+        "tokens_count": 11
+      },
+      {
+        "update_count": 7,
+        "tokens_count": 19
+      },
+      {
+        "update_count": 8,
+        "tokens_count": 109
+      },
+      {
+        "update_count": 9,
+        "tokens_count": 98
+      },
+      {
+        "update_count": 10,
+        "tokens_count": 1
+      }
+    ]
+  },
+  "recent_activity": {
+    "snapshot_activity": {
+      "total_snapshots": 1708,
+      "unique_tokens": 1305,
+      "first_snapshot": "2025-07-27 09:26:06",
+      "last_snapshot": "2025-07-27 10:25:19"
+    },
+    "successful_updates": {
+      "successful_updates": 277,
+      "unique_updated_tokens": 277
+    },
+    "status_changes": [
+      {
+        "status": "active",
+        "count": 1708
+      }
+    ],
+    "recent_token_updates": [
+      {
+        "symbol": "robosheeb",
+        "address": "Y4RCBSCWezPv5y4z32e8u2Ftxpqcg3LSh1ceGWapump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:25:20",
+        "dexscreener_price_usd": 5.228e-06,
+        "dexscreener_volume_24h": 19.37,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "XIMAO",
+        "address": "3gBXcyuLyWCNidXi3bm4VRTyyjVCrkYcZXVwiXrupump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:24:18",
+        "dexscreener_price_usd": 7.59e-06,
+        "dexscreener_volume_24h": 1495.87,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "FROGASS",
+        "address": "EoCBDGaUFw7aMPtWJEYHpJremtYsfChFfpe8nAcUpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:22:16",
+        "dexscreener_price_usd": 5.326e-06,
+        "dexscreener_volume_24h": 2638.73,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "🚀🚀",
+        "address": "C94NytkZZKqUroRC9TQHzkJFcjPtEL279C5tZtr4eKcS",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:22:15",
+        "dexscreener_price_usd": 5.269e-06,
+        "dexscreener_volume_24h": 1.6,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "passive",
+        "address": "79dx1c1o6fi28xxv7wxuVctpAXAn9dnokQkv4MUbpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:21:14",
+        "dexscreener_price_usd": 5.23e-06,
+        "dexscreener_volume_24h": 2.15,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "lumo",
+        "address": "6scb5QnhH6PhTKvFFCFAyj1abt3cYxM5uAupmq5gpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:21:14",
+        "dexscreener_price_usd": 3.596e-05,
+        "dexscreener_volume_24h": 7354.57,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "MCDOGVIN",
+        "address": "9kFWGtuYpzyDKkyrg8QdfyHtbaPBvW3f8ukmZYjNpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:20:12",
+        "dexscreener_price_usd": 9.65e-06,
+        "dexscreener_volume_24h": 5957.84,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "$BMASH",
+        "address": "47mLNS1qp4bSConqQtFAXSJJ8yZGuvrsAbD23SDmpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:20:11",
+        "dexscreener_price_usd": 5.227e-06,
+        "dexscreener_volume_24h": 167.6,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "INPEPE",
+        "address": "5iSBJyUagoY2k9YkmjWMu4NqALhd4kgZfu4hgjHMpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:20:11",
+        "dexscreener_price_usd": 8.758e-06,
+        "dexscreener_volume_24h": 1622.95,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "$LACKING",
+        "address": "4bPAhMztSqfskXBm6nfKdvuL94xHxs6vFmpXsiwFpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:19:09",
+        "dexscreener_price_usd": 5.233e-06,
+        "dexscreener_volume_24h": 12.89,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "LLM",
+        "address": "6zWeeRp9nQTH45wSKQRx2AbUtCyL8iAgCA26SinJpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:19:08",
+        "dexscreener_price_usd": 1.885e-05,
+        "dexscreener_volume_24h": 6660.32,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "INVT",
+        "address": "HwXETySUujgGTyqJWo3ezoisZUPZaMvgRAFjqoCcpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:19:06",
+        "dexscreener_price_usd": 5.234e-06,
+        "dexscreener_volume_24h": 76.15,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "SAM",
+        "address": "A8S13rvTPz2DjY8Pe9zbxs14M8crrarUhRXyTXb4pump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:18:04",
+        "dexscreener_price_usd": 5.305e-06,
+        "dexscreener_volume_24h": 20.44,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "KNA",
+        "address": "D9KXnhw7SkHA7BFAKVqiuYVp4hzLN2DEdsatHz3Ppump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:17:03",
+        "dexscreener_price_usd": 5.23e-06,
+        "dexscreener_volume_24h": 7.48,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "School",
+        "address": "J8HkAc61tsoDxhj5uaFzGmnRafnggv3gQtkKKSwPpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:17:02",
+        "dexscreener_price_usd": 5.263e-06,
+        "dexscreener_volume_24h": 17.22,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "LMG",
+        "address": "9B9BxRuf2h2v3T6mn2Ab1DHs9ea2k9hjbr3rpfB8pump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:17:02",
+        "dexscreener_price_usd": 5.236e-06,
+        "dexscreener_volume_24h": 7.48,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "TULLY",
+        "address": "G23p3Ach62YTN2VCcKxof7mjJMBbDzgWVKwsVSd3pump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:16:01",
+        "dexscreener_price_usd": 5.23e-06,
+        "dexscreener_volume_24h": 7.48,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "NEWCOIN",
+        "address": "3pxmTSF4WoLdKtRotnYjJnmXMs54W6kdNAK4nfWRpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:16:00",
+        "dexscreener_price_usd": 5.585e-06,
+        "dexscreener_volume_24h": 3431.87,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "MEOWANG ",
+        "address": "6AeH5qBeMuzzv1yRhXti4BeGd4WQyyH48dw163G1pump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:14:59",
+        "dexscreener_price_usd": 5.523e-06,
+        "dexscreener_volume_24h": 417.04,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      },
+      {
+        "symbol": "SENINU",
+        "address": "7pjJzZ2FLrse8GkEN8wBTnZ3uYehrjwNBc1tKyVDpump",
+        "dexscreener_last_dexscreener_update": "2025-07-27 10:14:59",
+        "dexscreener_price_usd": 7.859e-06,
+        "dexscreener_volume_24h": 5669.13,
+        "dexscreener_liquidity_quote": 0.0,
+        "status": "active"
+      }
+    ]
+  },
+  "failure_patterns": {
+    "failure_status_distribution": [
+      {
+        "status": "no_dex_data",
+        "count": 809,
+        "avg_age_days": 0.9962917181705809
+      },
+      {
+        "status": "inactive",
+        "count": 219,
+        "avg_age_days": 0.4657534246575342
+      }
+    ],
+    "oldest_without_data": [
+      {
+        "symbol": "CHOP",
+        "address": "5bF5w1ZYnwvrY4pGDwwmt1jqhzHtffb18ucfU5nAC1MY",
+        "first_discovered_at": "2025-07-25 15:44:26",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "realguy",
+        "address": "4wQbtkqMESpwUVyhFjHb2GGwQnP9gQsvk2r2VHeF1Ars",
+        "first_discovered_at": "2025-07-25 15:44:33",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "SDI",
+        "address": "DZNc7eJk6AomarvTDVYHUraSzhcVUPpWSDiS7baxpump",
+        "first_discovered_at": "2025-07-25 15:46:26",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "VINE",
+        "address": "CfNFv1vN94ZV5QHvFXsXionwvcJoo7C7GZZM9U7Ppump",
+        "first_discovered_at": "2025-07-25 15:46:27",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "ERROR",
+        "address": "J6xyZavJjF5Ym2tU8XdH68WYjNY5646Ywz6Vb1RfS7N1",
+        "first_discovered_at": "2025-07-25 15:46:33",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "babyval",
+        "address": "Rv1mUBm4ua4XBWAx17kvMUmR7XuPJuDMMeF8S3Mpump",
+        "first_discovered_at": "2025-07-25 15:46:37",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "DOGC",
+        "address": "6AquoqDg6v4tS6Xni29QsXr2ZGnxjrrmbETf2aP7pump",
+        "first_discovered_at": "2025-07-25 15:47:18",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "Babyntine",
+        "address": "4RURMANj3Le2DtRwkk3vi1fZjrBPX8JZVCu8Qqu8pump",
+        "first_discovered_at": "2025-07-25 15:47:28",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": " $SONIC",
+        "address": "56DVPQbyCkrQPFXxuk291GH4Qi2XKVHKXnZiYXMzAXUo",
+        "first_discovered_at": "2025-07-25 15:47:48",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "WEIRDO",
+        "address": "FM5hkWs7uBpUGCZpWPAssszPNxy6QQ5mKSckT4udZvta",
+        "first_discovered_at": "2025-07-25 15:48:18",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "MA$$$AAA ",
+        "address": "AaVqD74UhzdQkwLY6zBqeqoYXunpA4JKNU3AEyeYpump",
+        "first_discovered_at": "2025-07-25 15:48:28",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "JESUSMONEY",
+        "address": "F4AUpzxC26xvs96oYDtKWWGzMw1AxQ2cvDdJGqsmyuBN",
+        "first_discovered_at": "2025-07-25 15:49:05",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "WantedALON",
+        "address": "2cCT7nnHjHZXEgQ5ArmaHYc6MEymaW8TSNWfPiC7r1HZ",
+        "first_discovered_at": "2025-07-25 15:49:13",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "Warrior",
+        "address": "DozfVgCX1JzvRSvodF68NY8ECQeCcfX8MCpTYnozpump",
+        "first_discovered_at": "2025-07-25 15:49:36",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "SHITCOIN",
+        "address": "9j6cH5MHXhJeUhBJnY9JYqQPx8dWonjrKQoeRcrcpump",
+        "first_discovered_at": "2025-07-25 15:49:39",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "CATUS",
+        "address": "5oPf5mAdf29ro2URDXGqzoFKVAqqrHBug9bSSd5opump",
+        "first_discovered_at": "2025-07-25 15:49:48",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "TLC",
+        "address": "B2WgPaYLCsahJdYvJ6APTo1s3vhtEz78D6GSiUxyhuiq",
+        "first_discovered_at": "2025-07-25 15:50:04",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "rasmr20M",
+        "address": "EeD5ih2z6jBHHqGghQosqbbmw3QDZxdcyY3mwyEEpump",
+        "first_discovered_at": "2025-07-25 15:50:36",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "PONZU",
+        "address": "8QGaBqfM9JFvTS28sBkFyCZKc3mUUEbr1UCJrdQ1TaSb",
+        "first_discovered_at": "2025-07-25 15:51:11",
+        "age_days": 1,
+        "status": "no_dex_data"
+      },
+      {
+        "symbol": "CRYPTO",
+        "address": "2FrogsNoqgtmVPWjppB47dLQ74CfrV5HaPMT5xdhDenA",
+        "first_discovered_at": "2025-07-25 15:51:47",
+        "age_days": 1,
+        "status": "no_dex_data"
+      }
+    ],
+    "consecutive_failures_distribution": [
+      {
+        "consecutive_failures": 1,
+        "token_count": 1228
+      },
+      {
+        "consecutive_failures": 2,
+        "token_count": 18
+      },
+      {
+        "consecutive_failures": 3,
+        "token_count": 52
+      },
+      {
+        "consecutive_failures": 4,
+        "token_count": 167
+      }
+    ]
+  },
+  "data_quality": {
+    "data_completeness": [
+      {
+        "field": "price_usd",
+        "non_zero_count": 2357,
+        "non_null_count": 2360,
+        "total_count": 2360
+      },
+      {
+        "field": "volume_24h",
+        "non_zero_count": 2307,
+        "non_null_count": 2360,
+        "total_count": 2360
+      },
+      {
+        "field": "liquidity_quote",
+        "non_zero_count": 74,
+        "non_null_count": 2360,
+        "total_count": 2360
+      }
+    ],
+    "value_distributions": [
+      {
+        "metric": "Price Ranges",
+        "range_category": "< $0.001",
+        "count": 2350
+      },
+      {
+        "metric": "Price Ranges",
+        "range_category": "< $1",
+        "count": 6
+      },
+      {
+        "metric": "Price Ranges",
+        "range_category": ">= $1",
+        "count": 1
+      },
+      {
+        "metric": "Price Ranges",
+        "range_category": "Zero",
+        "count": 3
+      },
+      {
+        "metric": "Volume Ranges",
+        "range_category": "< $100",
+        "count": 873
+      },
+      {
+        "metric": "Volume Ranges",
+        "range_category": "< $10K",
+        "count": 546
+      },
+      {
+        "metric": "Volume Ranges",
+        "range_category": "< $1K",
+        "count": 470
+      },
+      {
+        "metric": "Volume Ranges",
+        "range_category": ">= $10K",
+        "count": 418
+      },
+      {
+        "metric": "Volume Ranges",
+        "range_category": "Zero",
+        "count": 53
+      }
+    ]
+  },
+  "snapshot_consistency": {}
+}

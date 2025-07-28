@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>🎯 Invest Ready – Solana Scanner</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", sans-serif; background: #0f0f23; color: #fff; }
+    .nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; background: #1e1e38; }
+    .nav a { color: #00d4ff; text-decoration: none; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem;}
+    th, td { padding: .6rem .5rem; border-bottom: 1px solid #2a2a4a; }
+    th { background: #0f3460; }
+    .price { color: #00ff88; font-weight: bold; }
+    .score { color: #ffaa00; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <h1>🎯 Invest Ready (Top Picks)</h1>
+    <a href="/dashboard">← Retour au Dashboard</a>
+  </div>
+
+  <table id="table">
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Price ($)</th>
+        <th>Score</th>
+        <th>Liquidity ($)</th>
+        <th>Volume 24h ($)</th>
+        <th>Holders</th>
+        <th>Age (h)</th>
+        <th>Risk</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <script>
+    async function load() {
+      const rows = await fetch('/api/invest-ready').then(r => r.json());
+      const tbody = document.getElementById('tbody');
+      tbody.innerHTML = rows.map(r => `
+        <tr>
+          <td><a href="https://dexscreener.com/solana/${r.address}" target="_blank">${r.symbol}</a></td>
+          <td class="price">${(+r.price_usdc || 0).toFixed(8)}</td>
+          <td class="score">${(+r.invest_score || 0).toFixed(1)}</td>
+          <td>${Math.round(r.liquidity_usd || 0).toLocaleString()}</td>
+          <td>${Math.round(r.volume_24h || 0).toLocaleString()}</td>
+          <td>${r.holders || 0}</td>
+          <td>${(+r.age_hours || 0).toFixed(1)}</td>
+          <td>${Math.round(100 - (r.rug_score || 50))}</td>
+        </tr>
+      `).join('');
+    }
+    load();
+  </script>
+</body>
+</html>

@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Token Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            color: #ffffff;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(45deg, #00d4ff, #090979);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #00d4ff;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #b0b0b0;
+            font-size: 0.9rem;
+        }
+
+        .sections-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+
+        .section {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(5px);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .section h2 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+
+        .token-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #00d4ff;
+            transition: transform 0.2s ease;
+        }
+
+        .token-item:hover {
+            transform: translateX(5px);
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .token-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .token-symbol {
+            font-weight: bold;
+            font-size: 1.1rem;
+            color: #ffffff;
+        }
+
+        .token-score {
+            background: linear-gradient(45deg, #00d4ff, #090979);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .token-details {
+            font-size: 0.9rem;
+            color: #b0b0b0;
+            line-height: 1.4;
+        }
+
+        .price { color: #00ff88; font-weight: bold; }
+        .volume { color: #ffaa00; }
+        .holders { color: #ff6b6b; }
+
+        .alert-high {
+            border-left-color: #ff4757;
+            background: rgba(255, 71, 87, 0.1);
+        }
+
+        .alert-medium {
+            border-left-color: #ffa502;
+            background: rgba(255, 165, 2, 0.1);
+        }
+
+        .links {
+            margin-top: 8px;
+        }
+
+        .links a {
+            color: #00d4ff;
+            text-decoration: none;
+            font-size: 0.8rem;
+            margin-right: 10px;
+        }
+
+        .links a:hover {
+            text-decoration: underline;
+        }
+
+        .refresh-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: linear-gradient(45deg, #00d4ff, #090979);
+            border: none;
+            color: white;
+            padding: 15px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 1.2rem;
+            box-shadow: 0 4px 15px rgba(0, 212, 255, 0.3);
+            transition: transform 0.2s ease;
+        }
+
+        .refresh-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .update-time {
+            text-align: center;
+            color: #888;
+            font-size: 0.8rem;
+            margin-top: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            color: #888;
+            padding: 20px;
+        }
+
+        .error {
+            text-align: center;
+            color: #ff6b6b;
+            padding: 20px;
+            background: rgba(255, 107, 107, 0.1);
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+
+        @media (max-width: 768px) {
+            .sections-grid { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .header h1 { font-size: 2rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Solana Token Scanner</h1>
+            
+            <p>Real-time monitoring of emerging tokens</p>
+            <a href="/dashboard/detail" style="color:#00d4ff;font-size:1rem;">📊 Voir le rapport détaillé</a>
+            <button id="exportBtn" style="margin-left:1rem;padding:.4rem .8rem;background:#00d4ff;border:none;border-radius:4px;color:#fff;cursor:pointer;" onclick="downloadCSV()">📥 Export Ready</button>
+            <span style="cursor:help;color:#ffaa00;margin-left:1rem;font-size:.9rem;" 
+      title="Critères : invest_score ≥ 75, rug_score < 30, liquidity_usd > 50 000">
+  ❓
+</span>
+ <div class="nav" style="margin-top:.5rem;">
+  <a href="/dashboard/invest-ready" style="background:#00d4ff;padding:.5rem 1rem;border-radius:4px;color:#fff;">
+    🎯 Voir les Invest Ready
+  </a>
+</div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalTokens">-</div>
+                <div class="stat-label">Total Tokens</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="highScoreTokens">-</div>
+                <div class="stat-label">High Score (80+)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="newTokens">-</div>
+                <div class="stat-label">New (24h)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="graduatedTokens">-</div>
+                <div class="stat-label">Graduated</div>
+            </div>
+        </div>
+
+    <!--<div style="margin:1rem 0;font-size:.9rem;color:#aaa;">
+        📊 <strong>Export Ready</strong> : tokens avec invest_score ≥ 75, rug_score < 30, liquidity > 50 k$
+        <br><a href="/dashboard/detail" style="color:#00d4ff;">Voir le détail filtrable</a>
+    </div>-->
+
+   
+
+        <div class="sections-grid">
+            <div class="section">
+                <h2>🏆 Top Performers</h2>
+                <div id="topTokens">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            <div class="section">
+                <h2>💎 Fresh Gems (6h)</h2>
+                <div id="newGems">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            <div class="section">
+                <h2>🔥 Volume Spikes</h2>
+                <div id="volumeAlerts">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            <div class="section">
+                <h2>🚀 Recent Graduations</h2>
+                <div id="graduatedTokens">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="update-time">
+            Last updated: <span id="lastUpdate">Never</span>
+        </div>
+    </div>
+
+    <button class="refresh-btn" onclick="manualRefresh()">🔄</button>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5000/api';
+        let isLoading = false;
+        // Téléchargement CSV
+        function downloadCSV() {
+            window.location.href = '/api/export-ready';
+        }
+
+        // Raccourci clavier Ctrl + E
+        document.addEventListener('keydown', e => {
+            if (e.ctrlKey && e.key === 'e') {
+                e.preventDefault();
+                downloadCSV();
+            }
+        });
+        // Fonction pour faire des requêtes API
+        async function fetchAPI(endpoint) {
+            try {
+                console.log('Fetching:', API_BASE_URL + endpoint);
+                const response = await fetch(API_BASE_URL + endpoint);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                console.log('Response received:', data);
+                return data;
+            } catch (error) {
+                console.error(`Error fetching ${endpoint}:`, error);
+                return null;
+            }
+        }
+
+        // Test de connexion API
+        async function testConnection() {
+            try {
+                const health = await fetchAPI('/health');
+                console.log('✅ API Connection OK:', health);
+                return true;
+            } catch (error) {
+                console.error('❌ API Connection Failed:', error);
+                showGlobalError('Cannot connect to API server. Is Flask running?');
+                return false;
+            }
+        }
+
+        // Chargement des données
+        async function loadData() {
+            if (isLoading) return;
+            isLoading = true;
+
+            try {
+                console.log('🔄 Loading dashboard data...');
+                const data = await fetchAPI('/dashboard-data');
+                
+                if (data) {
+                    updateStats(data.stats || {});
+                    renderTokens('topTokens', data.topTokens || []);
+                    renderTokens('newGems', data.newGems || []);
+                    renderTokens('volumeAlerts', data.volumeAlerts || [], true);
+                    renderTokens('graduatedTokens', data.graduated || []);
+                    
+                    document.getElementById('lastUpdate').textContent = 
+                        new Date().toLocaleTimeString();
+                    
+                    console.log('✅ Data loaded successfully');
+                } else {
+                    throw new Error('No data received');
+                }
+            } catch (error) {
+                console.error('❌ Error loading data:', error);
+                showGlobalError('Failed to load data: ' + error.message);
+            } finally {
+                isLoading = false;
+            }
+        }
+
+        // Met à jour les statistiques
+        function updateStats(stats) {
+            document.getElementById('totalTokens').textContent = stats.totalTokens || 0;
+            document.getElementById('highScoreTokens').textContent = stats.highScoreTokens || 0;
+            document.getElementById('newTokens').textContent = stats.newTokens || 0;
+            document.getElementById('graduatedTokens').textContent = stats.graduatedTokens || 0;
+        }
+
+        // Rendu des tokens
+        function renderTokens(containerId, tokens, isAlert = false) {
+            const container = document.getElementById(containerId);
+            
+            if (!tokens || tokens.length === 0) {
+                container.innerHTML = '<div class="loading">No data available yet. Scanner is collecting data...</div>';
+                return;
+            }
+
+            container.innerHTML = tokens.map(token => {
+                const alertClass = isAlert && token.volumeRatio > 5 ? 'alert-high' : 
+                                 isAlert && token.volumeRatio > 2 ? 'alert-medium' : '';
+                
+                const price = token.price ? `$${parseFloat(token.price).toFixed(8)}` : 'N/A';
+                const volume = `$${Math.round(token.volume || 0).toLocaleString()}`;
+                const age = token.age ? `${parseFloat(token.age).toFixed(1)}h` : 'N/A';
+                const score = token.score ? parseFloat(token.score).toFixed(1) : 
+                             token.volumeRatio ? `${token.volumeRatio}x` : '0';
+                
+                return `
+                    <div class="token-item ${alertClass}">
+                        <div class="token-header">
+                            <span class="token-symbol">${token.symbol || 'UNKNOWN'}</span>
+                            <span class="token-score">${score}</span>
+                        </div>
+                        <div class="token-details">
+                            ${token.price ? `Price: <span class="price">${price}</span> | ` : ''}
+                            Volume: <span class="volume">${volume}</span> |
+                            ${token.holders ? `Holders: <span class="holders">${token.holders}</span> | ` : ''}
+                            ${token.age ? `Age: ${age}` : ''}
+                            ${token.status ? ` | Status: ${token.status}` : ''}
+                        </div>
+                        <div class="links">
+                            <a href="https://dexscreener.com/solana/${token.address}" target="_blank">DexScreener</a>
+                            <a href="https://pump.fun/coin/${token.address}" target="_blank">Pump.fun</a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Affichage des erreurs
+        function showGlobalError(message) {
+            const sections = ['topTokens', 'newGems', 'volumeAlerts', 'graduatedTokens'];
+            sections.forEach(sectionId => {
+                const container = document.getElementById(sectionId);
+                container.innerHTML = `<div class="error">❌ ${message}</div>`;
+            });
+        }
+
+        // Refresh manuel
+        async function manualRefresh() {
+            console.log('Manual refresh triggered');
+            
+            const btn = document.querySelector('.refresh-btn');
+            btn.style.transform = 'rotate(360deg) scale(1.1)';
+            btn.innerHTML = '⏳';
+            
+            try {
+                await loadData();
+            } finally {
+                setTimeout(() => {
+                    btn.style.transform = 'scale(1)';
+                    btn.innerHTML = '🔄';
+                }, 500);
+            }
+        }
+
+        // Initialisation
+        async function init() {
+            console.log('🚀 Initializing dashboard...');
+            
+            const apiConnected = await testConnection();
+            
+            if (apiConnected) {
+                await loadData();
+                
+                // Auto-refresh toutes les 2 minutes
+                setInterval(() => {
+                    if (!isLoading) {
+                        loadData();
+                    }
+                }, 2 * 60 * 1000);
+                
+                console.log('✅ Dashboard initialized successfully');
+            } else {
+                console.error('❌ Failed to initialize dashboard - API not available');
+            }
+        }
+
+        // Démarrer quand la page est chargée
+        document.addEventListener('DOMContentLoaded', init);
+        
+        // Fallback pour les navigateurs plus anciens
+        if (document.readyState !== 'loading') {
+            init();
+        }
+    </script>
+</body>
+</html>

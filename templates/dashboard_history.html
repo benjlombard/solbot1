@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>📈 Token History Report</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", sans-serif; background: #0f0f23; color: #fff; }
+    .nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; background: #1e1e38; }
+    .nav a { color: #00d4ff; text-decoration: none; }
+    .controls { display: flex; gap: 1rem; align-items: center; padding: 1rem 2rem; background: #16213e; flex-wrap: wrap; }
+    
+    /* Info du token */
+    .token-info {
+      background: #1e1e38;
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid #2a2a4a;
+    }
+    .token-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .token-title {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #00d4ff;
+    }
+    .token-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .metric-card {
+      background: #2a2a4a;
+      padding: 1rem;
+      border-radius: 6px;
+      text-align: center;
+    }
+    .metric-value {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #00ff88;
+    }
+    .metric-label {
+      font-size: 0.9rem;
+      color: #888;
+      margin-top: 0.25rem;
+    }
+    
+    /* Système d'onglets */
+    .tabs-container { background: #16213e; border-bottom: 1px solid #2a2a4a; }
+    .tabs { display: flex; padding: 0 2rem; gap: 0.5rem; }
+    .tab { 
+      padding: 1rem 1.5rem; 
+      background: transparent; 
+      border: none; 
+      color: #888; 
+      cursor: pointer; 
+      border-bottom: 3px solid transparent;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+    .tab:hover { color: #00d4ff; }
+    .tab.active { 
+      color: #00d4ff; 
+      border-bottom-color: #00d4ff; 
+      background: rgba(0, 212, 255, 0.1);
+    }
+    
+    /* Contenu des onglets */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    
+    /* Graphiques */
+    .chart-container {
+      background: #1e1e38;
+      margin: 1rem 2rem;
+      padding: 1.5rem;
+      border-radius: 8px;
+      border: 1px solid #2a2a4a;
+    }
+    .chart-title {
+      color: #00d4ff;
+      font-size: 1.1rem;
+      font-weight: bold;
+      margin-bottom: 1rem;
+    }
+    .chart-wrapper {
+      position: relative;
+      height: 400px;
+      width: 100%;
+    }
+    
+    /* Filtres temporels */
+    .time-filters {
+      display: flex;
+      gap: 0.5rem;
+      padding: 1rem 2rem;
+      background: #16213e;
+      border-bottom: 1px solid #2a2a4a;
+    }
+    .time-filter-btn {
+      padding: 0.5rem 1rem;
+      border: none;
+      border-radius: 4px;
+      background: #2a2a4a;
+      color: #00d4ff;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .time-filter-btn:hover { background: #00d4ff; color: #fff; }
+    .time-filter-btn.active { background: #00d4ff; color: #fff; }
+    
+    /* Tableau historique */
+    table { width: 100%; border-collapse: collapse; margin: 1rem 2rem; font-size: 0.8rem; max-width: calc(100% - 4rem); }
+    th, td { padding: 0.4rem 0.3rem; border-bottom: 1px solid #2a2a4a; text-align: left; }
+    th { background: #0f3460; position: sticky; top: 0; font-size: 0.75rem; }
+    .price { color: #00ff88; font-weight: bold; }
+    .score { color: #ffaa00; font-weight: bold; }
+    .positive { color: #00ff88; }
+    .negative { color: #ff6b6b; }
+    .neutral { color: #888; }
+    
+    /* Stats en temps réel */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1rem;
+      padding: 1rem 2rem;
+    }
+    .stat-card {
+      background: #1e1e38;
+      padding: 1.5rem;
+      border-radius: 8px;
+      border: 1px solid #2a2a4a;
+    }
+    .stat-title {
+      color: #00d4ff;
+      font-size: 1rem;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
+    }
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #fff;
+    }
+    .stat-change {
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+    
+    /* Statuts */
+    .status-badge {
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 0.7rem;
+      font-weight: bold;
+      text-transform: uppercase;
+      display: inline-block;
+    }
+    .status-active { background: linear-gradient(45deg, #4CAF50, #8BC34A); color: #fff; }
+    .status-inactive { background: linear-gradient(45deg, #FF9800, #FFC107); color: #000; }
+    .status-completed { background: linear-gradient(45deg, #2196F3, #03A9F4); color: #fff; }
+    .status-migrated { background: linear-gradient(45deg, #9C27B0, #E91E63); color: #fff; }
+    
+    /* Auto-refresh */
+    .auto-refresh-section {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.5rem 1rem;
+      background: #2a2a4a;
+      border: 1px solid #444;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      margin-left: auto;
+    }
+    .toggle-switch {
+      position: relative;
+      width: 40px;
+      height: 20px;
+      background: #444;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    .toggle-switch.active { background: #00d4ff; }
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: white;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.3s;
+    }
+    .toggle-switch.active::after { transform: translateX(20px); }
+    
+    .loading { text-align: center; padding: 2rem; color: #888; }
+    .error { text-align: center; padding: 2rem; color: #ff6b6b; }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+      .token-metrics { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: 1fr; }
+      th, td { padding: 0.3rem 0.2rem; font-size: 0.75rem; }
+      table { font-size: 0.7rem; }
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+</head>
+<body>
+  <!-- Navigation -->
+  <div class="nav">
+    <h1>📈 Token History Report</h1>
+    <div>
+      <a href="/dashboard/detail">← Retour aux Tokens</a>
+      <a href="/dashboard" style="margin-left: 1rem;">Dashboard</a>
+    </div>
+  </div>
+
+  <!-- Info du token -->
+  <div class="token-info">
+    <div class="token-header">
+      <div class="token-title" id="tokenTitle">Chargement...</div>
+      <div class="auto-refresh-section">
+        <div class="auto-refresh-toggle">
+          <label for="autoRefreshEnabled">Auto-refresh:</label>
+          <div class="toggle-switch active" id="autoRefreshToggle" onclick="toggleAutoRefresh()"></div>
+        </div>
+        <select id="refreshInterval" onchange="updateRefreshInterval()">
+          <option value="30000" selected>30s</option>
+          <option value="60000">1min</option>
+          <option value="300000">5min</option>
+        </select>
+      </div>
+    </div>
+    
+    <div class="token-metrics" id="tokenMetrics">
+      <!-- Métriques du token chargées dynamiquement -->
+    </div>
+  </div>
+
+  <!-- Contrôles -->
+  <div class="controls">
+    <button onclick="reloadData()">🔄 Actualiser</button>
+    <label>Période d'analyse:
+      <select id="analysisPeriod" onchange="updateAnalysisPeriod()">
+        <option value="1">1 jour</option>
+        <option value="3">3 jours</option>
+        <option value="7" selected>7 jours</option>
+        <option value="14">14 jours</option>
+        <option value="30">30 jours</option>
+      </select>
+    </label>
+  </div>
+
+  <!-- Filtres temporels -->
+  <div class="time-filters">
+    <button class="time-filter-btn" onclick="setTimeFilter(1, this)">1j</button>
+    <button class="time-filter-btn" onclick="setTimeFilter(3, this)">3j</button>
+    <button class="time-filter-btn active" onclick="setTimeFilter(7, this)">7j</button>
+    <button class="time-filter-btn" onclick="setTimeFilter(14, this)">14j</button>
+    <button class="time-filter-btn" onclick="setTimeFilter(30, this)">30j</button>
+  </div>
+
+  <!-- Onglets -->
+  <div class="tabs-container">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('charts', this)">📊 Graphiques</button>
+      <button class="tab" onclick="switchTab('history', this)">📋 Historique</button>
+      <button class="tab" onclick="switchTab('stats', this)">📈 Statistiques</button>
+    </div>
+  </div>
+
+  <!-- Contenu Onglet Graphiques -->
+  <div id="charts-content" class="tab-content active">
+    <div class="chart-container">
+      <div class="chart-title">📈 Évolution du Prix</div>
+      <div class="chart-wrapper">
+        <canvas id="priceChart"></canvas>
+      </div>
+    </div>
+    
+    <div class="chart-container">
+      <div class="chart-title">📊 Volume et Liquidité</div>
+      <div class="chart-wrapper">
+        <canvas id="volumeChart"></canvas>
+      </div>
+    </div>
+    
+    <div class="chart-container">
+      <div class="chart-title">⭐ Score d'Investissement</div>
+      <div class="chart-wrapper">
+        <canvas id="scoreChart"></canvas>
+      </div>
+    </div>
+    
+    <div class="chart-container">
+      <div class="chart-title">👥 Évolution des Holders</div>
+      <div class="chart-wrapper">
+        <canvas id="holdersChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contenu Onglet Historique -->
+  <div id="history-content" class="tab-content">
+    <table id="historyTable">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Prix USDC</th>
+          <th>Prix DexScreener</th>
+          <th>Market Cap</th>
+          <th>Volume 24h</th>
+          <th>Liquidité</th>
+          <th>Score Invest.</th>
+          <th>Holders</th>
+          <th>Statut</th>
+          <th>Progress BC</th>
+          <th>Raison</th>
+        </tr>
+      </thead>
+      <tbody id="historyTbody">
+        <tr><td colspan="11" class="loading">Chargement des données historiques...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Contenu Onglet Statistiques -->
+  <div id="stats-content" class="tab-content">
+    <div class="stats-grid" id="statsGrid">
+      <!-- Statistiques chargées dynamiquement -->
+    </div>
+  </div>
+
+  <script>
+    let tokenAddress = '';
+    let chartData = [];
+    let priceChart, volumeChart, scoreChart, holdersChart;
+    let currentPeriod = 7;
+    let refreshInterval = 30000;
+    let refreshTimer = null;
+    let isAutoRefreshEnabled = true;
+
+    // === INITIALISATION ===
+    function init() {
+      // Récupérer l'adresse du token depuis l'URL
+      const urlParams = new URLSearchParams(window.location.search);
+      tokenAddress = urlParams.get('address');
+      
+      if (!tokenAddress) {
+        document.getElementById('tokenTitle').textContent = 'Aucun token spécifié';
+        return;
+      }
+      
+      loadTokenData();
+      startAutoRefresh();
+    }
+
+    // === GESTION DES ONGLETS ===
+    function switchTab(tabName, button) {
+      document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+      });
+      
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      
+      document.getElementById(tabName + '-content').classList.add('active');
+      button.classList.add('active');
+      
+      if (tabName === 'charts' && chartData.length > 0) {
+        setTimeout(() => updateCharts(), 100);
+      }
+    }
+
+    // === CHARGEMENT DES DONNÉES ===
+    async function loadTokenData() {
+      try {
+        // Charger les données du token
+        const [chartResponse, statsResponse, historyResponse] = await Promise.all([
+          fetch(`/api/token-chart-data/${tokenAddress}?days=${currentPeriod}`),
+          fetch(`/api/token-history-stats/${tokenAddress}?days=${currentPeriod}`),
+          fetch(`/api/token-trends/${tokenAddress}?days=${currentPeriod}`)
+        ]);
+
+        if (!chartResponse.ok || !statsResponse.ok || !historyResponse.ok) {
+          throw new Error('Erreur lors du chargement des données');
+        }
+
+        chartData = await chartResponse.json();
+        const statsData = await statsResponse.json();
+        const historyData = await historyResponse.json();
+
+        updateTokenInfo(historyData.token_info, statsData);
+        updateCharts();
+        updateHistoryTable(historyData.historical_data);
+        updateStatsCards(statsData);
+        
+      } catch (error) {
+        console.error('Erreur:', error);
+        document.getElementById('tokenTitle').textContent = 'Erreur de chargement';
+      }
+    }
+
+    function updateTokenInfo(tokenInfo, statsData) {
+      if (!tokenInfo || !tokenInfo.symbol) {
+        document.getElementById('tokenTitle').textContent = `Token ${tokenAddress.substring(0, 8)}...`;
+        return;
+      }
+
+      document.getElementById('tokenTitle').textContent = 
+        `${tokenInfo.symbol} - ${tokenInfo.name || 'Token Analysis'}`;
+
+      const metricsHtml = `
+        <div class="metric-card">
+          <div class="metric-value">${statsData.data_points || 0}</div>
+          <div class="metric-label">Points de données</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">${currentPeriod} jours</div>
+          <div class="metric-label">Période analysée</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">${statsData.price_stats ? '$' + statsData.price_stats.last.toFixed(6) : 'N/A'}</div>
+          <div class="metric-label">Prix actuel</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">${statsData.price_stats ? statsData.price_stats.change_pct.toFixed(2) + '%' : 'N/A'}</div>
+          <div class="metric-label">Variation prix</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">${statsData.score_stats ? statsData.score_stats.last.toFixed(1) : 'N/A'}</div>
+          <div class="metric-label">Score invest.</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">${statsData.holders_stats ? statsData.holders_stats.last.toLocaleString() : 'N/A'}</div>
+          <div class="metric-label">Holders</div>
+        </div>
+      `;
+      
+      document.getElementById('tokenMetrics').innerHTML = metricsHtml;
+    }
+
+    // === GRAPHIQUES ===
+    function updateCharts() {
+      if (!chartData || !chartData.labels || chartData.labels.length === 0) {
+        return;
+      }
+
+      // Graphique des prix
+      updatePriceChart();
+      updateVolumeChart();
+      updateScoreChart();
+      updateHoldersChart();
+    }
+
+    function updatePriceChart() {
+      const ctx = document.getElementById('priceChart').getContext('2d');
+      
+      if (priceChart) {
+        priceChart.destroy();
+      }
+
+      priceChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: chartData.labels,
+          datasets: [{
+            label: 'Prix USDC',
+            data: chartData.datasets.price,
+            borderColor: '#00ff88',
+            backgroundColor: 'rgba(0, 255, 136, 0.1)',
+            tension: 0.3,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: '#fff' } }
+          },
+          scales: {
+            x: { ticks: { color: '#888' }, grid: { color: '#333' } },
+            y: { ticks: { color: '#888' }, grid: { color: '#333' } }
+          }
+        }
+      });
+    }
+
+    function updateVolumeChart() {
+      const ctx = document.getElementById('volumeChart').getContext('2d');
+      
+      if (volumeChart) {
+        volumeChart.destroy();
+      }
+
+      volumeChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: chartData.labels,
+          datasets: [{
+            label: 'Volume 24h',
+            data: chartData.datasets.volume,
+            borderColor: '#00d4ff',
+            backgroundColor: 'rgba(0, 212, 255, 0.1)',
+            yAxisID: 'y'
+          }, {
+            label: 'Liquidité',
+            data: chartData.datasets.liquidity,
+            borderColor: '#ffaa00',
+            backgroundColor: 'rgba(255, 170, 0, 0.1)',
+            yAxisID: 'y1'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: '#fff' } }
+          },
+          scales: {
+            x: { ticks: { color: '#888' }, grid: { color: '#333' } },
+            y: {
+              type: 'linear',
+              display: true,
+              position: 'left',
+              ticks: { color: '#888' },
+              grid: { color: '#333' }
+            },
+            y1: {
+              type: 'linear',
+              display: true,
+              position: 'right',
+              ticks: { color: '#888' },
+              grid: { drawOnChartArea: false }
+            }
+          }
+        }
+      });
+    }
+
+    function updateScoreChart() {
+      const ctx = document.getElementById('scoreChart').getContext('2d');
+      
+      if (scoreChart) {
+        scoreChart.destroy();
+      }
+
+      scoreChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: chartData.labels,
+          datasets: [{
+            label: 'Score d\'investissement',
+            data: chartData.datasets.score,
+            borderColor: '#ff6b35',
+            backgroundColor: 'rgba(255, 107, 53, 0.1)',
+            tension: 0.3,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: '#fff' } }
+          },
+          scales: {
+            x: { ticks: { color: '#888' }, grid: { color: '#333' } },
+            y: { 
+              ticks: { color: '#888' }, 
+              grid: { color: '#333' },
+              min: 0,
+              max: 100
+            }
+          }
+        }
+      });
+    }
+
+    function updateHoldersChart() {
+      const ctx = document.getElementById('holdersChart').getContext('2d');
+      
+      if (holdersChart) {
+        holdersChart.destroy();
+      }
+
+      holdersChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: chartData.labels,
+          datasets: [{
+            label: 'Nombre de holders',
+            data: chartData.datasets.holders,
+            borderColor: '#9C27B0',
+            backgroundColor: 'rgba(156, 39, 176, 0.1)',
+            tension: 0.3,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: '#fff' } }
+          },
+          scales: {
+            x: { ticks: { color: '#888' }, grid: { color: '#333' } },
+            y: { ticks: { color: '#888' }, grid: { color: '#333' } }
+          }
+        }
+      });
+    }
+
+    // === TABLEAU HISTORIQUE ===
+    function updateHistoryTable(historyData) {
+      const tbody = document.getElementById('historyTbody');
+      
+      if (!historyData || historyData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11" class="error">Aucune donnée historique disponible</td></tr>';
+        return;
+      }
+
+      const rows = historyData.map(row => {
+        const priceChange = row.dexscreener_price_change_h24 || 0;
+        const priceChangeClass = priceChange > 0 ? 'positive' : priceChange < 0 ? 'negative' : 'neutral';
+        
+        return `
+          <tr>
+            <td>${formatLocalDateTime(row.snapshot_timestamp)}</td>
+            <td class="price">${(row.price_usdc || 0).toFixed(8)}</td>
+            <td class="price">${(row.dexscreener_price_usd || 0).toFixed(8)}</td>
+            <td>${formatNumber(row.dexscreener_market_cap || row.market_cap || 0)}</td>
+            <td>${formatNumber(row.dexscreener_volume_24h || row.volume_24h || 0)}</td>
+            <td>${formatNumber(row.dexscreener_liquidity_quote || row.liquidity_usd || 0)}</td>
+            <td class="score">${(row.invest_score || 0).toFixed(1)}</td>
+            <td>${row.holders || 0}</td>
+            <td>${getStatusBadge(row.status || row.bonding_curve_status)}</td>
+            <td>${(row.bonding_curve_progress || 0).toFixed(1)}%</td>
+            <td>${row.snapshot_reason || 'auto'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      tbody.innerHTML = rows;
+    }
+
+    // === STATISTIQUES ===
+    function updateStatsCards(statsData) {
+      const statsGrid = document.getElementById('statsGrid');
+      
+      const statsHtml = `
+        ${statsData.price_stats ? `
+        <div class="stat-card">
+          <div class="stat-title">📈 Statistiques Prix</div>
+          <div class="stat-value">$${statsData.price_stats.last.toFixed(6)}</div>
+          <div class="stat-change ${statsData.price_stats.change_pct >= 0 ? 'positive' : 'negative'}">
+            ${statsData.price_stats.change_pct >= 0 ? '+' : ''}${statsData.price_stats.change_pct.toFixed(2)}% sur ${currentPeriod}j
+          </div>
+          <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #888;">
+            Min: $${statsData.price_stats.min.toFixed(8)}<br>
+            Max: $${statsData.price_stats.max.toFixed(8)}<br>
+            Moy: $${statsData.price_stats.avg.toFixed(8)}<br>
+            Volatilité: ${statsData.price_stats.volatility.toFixed(2)}%
+          </div>
+        </div>
+        ` : ''}
+        
+        ${statsData.volume_stats ? `
+        <div class="stat-card">
+          <div class="stat-title">📊 Statistiques Volume</div>
+          <div class="stat-value">${formatNumber(statsData.volume_stats.last)}</div>
+          <div class="stat-change">Volume 24h actuel</div>
+          <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #888;">
+            Total: ${formatNumber(statsData.volume_stats.total)}<br>
+            Moyenne: ${formatNumber(statsData.volume_stats.avg)}<br>
+            Max: ${formatNumber(statsData.volume_stats.max)}
+          </div>
+        </div>
+        ` : ''}
+        
+        ${statsData.score_stats ? `
+        <div class="stat-card">
+          <div class="stat-title">⭐ Score d'Investissement</div>
+          <div class="stat-value">${statsData.score_stats.last.toFixed(1)}</div>
+          <div class="stat-change ${statsData.score_stats.change >= 0 ? 'positive' : 'negative'}">
+            ${statsData.score_stats.change >= 0 ? '+' : ''}${statsData.score_stats.change.toFixed(2)} points
+          </div>
+          <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #888;">
+            Min: ${statsData.score_stats.min.toFixed(1)}<br>
+            Max: ${statsData.score_stats.max.toFixed(1)}<br>
+            Moyenne: ${statsData.score_stats.avg.toFixed(1)}
+          </div>
+        </div>
+        ` : ''}
+        
+        ${statsData.holders_stats ? `
+        <div class="stat-card">
+          <div class="stat-title">👥 Évolution Holders</div>
+          <div class="stat-value">${statsData.holders_stats.last.toLocaleString()}</div>
+          <div class="stat-change ${statsData.holders_stats.change >= 0 ? 'positive' : 'negative'}">
+            ${statsData.holders_stats.change >= 0 ? '+' : ''}${statsData.holders_stats.change} (${statsData.holders_stats.growth_pct.toFixed(1)}%)
+          </div>
+          <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #888;">
+            Min: ${statsData.holders_stats.min.toLocaleString()}<br>
+            Max: ${statsData.holders_stats.max.toLocaleString()}
+          </div>
+        </div>
+        ` : ''}
+        
+        <div class="stat-card">
+          <div class="stat-title">📊 Données Collectées</div>
+          <div class="stat-value">${statsData.data_points || 0}</div>
+          <div class="stat-change">Points de données sur ${currentPeriod} jours</div>
+          <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #888;">
+            Première: ${statsData.first_snapshot ? formatLocalDateTime(statsData.first_snapshot) : 'N/A'}<br>
+            Dernière: ${statsData.last_snapshot ? formatLocalDateTime(statsData.last_snapshot) : 'N/A'}
+          </div>
+        </div>
+        
+        ${statsData.status_changes ? `
+        <div class="stat-card">
+          <div class="stat-title">🔄 Changements de Statut</div>
+          <div class="stat-value">${statsData.status_changes.length}</div>
+          <div class="stat-change">Changements détectés</div>
+          <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #888;">
+            ${statsData.status_changes.slice(0, 3).map(change => 
+              `${change.from} → ${change.to}<br>`
+            ).join('')}
+          </div>
+        </div>
+        ` : ''}
+        
+        ${statsData.snapshot_reasons ? `
+        <div class="stat-card">
+          <div class="stat-title">📝 Raisons de Capture</div>
+          <div class="stat-value">${Object.keys(statsData.snapshot_reasons).length}</div>
+          <div class="stat-change">Types de triggers</div>
+          <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #888;">
+            ${Object.entries(statsData.snapshot_reasons).map(([reason, count]) => 
+              `${reason}: ${count}<br>`
+            ).join('')}
+          </div>
+        </div>
+        ` : ''}
+      `;
+      
+      statsGrid.innerHTML = statsHtml;
+    }
+
+    // === FONCTIONS UTILITAIRES ===
+    function formatLocalDateTime(dateString) {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      return date.toLocaleString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    function formatNumber(num) {
+      if (!num || num === 0) return '0';
+      if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
+      if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+      return Math.round(num).toLocaleString();
+    }
+
+    function getStatusBadge(status) {
+      if (!status) return '<span class="status-badge status-inactive">Unknown</span>';
+      
+      const statusLower = status.toLowerCase();
+      const statusMap = {
+        'active': '<span class="status-badge status-active">Active</span>',
+        'completed': '<span class="status-badge status-completed">Completed</span>',
+        'migrated': '<span class="status-badge status-migrated">Migrated</span>',
+        'inactive': '<span class="status-badge status-inactive">Inactive</span>'
+      };
+      
+      return statusMap[statusLower] || `<span class="status-badge status-inactive">${status}</span>`;
+    }
+
+    // === CONTRÔLES ===
+    function setTimeFilter(days, button) {
+      currentPeriod = days;
+      
+      document.querySelectorAll('.time-filter-btn').forEach(btn => btn.classList.remove('active'));
+      button.classList.add('active');
+      
+      document.getElementById('analysisPeriod').value = days;
+      
+      reloadData();
+    }
+
+    function updateAnalysisPeriod() {
+      const select = document.getElementById('analysisPeriod');
+      currentPeriod = parseInt(select.value);
+      
+      // Mettre à jour les boutons
+      document.querySelectorAll('.time-filter-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.time-filter-btn').forEach(btn => {
+        if (btn.textContent.includes(currentPeriod + 'j')) {
+          btn.classList.add('active');
+        }
+      });
+      
+      reloadData();
+    }
+
+    function reloadData() {
+      loadTokenData();
+    }
+
+    // === AUTO-REFRESH ===
+    function toggleAutoRefresh() {
+      isAutoRefreshEnabled = !isAutoRefreshEnabled;
+      const toggle = document.getElementById('autoRefreshToggle');
+      
+      if (isAutoRefreshEnabled) {
+        toggle.classList.add('active');
+        startAutoRefresh();
+      } else {
+        toggle.classList.remove('active');
+        stopAutoRefresh();
+      }
+    }
+
+    function updateRefreshInterval() {
+      const select = document.getElementById('refreshInterval');
+      refreshInterval = parseInt(select.value);
+      
+      if (isAutoRefreshEnabled) {
+        stopAutoRefresh();
+        startAutoRefresh();
+      }
+    }
+
+    function startAutoRefresh() {
+      if (refreshTimer) clearInterval(refreshTimer);
+      
+      if (isAutoRefreshEnabled) {
+        refreshTimer = setInterval(() => {
+          loadTokenData();
+        }, refreshInterval);
+      }
+    }
+
+    function stopAutoRefresh() {
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
+    }
+
+    // === INITIALISATION ===
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

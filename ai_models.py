@@ -1,1 +1,0 @@
-#Modèles IA pour détection patterns (à créer)

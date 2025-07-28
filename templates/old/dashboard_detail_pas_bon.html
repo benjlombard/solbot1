@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title data-i18n="title">📊 Solana Token Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --primary: #00d4ff;
+      --primary-dark: #00aaff;
+      --secondary: #2a2a4a;
+      --background: #0f0f23;
+      --text: #ffffff;
+      --text-muted: #aaaaaa;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: var(--background);
+      color: var(--text);
+      transition: background 0.3s ease, color 0.3s ease;
+    }
+
+    body.light-theme {
+      --background: #f5f5f5;
+      --secondary: #e0e0e0;
+      --text: #333333;
+      --text-muted: #666666;
+    }
+
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      background: var(--secondary);
+      border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+    }
+
+    .nav h1 {
+      letter-spacing: 0.02em;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .nav a, .nav button {
+      color: var(--primary);
+      text-decoration: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    .controls {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      padding: 1rem 2rem;
+      background: var(--secondary);
+      flex-wrap: wrap;
+    }
+
+    .controls button {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      border: none;
+      background: var(--primary);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .controls button:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    .controls button:active {
+      transform: translateY(0);
+    }
+
+    .tabs-container {
+      background: var(--secondary);
+      border-bottom: 1px solid var(--primary-dark);
+    }
+
+    .tabs {
+      display: flex;
+      padding: 0 2rem;
+      gap: 0.5rem;
+    }
+
+    .tab {
+      padding: 1rem 1.5rem;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+
+    .tab:hover {
+      color: var(--primary);
+    }
+
+    .tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+      background: rgba(0, 212, 255, 0.1);
+    }
+
+    .tab-content {
+      display: none;
+      padding: 1rem 2rem;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .filter-panel {
+      padding: 1rem 2rem;
+      background: var(--secondary);
+      border-bottom: 1px solid var(--primary-dark);
+    }
+
+    .filter-panel .filter-group {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .filter-panel .filter-group label {
+      margin-right: 0.5rem;
+      color: var(--primary);
+      font-size: 0.9rem;
+      align-self: center;
+    }
+
+    .filter-panel .filter-group input,
+    .filter-panel .filter-group select {
+      padding: 0.4rem;
+      border: none;
+      border-radius: 4px;
+      background: var(--background);
+      color: var(--text);
+      width: 100px;
+      font-size: 0.9rem;
+    }
+
+    .filter-panel .filter-group input:focus,
+    .filter-panel .filter-group select:focus {
+      outline: none;
+      border: 1px solid var(--primary);
+      box-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+    }
+
+    .filter-panel .filter-group .time-filter {
+      width: 120px;
+    }
+
+    .filter-panel .filter-group .time-unit {
+      width: 80px;
+    }
+
+    .filter-panel .filter-group .bonding-filter,
+    .filter-panel .filter-group .status-filter {
+      width: 140px;
+    }
+
+    .filter-active {
+      border: 2px solid var(--primary) !important;
+      box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+      background: rgba(0, 212, 255, 0.1);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.8rem;
+    }
+
+    th, td {
+      padding: 0.6rem 0.8rem;
+      border-bottom: 1px solid var(--primary-dark);
+      text-align: left;
+    }
+
+    th {
+      background: #0f3460;
+      position: sticky;
+      top: 0;
+      font-size: 0.75rem;
+    }
+
+    table tr:hover {
+      background: rgba(0, 212, 255, 0.1);
+      transition: background 0.2s ease;
+    }
+
+    .price {
+      color: #00ff88;
+      font-weight: bold;
+    }
+
+    .score {
+      color: #ffaa00;
+      font-weight: bold;
+    }
+
+    .updated-recent {
+      color: #00ff88;
+      font-weight: bold;
+    }
+
+    .updated-old {
+      color: #ff6b6b;
+    }
+
+    .updated-medium {
+      color: #ffaa00;
+    }
+
+    .pagination {
+      display: flex;
+      gap: 0.5rem;
+      padding: 1rem 2rem;
+      justify-content: space-between;
+    }
+
+    .pagination button {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      background: var(--primary);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.3s ease;
+      border: none;
+    }
+
+    .pagination button:disabled {
+      background: var(--text-muted);
+      cursor: not-allowed;
+    }
+
+    .fav {
+      color: gold;
+      cursor: pointer;
+    }
+
+    .no-data {
+      text-align: center;
+      padding: 1rem;
+      color: var(--text-muted);
+    }
+
+    .preset-buttons {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .preset-btn {
+      padding: 0.3rem 0.6rem;
+      border-radius: 3px;
+      background: var(--background);
+      color: var(--primary);
+      cursor: pointer;
+      font-size: 0.8rem;
+      border: 1px solid var(--primary-dark);
+      transition: all 0.2s ease;
+    }
+
+    .preset-btn:hover {
+      background: var(--primary);
+      color: var(--text);
+    }
+
+    .preset-btn.active {
+      background: var(--primary);
+      color: var(--text);
+      border: 1px solid var(--primary-dark);
+      box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+      transform: scale(1.05);
+    }
+
+    .auto-refresh-section {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.5rem 1rem;
+      background: var(--secondary);
+      border: 1px solid var(--primary-dark);
+      border-radius: 6px;
+      font-size: 0.9rem;
+      margin-left: auto;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 40px;
+      height: 20px;
+      background: var(--text-muted);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    .toggle-switch.active {
+      background: var(--primary);
+    }
+
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--text);
+      top: 2px;
+      left: 2px;
+      transition: transform 0.3s;
+    }
+
+    .toggle-switch.active::after {
+      transform: translateX(20px);
+    }
+
+    .bonding-status {
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 0.7rem;
+      font-weight: bold;
+      text-transform: uppercase;
+      display: inline-block;
+      min-width: 60px;
+      text-align: center;
+    }
+
+    .bonding-created {
+      background: linear-gradient(45deg, #4CAF50, #8BC34A);
+      color: #fff;
+    }
+
+    .bonding-active {
+      background: linear-gradient(45deg, #FF9800, #FFC107);
+      color: #000;
+    }
+
+    .bonding-completed {
+      background: linear-gradient(45deg, #2196F3, #03A9F4);
+      color: #fff;
+    }
+
+    .bonding-migrated {
+      background: linear-gradient(45deg, #9C27B0, #E91E63);
+      color: #fff;
+    }
+
+    .bonding-terminated {
+      background: linear-gradient(45deg, #F44336, #FF5722);
+      color: #fff;
+    }
+
+    .progress-container {
+      width: 80px;
+      height: 16px;
+      background: var(--secondary);
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid var(--primary-dark);
+    }
+
+    .progress-bar {
+      height: 100%;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #ff6b35, #00ff9d);
+      transition: width 0.3s ease;
+    }
+
+    .progress-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 0.65rem;
+      font-weight: bold;
+      color: var(--text);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    }
+
+    .chart-container {
+      max-width: 800px;
+      margin: 1rem auto;
+    }
+
+    @media (max-width: 768px) {
+      .controls, .filter-panel .filter-group {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .filter-panel .filter-group input,
+      .filter-panel .filter-group select {
+        width: 100%;
+      }
+
+      #dexscreenerTable th:nth-child(n+11):not(:last-child),
+      #dexscreenerTable td:nth-child(n+11):not(:last-child) {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <h1 data-i18n="header">Solana Token Scanner</h1>
+    <div>
+      <a href="/dashboard" data-i18n="dashboard">Dashboard</a> |
+      <button class="theme-toggle" role="button" tabindex="0" aria-label="Basculer entre thème clair et sombre">🌙</button>
+    </div>
+  </nav>
+
+  <div class="controls">
+    <button data-i18n="refresh">Actualiser</button>
+    <div class="auto-refresh-section">
+      <span data-i18n="auto-refresh">Actualisation automatique</span>
+      <div class="toggle-switch" role="button" tabindex="0" aria-label="Activer ou désactiver l'actualisation automatique"></div>
+      <span data-i18n="every">Toutes les</span>
+      <input type="number" min="1" value="5" class="refresh-interval" aria-label="Intervalle d'actualisation en minutes">
+      <span data-i18n="minutes">minutes</span>
+    </div>
+  </div>
+
+  <div class="tabs-container">
+    <div class="tabs">
+      <button class="tab active" data-tab="base-content" role="tab" tabindex="0" aria-label="Afficher les données de base">Base</button>
+      <button class="tab" data-tab="dexscreener-content" role="tab" tabindex="0" aria-label="Afficher les données DexScreener">DexScreener</button>
+      <button class="tab" data-tab="trends-content" role="tab" tabindex="0" aria-label="Afficher les tendances">Tendances</button>
+      <button class="tab" data-tab="analysis-content" role="tab" tabindex="0" aria-label="Afficher l'analyse">Analyse</button>
+    </div>
+  </div>
+
+  <div class="tab-content active" id="base-content">
+    <div class="filter-panel">
+      <div class="filter-group">
+        <label for="search" data-i18n="search">Rechercher:</label>
+        <input type="text" id="search" placeholder="Nom ou symbole" aria-label="Rechercher par nom ou symbole">
+        <label for="minScore" data-i18n="min-score">Score min:</label>
+        <input type="number" id="minScore" min="0" max="100" value="0" aria-label="Score d'investissement minimum">
+        <label for="minLiquidity" data-i18n="min-liquidity">Liquidité min:</label>
+        <input type="number" id="minLiquidity" min="0" value="0" aria-label="Liquidité minimum en USD">
+        <label for="bondingFilter" data-i18n="bonding-status">Statut Bonding:</label>
+        <select id="bondingFilter" class="bonding-filter" aria-label="Filtrer par statut de bonding curve">
+          <option value="">Tous</option>
+          <option value="created">Créé</option>
+          <option value="active">Actif</option>
+          <option value="completed">Terminé</option>
+          <option value="migrated">Migré</option>
+          <option value="terminated">Terminé</option>
+        </select>
+        <label for="statusFilter" data-i18n="status">Statut:</label>
+        <select id="statusFilter" class="status-filter" aria-label="Filtrer par statut du token">
+          <option value="">Tous</option>
+          <option value="new">Nouveau</option>
+          <option value="active">Actif</option>
+        </select>
+      </div>
+    </div>
+    <table id="baseTable">
+      <thead>
+        <tr>
+          <th data-i18n="favorite">Fav</th>
+          <th data-i18n="symbol">Symbole</th>
+          <th data-i18n="name">Nom</th>
+          <th data-i18n="price-usdc">Prix (USDC)</th>
+          <th data-i18n="invest-score">Score</th>
+          <th data-i18n="liquidity-usd">Liquidité (USD)</th>
+          <th data-i18n="volume-24h">Volume 24h</th>
+          <th data-i18n="holders">Holders</th>
+          <th data-i18n="age-hours">Âge (h)</th>
+          <th data-i18n="rug-score">Score Rug</th>
+          <th data-i18n="tradeable">Échangeable</th>
+          <th data-i18n="updated-at">Mise à jour</th>
+          <th data-i18n="bonding-curve">Bonding Curve</th>
+          <th data-i18n="progress">Progression</th>
+        </tr>
+      </thead>
+      <tbody id="baseTbody">
+        <tr><td colspan="14" class="no-data" data-i18n="no-data">Chargement des données...</td></tr>
+      </tbody>
+    </table>
+    <div class="pagination">
+      <button disabled data-i18n="previous">Précédent</button>
+      <span data-i18n="page">Page 1 / 1</span>
+      <button disabled data-i18n="next">Suivant</button>
+    </div>
+  </div>
+
+  <div class="tab-content" id="dexscreener-content">
+    <div class="filter-panel">
+      <div class="preset-buttons">
+        <button class="preset-btn" role="button" tabindex="0" aria-label="Filtrer les tokens mis à jour dans les dernières 5 minutes">5m</button>
+        <button class="preset-btn" role="button" tabindex="0" aria-label="Filtrer les tokens mis à jour dans les dernières 30 minutes">30m</button>
+        <button class="preset-btn" role="button" tabindex="0" aria-label="Filtrer les tokens mis à jour dans la dernière heure">1h</button>
+        <button class="preset-btn" role="button" tabindex="0" aria-label="Filtrer les tokens mis à jour dans les dernières 6 heures">6h</button>
+      </div>
+      <div class="filter-group">
+        <label for="minVolume" data-i18n="min-volume">Volume min (24h):</label>
+        <input type="number" id="minVolume" min="0" value="0" aria-label="Volume minimum sur 24 heures">
+        <label for="minDexLiquidity" data-i18n="min-liquidity">Liquidité min:</label>
+        <input type="number" id="minDexLiquidity" min="0" value="0" aria-label="Liquidité minimum DexScreener">
+        <label for="maxAge" data-i18n="max-age">Âge max (h):</label>
+        <input type="number" id="maxAge" min="0" value="168" aria-label="Âge maximum du token en heures">
+      </div>
+    </div>
+    <table id="dexscreenerTable">
+      <thead>
+        <tr>
+          <th data-i18n="favorite">Fav</th>
+          <th data-i18n="symbol">Symbole</th>
+          <th data-i18n="name">Nom</th>
+          <th data-i18n="dex-price-usd">Prix (USD)</th>
+          <th data-i18n="market-cap">Market Cap</th>
+          <th data-i18n="liquidity-base">Liquidité Base</th>
+          <th data-i18n="liquidity-quote">Liquidité Quote</th>
+          <th data-i18n="volume-1h">Volume 1h</th>
+          <th data-i18n="volume-6h">Volume 6h</th>
+          <th data-i18n="volume-24h">Volume 24h</th>
+          <th data-i18n="price-change-1h">Changement 1h</th>
+          <th data-i18n="price-change-6h">Changement 6h</th>
+          <th data-i18n="price-change-24h">Changement 24h</th>
+          <th data-i18n="txns-1h">Txns 1h</th>
+          <th data-i18n="txns-6h">Txns 6h</th>
+          <th data-i18n="txns-24h">Txns 24h</th>
+          <th data-i18n="buys-1h">Achats 1h</th>
+          <th data-i18n="sells-1h">Ventes 1h</th>
+          <th data-i18n="buys-24h">Achats 24h</th>
+          <th data-i18n="sells-24h">Ventes 24h</th>
+          <th data-i18n="pair-created">Création Paire</th>
+          <th data-i18n="link">Lien</th>
+        </tr>
+      </thead>
+      <tbody id="dexscreenerTbody">
+        <tr><td colspan="22" class="no-data" data-i18n="no-data">Chargement des données...</td></tr>
+      </tbody>
+    </table>
+    <div class="pagination">
+      <button disabled data-i18n="previous">Précédent</button>
+      <span data-i18n="page">Page 1 / 1</span>
+      <button disabled data-i18n="next">Suivant</button>
+    </div>
+  </div>
+
+  <div class="tab-content" id="trends-content">
+    <div class="filter-panel">
+      <div class="filter-group">
+        <label for="trendPeriod" data-i18n="trend-period">Période:</label>
+        <select id="trendPeriod" aria-label="Période pour l'analyse des tendances">
+          <option value="1">1 heure</option>
+          <option value="6">6 heures</option>
+          <option value="24" selected>24 heures</option>
+          <option value="168">7 jours</option>
+        </select>
+        <label for="tokenSelector" data-i18n="select-token">Token:</label>
+        <select id="tokenSelector" aria-label="Sélectionner un token pour les graphiques"></select>
+      </div>
+    </div>
+    <div class="chart-container">
+      <canvas id="priceVolumeChart" aria-label="Graphique du prix et du volume"></canvas>
+    </div>
+    <div class="chart-container">
+      <canvas id="liquidityHoldersChart" aria-label="Graphique de la liquidité et des holders"></canvas>
+    </div>
+    <table id="trendsTable">
+      <thead>
+        <tr>
+          <th data-i18n="symbol">Symbole</th>
+          <th data-i18n="name">Nom</th>
+          <th data-i18n="trend">Tendance</th>
+          <th data-i18n="price-change">Changement Prix (%)</th>
+          <th data-i18n="score-change">Changement Score</th>
+          <th data-i18n="liquidity-change">Changement Liquidité (%)</th>
+          <th data-i18n="snapshot-count">Snapshots</th>
+        </tr>
+      </thead>
+      <tbody id="trendsTbody">
+        <tr><td colspan="7" class="no-data" data-i18n="no-data">Chargement des données...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tab-content" id="analysis-content">
+    <div class="chart-container">
+      <canvas id="scoreDistributionChart" aria-label="Distribution des scores d'investissement"></canvas>
+    </div>
+  </div>
+  <script>
+    (function () {
+  // Internationalization
+  const i18n = {
+    fr: {
+      noData: "Aucune donnée ne correspond aux filtres",
+      refresh: "Actualiser",
+      dashboard: "Tableau de bord",
+      header: "Solana Token Scanner",
+      title: "📊 Solana Token Scanner",
+      favorite: "Fav",
+      symbol: "Symbole",
+      name: "Nom",
+      priceUsdc: "Prix (USDC)",
+      investScore: "Score",
+      liquidityUsd: "Liquidité (USD)",
+      volume24h: "Volume 24h",
+      holders: "Holders",
+      ageHours: "Âge (h)",
+      rugScore: "Score Rug",
+      tradeable: "Échangeable",
+      updatedAt: "Mise à jour",
+      bondingCurve: "Bonding Curve",
+      progress: "Progression",
+      search: "Rechercher",
+      minScore: "Score min",
+      minLiquidity: "Liquidité min",
+      bondingStatus: "Statut Bonding",
+      status: "Statut",
+      previous: "Précédent",
+      next: "Suivant",
+      page: "Page",
+      autoRefresh: "Actualisation automatique",
+      every: "Toutes les",
+      minutes: "minutes",
+      dexPriceUsd: "Prix (USD)",
+      marketCap: "Market Cap",
+      liquidityBase: "Liquidité Base",
+      liquidityQuote: "Liquidité Quote",
+      volume1h: "Volume 1h",
+      volume6h: "Volume 6h",
+      priceChange1h: "Changement 1h",
+      priceChange6h: "Changement 6h",
+      priceChange24h: "Changement 24h",
+      txns1h: "Txns 1h",
+      txns6h: "Txns 6h",
+      txns24h: "Txns 24h",
+      buys1h: "Achats 1h",
+      sells1h: "Ventes 1h",
+      buys24h: "Achats 24h",
+      sells24h: "Ventes 24h",
+      pairCreated: "Création Paire",
+      link: "Lien",
+      trendPeriod: "Période",
+      selectToken: "Token",
+      trend: "Tendance",
+      priceChange: "Changement Prix (%)",
+      scoreChange: "Changement Score",
+      liquidityChange: "Changement Liquidité (%)",
+      snapshotCount: "Snapshots",
+    },
+    en: {
+      noData: "No data matches the filters",
+      refresh: "Refresh",
+      dashboard: "Dashboard",
+      header: "Solana Token Scanner",
+      title: "📊 Solana Token Scanner",
+      favorite: "Fav",
+      symbol: "Symbol",
+      name: "Name",
+      priceUsdc: "Price (USDC)",
+      investScore: "Score",
+      liquidityUsd: "Liquidity (USD)",
+      volume24h: "Volume 24h",
+      holders: "Holders",
+      ageHours: "Age (h)",
+      rugScore: "Rug Score",
+      tradeable: "Tradeable",
+      updatedAt: "Updated",
+      bondingCurve: "Bonding Curve",
+      progress: "Progress",
+      search: "Search",
+      minScore: "Min Score",
+      minLiquidity: "Min Liquidity",
+      bondingStatus: "Bonding Status",
+      status: "Status",
+      previous: "Previous",
+      next: "Next",
+      page: "Page",
+      autoRefresh: "Auto Refresh",
+      every: "Every",
+      minutes: "minutes",
+      dexPriceUsd: "Price (USD)",
+      marketCap: "Market Cap",
+      liquidityBase: "Liquidity Base",
+      liquidityQuote: "Liquidity Quote",
+      volume1h: "Volume 1h",
+      volume6h: "Volume 6h",
+      priceChange1h: "Change 1h",
+      priceChange6h: "Change 6h",
+      priceChange24h: "Change 24h",
+      txns1h: "Txns 1h",
+      txns6h: "Txns 6h",
+      txns24h: "Txns 24h",
+      buys1h: "Buys 1h",
+      sells1h: "Sells 1h",
+      buys24h: "Buys 24h",
+      sells24h: "Sells 24h",
+      pairCreated: "Pair Created",
+      link: "Link",
+      trendPeriod: "Period",
+      selectToken: "Token",
+      trend: "Trend",
+      priceChange: "Price Change (%)",
+      scoreChange: "Score Change",
+      liquidityChange: "Liquidity Change (%)",
+      snapshotCount: "Snapshots",
+    },
+  };
+  const lang = "fr"; // Default language
+
+  // State
+  let data = [],
+    filteredData = [],
+    cachedData = [],
+    currentPage = 1,
+    perPage = 10,
+    favorites = new Set(JSON.parse(localStorage.getItem("favorites") || "[]")),
+    autoRefreshInterval = null,
+    dexTimeValue = null,
+    dexTimeUnit = null,
+    priceVolumeChart = null,
+    liquidityHoldersChart = null,
+    scoreDistributionChart = null;
+
+  // Utility Functions
+  function debounce(func, wait) {
+    let timeout;
+    return function (...args) {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+  }
+
+  function formatNumber(num, decimals = 2) {
+    return num ? Number(num).toFixed(decimals) : "-";
+  }
+
+  function formatPrice(num, decimals = 8) {
+    return num ? Number(num).toFixed(decimals) : "-";
+  }
+
+  function formatDateTime(dateString) {
+    if (!dateString) return "-";
+    try {
+      const date = new Date(dateString);
+      return isNaN(date) ? "-" : date.toLocaleString(lang);
+    } catch {
+      return "-";
+    }
+  }
+
+  function getTimeDiffClass(dateString) {
+    if (!dateString) return "updated-old";
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffMinutes = (now - date) / 1000 / 60;
+    if (diffMinutes < 5) return "updated-recent";
+    if (diffMinutes < 60) return "updated-medium";
+    return "updated-old";
+  }
+
+  function showRefreshIndicator(show) {
+    const refreshBtn = document.querySelector(".controls button");
+    refreshBtn.textContent = i18n[lang][show ? "refresh" : "refresh"] + (show ? "..." : "");
+  }
+
+  // Data Fetching
+  async function fetchData(page = 1, pageSize = perPage) {
+    showRefreshIndicator(true);
+    try {
+      const response = await fetch(`/api/tokens-detail?page=${page}&pageSize=${pageSize}`);
+      if (!response.ok) throw new Error("API failed");
+      data = (await response.json()) || [];
+      cachedData = [...data]; // Cache real data
+    } catch (error) {
+      console.error("Erreur lors du chargement des données:", error);
+      document.getElementById("baseTbody").innerHTML = `<tr><td colspan="14" class="no-data">${i18n[lang].noData}: Erreur API</td></tr>`;
+      data = generateMockData(); // Fallback to mock data
+    } finally {
+      showRefreshIndicator(false);
+      filteredData = [...data];
+      renderPage();
+    }
+  }
+
+  async function fetchDexScreenerData() {
+    const minVolume = document.getElementById("minVolume")?.value || 0;
+    const minLiquidity = document.getElementById("minDexLiquidity")?.value || 0;
+    const maxAge = dexTimeValue ? (dexTimeUnit === "minutes" ? dexTimeValue / 60 : dexTimeValue) : document.getElementById("maxAge")?.value || 168;
+    showRefreshIndicator(true);
+    try {
+      const response = await fetch(`/api/dexscreener-data?min_volume_24h=${minVolume}&min_liquidity=${minLiquidity}&max_age_hours=${maxAge}`);
+      if (!response.ok) throw new Error("API failed");
+      filteredData = (await response.json()) || [];
+    } catch (error) {
+      console.error("Erreur lors du chargement des données DexScreener:", error);
+      document.getElementById("dexscreenerTbody").innerHTML = `<tr><td colspan="22" class="no-data">${i18n[lang].noData}: Erreur API</td></tr>`;
+      filteredData = generateMockData();
+    } finally {
+      showRefreshIndicator(false);
+      currentPage = 1;
+      renderDexScreenerTable(filteredData);
+    }
+  }
+
+  async function updateTrendsSummary() {
+    const period = document.getElementById("trendPeriod")?.value || 24;
+    try {
+      const response = await fetch(`/api/trends-summary?hours=${period}`);
+      if (!response.ok) throw new Error("API failed");
+      const data = await response.json();
+      renderTrendsTable(data.tokens || []);
+    } catch (error) {
+      console.error("Erreur lors du chargement des tendances:", error);
+      document.getElementById("trendsTbody").innerHTML = `<tr><td colspan="7" class="no-data">${i18n[lang].noData}: Erreur API</td></tr>`;
+      renderTrendsTable(generateMockTrendsData());
+    }
+  }
+
+  async function loadTokenCharts(address) {
+    const days = document.getElementById("trendPeriod")?.value || 7;
+    try {
+      const response = await fetch(`/api/token-trends/${address}?days=${days}`);
+      if (!response.ok) throw new Error("API failed");
+      const data = await response.json();
+      createPriceVolumeChart(data.historical_data || []);
+      createLiquidityHoldersChart(data.historical_data || []);
+    } catch (error) {
+      console.error("Erreur lors du chargement des graphiques:", error);
+      createPriceVolumeChart(generateMockChartData(days));
+      createLiquidityHoldersChart(generateMockChartData(days));
+    }
+  }
+
+  // Mock Data (for fallback)
+  function generateMockData() {
+    return Array.from({ length: 10 }, (_, i) => ({
+      address: `mock${i}`,
+      symbol: `TOK${i}`,
+      name: `Token ${i}`,
+      price_usdc: 0.001 * (i + 1),
+      invest_score: 70 + i,
+      liquidity_usd: 5000 + i * 1000,
+      volume_24h: 10000 + i * 2000,
+      holders: 100 + i * 10,
+      age_hours: 24 + i,
+      rug_score: 10 + i,
+      is_tradeable: i % 2,
+      updated_at: new Date(Date.now() - i * 3600 * 1000).toISOString(),
+      bonding_curve_status: ["created", "active", "completed", "migrated", "terminated"][i % 5],
+      bonding_curve_progress: 10 * i,
+      dexscreener_price_usd: 0.001 * (i + 1),
+      dexscreener_market_cap: 100000 + i * 10000,
+      dexscreener_liquidity_base: 2000 + i * 500,
+      dexscreener_liquidity_quote: 3000 + i * 600,
+      dexscreener_volume_1h: 1000 + i * 100,
+      dexscreener_volume_6h: 5000 + i * 500,
+      dexscreener_volume_24h: 10000 + i * 1000,
+      dexscreener_price_change_1h: i - 5,
+      dexscreener_price_change_6h: i - 3,
+      dexscreener_price_change_h24: i - 2,
+      dexscreener_txns_1h: 10 + i,
+      dexscreener_txns_6h: 50 + i * 5,
+      dexscreener_txns_24h: 100 + i * 10,
+      dexscreener_buys_1h: 5 + i,
+      dexscreener_sells_1h: 3 + i,
+      dexscreener_buys_24h: 50 + i * 5,
+      dexscreener_sells_24h: 30 + i * 3,
+      dexscreener_pair_created_at: new Date(Date.now() - i * 24 * 3600 * 1000).toISOString(),
+      dexscreener_url: `https://dexscreener.com/solana/mock${i}`,
+    }));
+  }
+
+  function generateMockTrendsData() {
+    return Array.from({ length: 5 }, (_, i) => ({
+      address: `mock${i}`,
+      symbol: `TOK${i}`,
+      name: `Token ${i}`,
+      trend: ["bullish", "bearish", "neutral"][i % 3],
+      price_change_pct: (i - 2) * 10,
+      score_change: (i - 2) * 5,
+      liquidity_change_pct: (i - 2) * 15,
+      snapshot_count: 10 + i,
+    }));
+  }
+
+  function generateMockChartData(days) {
+    return Array.from({ length: 10 }, (_, i) => ({
+      timestamp: new Date(Date.now() - i * 24 * 3600 * 1000 / 10).toISOString(),
+      price_usdc: 0.001 * (i + 1),
+      dexscreener_price_usd: 0.001 * (i + 1),
+      dexscreener_volume_24h: 1000 + i * 100,
+      dexscreener_liquidity_quote: 5000 + i * 500,
+      invest_score: 70 + i,
+      holders: 100 + i * 10,
+      dexscreener_txns_24h: 100 + i * 10,
+      dexscreener_buys_24h: 50 + i * 5,
+      dexscreener_sells_24h: 30 + i * 3,
+    }));
+  }
+
+  // Rendering Functions
+  function renderPage() {
+    const start = (currentPage - 1) * perPage;
+    const end = start + perPage;
+    const paginatedData = filteredData.slice(start, end);
+    renderBaseTable(paginatedData);
+    updatePagination(filteredData.length);
+  }
+
+  function renderBaseTable(data) {
+    const tbody = document.getElementById("baseTbody");
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="14" class="no-data">${i18n[lang].noData}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.map(r => `
+      <tr>
+        <td><span class="fav ${favorites.has(r.address) ? "active" : ""}" role="button" tabindex="0" onclick="toggleFav('${r.address}')" onkeydown="if(event.key === 'Enter') toggleFav('${r.address}')" aria-label="${i18n[lang].favorite} ${r.symbol}">${favorites.has(r.address) ? "★" : "☆"}</span></td>
+        <td><a href="${r.dexscreener_url || '#'}" target="_blank">${r.symbol || "-"}</a></td>
+        <td>${r.name || "-"}</td>
+        <td class="price">${formatPrice(r.price_usdc || r.dexscreener_price_usd)}</td>
+        <td class="score">${formatNumber(r.invest_score)}</td>
+        <td>${formatNumber(r.liquidity_usd)}</td>
+        <td>${formatNumber(r.volume_24h)}</td>
+        <td>${formatNumber(r.holders)}</td>
+        <td>${formatNumber(r.age_hours)}</td>
+        <td>${formatNumber(r.rug_score)}</td>
+        <td>${r.is_tradeable ? "Oui" : "Non"}</td>
+        <td class="${getTimeDiffClass(r.updated_at)}">${formatDateTime(r.updated_at)}</td>
+        <td><span class="bonding-status bonding-${r.bonding_curve_status}">${r.bonding_curve_status || "-"}</span></td>
+        <td>
+          <div class="progress-container">
+            <div class="progress-bar" style="width: ${r.bonding_curve_progress || 0}%"></div>
+            <span class="progress-text">${formatNumber(r.bonding_curve_progress)}%</span>
+          </div>
+        </td>
+      </tr>
+    `).join("");
+  }
+
+  function renderDexScreenerTable(data) {
+    const tbody = document.getElementById("dexscreenerTbody");
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="22" class="no-data">${i18n[lang].noData}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.map(r => `
+      <tr>
+        <td><span class="fav ${favorites.has(r.address) ? "active" : ""}" role="button" tabindex="0" onclick="toggleFav('${r.address}')" onkeydown="if(event.key === 'Enter') toggleFav('${r.address}')" aria-label="${i18n[lang].favorite} ${r.symbol}">${favorites.has(r.address) ? "★" : "☆"}</span></td>
+        <td><a href="${r.dexscreener_url || '#'}" target="_blank">${r.symbol || "-"}</a></td>
+        <td>${r.name || "-"}</td>
+        <td class="price">${formatPrice(r.dexscreener_price_usd)}</td>
+        <td>${formatNumber(r.dexscreener_market_cap)}</td>
+        <td>${formatNumber(r.dexscreener_liquidity_base)}</td>
+        <td>${formatNumber(r.dexscreener_liquidity_quote)}</td>
+        <td>${formatNumber(r.dexscreener_volume_1h)}</td>
+        <td>${formatNumber(r.dexscreener_volume_6h)}</td>
+        <td>${formatNumber(r.dexscreener_volume_24h)}</td>
+        <td>${formatNumber(r.dexscreener_price_change_1h)}%</td>
+        <td>${formatNumber(r.dexscreener_price_change_6h)}%</td>
+        <td>${formatNumber(r.dexscreener_price_change_h24)}%</td>
+        <td>${formatNumber(r.dexscreener_txns_1h)}</td>
+        <td>${formatNumber(r.dexscreener_txns_6h)}</td>
+        <td>${formatNumber(r.dexscreener_txns_24h)}</td>
+        <td>${formatNumber(r.dexscreener_buys_1h)}</td>
+        <td>${formatNumber(r.dexscreener_sells_1h)}</td>
+        <td>${formatNumber(r.dexscreener_buys_24h)}</td>
+        <td>${formatNumber(r.dexscreener_sells_24h)}</td>
+        <td>${formatDateTime(r.dexscreener_pair_created_at)}</td>
+        <td><a href="${r.dexscreener_url || '#'}" target="_blank" aria-label="Voir sur DexScreener">${i18n[lang].link}</a></td>
+      </tr>
+    `).join("");
+    updatePagination(data.length);
+  }
+
+  function renderTrendsTable(data) {
+    const tbody = document.getElementById("trendsTbody");
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="no-data">${i18n[lang].noData}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.map(r => `
+      <tr>
+        <td>${r.symbol || "-"}</td>
+        <td>${r.name || "-"}</td>
+        <td>${r.trend || "-"}</td>
+        <td>${formatNumber(r.price_change_pct)}%</td>
+        <td>${formatNumber(r.score_change)}</td>
+        <td>${formatNumber(r.liquidity_change_pct)}%</td>
+        <td>${formatNumber(r.snapshot_count)}</td>
+      </tr>
+    `).join("");
+  }
+
+  function updatePagination(totalItems) {
+    const totalPages = Math.ceil(totalItems / perPage);
+    const pagination = document.querySelector(".pagination");
+    pagination.innerHTML = `
+      <button ${currentPage === 1 ? "disabled" : ""} onclick="changePage(${currentPage - 1})" aria-label="${i18n[lang].previous}">${i18n[lang].previous}</button>
+      <span>${i18n[lang].page} ${currentPage} / ${totalPages}</span>
+      <button ${currentPage === totalPages ? "disabled" : ""} onclick="changePage(${currentPage + 1})" aria-label="${i18n[lang].next}">${i18n[lang].next}</button>
+    `;
+  }
+
+  // Chart Creation
+  function createPriceVolumeChart(data) {
+    const ctx = document.getElementById("priceVolumeChart")?.getContext("2d");
+    if (!ctx) return;
+    if (priceVolumeChart) priceVolumeChart.destroy();
+    priceVolumeChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: data.map(d => formatDateTime(d.timestamp)),
+        datasets: [
+          {
+            label: "Prix (USD)",
+            data: data.map(d => d.dexscreener_price_usd || d.price_usdc),
+            borderColor: "#00ff88",
+            yAxisID: "y",
+          },
+          {
+            label: "Volume 24h",
+            data: data.map(d => d.dexscreener_volume_24h),
+            borderColor: "#ffaa00",
+            yAxisID: "y1",
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { position: "left", title: { display: true, text: "Prix (USD)" } },
+          y1: { position: "right", title: { display: true, text: "Volume 24h" } },
+        },
+      },
+    });
+  }
+
+  function createLiquidityHoldersChart(data) {
+    const ctx = document.getElementById("liquidityHoldersChart")?.getContext("2d");
+    if (!ctx) return;
+    if (liquidityHoldersChart) liquidityHoldersChart.destroy();
+    liquidityHoldersChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: data.map(d => formatDateTime(d.timestamp)),
+        datasets: [
+          {
+            label: "Liquidité (USD)",
+            data: data.map(d => d.dexscreener_liquidity_quote || d.liquidity_usd),
+            borderColor: "#00d4ff",
+            yAxisID: "y",
+          },
+          {
+            label: "Holders",
+            data: data.map(d => d.holders),
+            borderColor: "#ff6b6b",
+            yAxisID: "y1",
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { position: "left", title: { display: true, text: "Liquidité (USD)" } },
+          y1: { position: "right", title: { display: true, text: "Holders" } },
+        },
+      },
+    });
+  }
+
+  function updateAnalysis() {
+    const ctx = document.getElementById("scoreDistributionChart")?.getContext("2d");
+    if (!ctx) return;
+    if (scoreDistributionChart) scoreDistributionChart.destroy();
+    const scores = filteredData.map(d => d.invest_score).filter(s => s !== null);
+    const bins = Array(10).fill(0);
+    scores.forEach(score => {
+      if (score >= 0 && score <= 100) bins[Math.floor(score / 10)]++;
+    });
+    scoreDistributionChart = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: ["0-10", "10-20", "20-30", "30-40", "40-50", "50-60", "60-70", "70-80", "80-90", "90-100"],
+        datasets: [{
+          label: "Distribution des scores",
+          data: bins,
+          backgroundColor: "rgba(0, 212, 255, 0.5)",
+          borderColor: "#00d4ff",
+          borderWidth: 1,
+        }],
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { beginAtZero: true, title: { display: true, text: "Nombre de tokens" } },
+          x: { title: { display: true, text: "Score d'investissement" } },
+        },
+      },
+    });
+  }
+
+  // Event Handlers
+  function toggleFav(address) {
+    if (favorites.has(address)) {
+      favorites.delete(address);
+    } else {
+      favorites.add(address);
+      // TODO: Send Telegram alert for favorited token via /api/telegram-alert
+    }
+    localStorage.setItem("favorites", JSON.stringify([...favorites]));
+    renderPage();
+    renderDexScreenerTable(filteredData);
+  }
+
+  function changePage(page) {
+    currentPage = page;
+    renderPage();
+  }
+
+  function setDexTimeFilter(value, unit, btn) {
+    dexTimeValue = value;
+    dexTimeUnit = unit;
+    document.querySelectorAll("#dexscreener-content .preset-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    fetchDexScreenerData();
+  }
+
+  function applyFilters() {
+    const search = document.getElementById("search")?.value.toLowerCase() || "";
+    const minScore = Number(document.getElementById("minScore")?.value) || 0;
+    const minLiquidity = Number(document.getElementById("minLiquidity")?.value) || 0;
+    const bondingFilter = document.getElementById("bondingFilter")?.value || "";
+    const statusFilter = document.getElementById("statusFilter")?.value || "";
+    filteredData = cachedData.filter(d =>
+      (d.symbol?.toLowerCase().includes(search) || d.name?.toLowerCase().includes(search)) &&
+      (d.invest_score >= minScore) &&
+      (d.liquidity_usd >= minLiquidity) &&
+      (!bondingFilter || d.bonding_curve_status === bondingFilter) &&
+      (!statusFilter || d.status === statusFilter)
+    );
+    currentPage = 1;
+    renderPage();
+  }
+
+  const applyFiltersDebounced = debounce(applyFilters, 300);
+  const applyDexFiltersDebounced = debounce(fetchDexScreenerData, 300);
+
+  function toggleAutoRefresh() {
+    const toggle = document.querySelector(".toggle-switch");
+    toggle.classList.toggle("active");
+    const interval = Number(document.querySelector(".refresh-interval")?.value) * 60 * 1000;
+    if (toggle.classList.contains("active")) {
+      autoRefreshInterval = setInterval(() => {
+        const activeTab = document.querySelector(".tab.active")?.dataset.tab;
+        if (activeTab === "base-content") fetchData(currentPage);
+        else if (activeTab === "dexscreener-content") fetchDexScreenerData();
+        else if (activeTab === "trends-content") updateTrendsSummary();
+      }, interval);
+    } else {
+      clearInterval(autoRefreshInterval);
+    }
+  }
+
+  function switchTab(tabId) {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+    document.querySelector(`[data-tab="${tabId}"]`).classList.add("active");
+    document.getElementById(tabId).classList.add("active");
+    if (tabId === "base-content") fetchData();
+    else if (tabId === "dexscreener-content") fetchDexScreenerData();
+    else if (tabId === "trends-content") {
+      updateTrendsSummary();
+      populateTokenSelector();
+    } else if (tabId === "analysis-content") updateAnalysis();
+  }
+
+  function populateTokenSelector() {
+    const selector = document.getElementById("tokenSelector");
+    if (!selector) return;
+    selector.innerHTML = '<option value="">Sélectionner un token</option>';
+    filteredData.forEach(d => {
+      const option = document.createElement("option");
+      option.value = d.address;
+      option.textContent = `${d.symbol} (${d.name})`;
+      selector.appendChild(option);
+    });
+  }
+
+  // Event Listeners
+  document.addEventListener("DOMContentLoaded", () => {
+    // Apply translations
+    document.querySelectorAll("[data-i18n]").forEach(el => {
+      const key = el.dataset.i18n;
+      if (i18n[lang][key]) el.textContent = i18n[lang][key];
+    });
+
+    // Tab switching
+    document.querySelectorAll(".tab").forEach(tab => {
+      tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+      tab.addEventListener("keydown", e => {
+        if (e.key === "Enter") switchTab(tab.dataset.tab);
+      });
+    });
+
+    // Filters
+    document.getElementById("search")?.addEventListener("input", applyFiltersDebounced);
+    document.getElementById("minScore")?.addEventListener("input", applyFiltersDebounced);
+    document.getElementById("minLiquidity")?.addEventListener("input", applyFiltersDebounced);
+    document.getElementById("bondingFilter")?.addEventListener("change", applyFiltersDebounced);
+    document.getElementById("statusFilter")?.addEventListener("change", applyFiltersDebounced);
+    document.getElementById("minVolume")?.addEventListener("input", applyDexFiltersDebounced);
+    document.getElementById("minDexLiquidity")?.addEventListener("input", applyDexFiltersDebounced);
+    document.getElementById("maxAge")?.addEventListener("input", applyDexFiltersDebounced);
+    document.getElementById("trendPeriod")?.addEventListener("change", updateTrendsSummary);
+    document.getElementById("tokenSelector")?.addEventListener("change", e => loadTokenCharts(e.target.value));
+
+    // Controls
+    document.querySelector(".controls button")?.addEventListener("click", () => {
+      const activeTab = document.querySelector(".tab.active")?.dataset.tab;
+      if (activeTab === "base-content") fetchData();
+      else if (activeTab === "dexscreener-content") fetchDexScreenerData();
+      else if (activeTab === "trends-content") updateTrendsSummary();
+    });
+    document.querySelector(".toggle-switch")?.addEventListener("click", toggleAutoRefresh);
+    document.querySelector(".toggle-switch")?.addEventListener("keydown", e => {
+      if (e.key === "Enter") toggleAutoRefresh();
+    });
+    document.querySelector(".theme-toggle")?.addEventListener("click", () => document.body.classList.toggle("light-theme"));
+    document.querySelector(".theme-toggle")?.addEventListener("keydown", e => {
+      if (e.key === "Enter") document.body.classList.toggle("light-theme");
+    });
+
+    // Initial load
+    fetchData();
+  });
+})();
+  </script>
+</body>
+</html>
