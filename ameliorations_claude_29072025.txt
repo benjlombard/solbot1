@@ -1,0 +1,133 @@
+🟢 SIMPLE (1-2h)
+
+Améliorer l'onglet Whale Activity
+
+Ajouter dates/heures complètes dans le feed whale
+Afficher nom du token + adresse complète
+Ajouter liens cliquables vers DexScreener/Pump.fun
+Améliorer le formatage des montants ($1.2K vs $1,200)
+
+
+Enrichir les métadonnées des tokens
+
+Ajouter logo des tokens dans les tableaux
+Afficher plus d'infos dans les tooltips
+Ajouter liens directs vers Jupiter, Birdeye, etc.
+
+
+Améliorer les filtres
+
+Ajouter filtre par tranche de market cap
+Filter par ratio buys/sells plus intuitif
+Presets "Gems potentiels" avec critères pré-définis
+
+
+Notifications visuelles
+
+Animations sur nouvelles détections whale
+Highlights colorés pour tokens à fort potentiel
+Sons/alertes browser pour gros mouvements
+
+
+
+🟡 MOYEN (3-8h)
+
+Score de potentiel amélioré
+
+Intégrer historique de prix dans le calcul
+Pondérer selon l'activité whale récente
+Ajouter momentum social (mentions Twitter simulées)
+
+
+Détection patterns avancés
+
+Détecter accumulation progressive de whales
+Identifier tokens avec croissance holders rapide
+Flaguer tokens avec liquidité croissante anormale
+
+
+Dashboard temps réel
+
+WebSocket pour mises à jour instantanées
+Graphiques en temps réel (prix, volume)
+Alertes push pour nouveaux gems
+
+
+Analyse technique basique
+
+Support/résistance automatique
+Détection breakouts de prix
+Volume/prix divergence analysis
+
+
+
+🟠 AVANCÉ (1-3 jours)
+
+Machine Learning pour scoring
+
+Modèle prédictif basé sur historique des winners
+Pattern recognition sur données whale
+Classification automatique "gem/scam/normal"
+
+
+Intégration APIs externes
+
+Données on-chain Solscan/Solana Beach
+Sentiment analysis Twitter/Telegram
+Données DEX multiples (Orca, Meteora...)
+
+
+Bot de trading automatique
+
+Auto-achat tokens haute probabilité
+Stop-loss/take-profit automatiques
+Portfolio management intégré
+
+
+Système d'alertes intelligent
+
+Profils d'alerte personnalisés
+Multi-canal (Telegram, Discord, Email)
+Filtrage anti-spam intelligent
+
+
+
+🔴 COMPLEXE (1+ semaine)
+
+Analyse réseau blockchain
+
+Mapping des connexions wallet-token
+Détection insider trading patterns
+Analyse flux de capitaux entre tokens
+
+
+Prédiction prix court terme
+
+Modèles LSTM pour prédiction 1-24h
+Intégration données macro (BTC, ETH)
+Backtesting automatisé des stratégies
+
+
+Interface mobile native
+
+App React Native complète
+Notifications push mobiles
+Trading mobile intégré
+
+
+Système de copy-trading
+
+Suivre automatiquement les meilleurs wallets
+Analyse performance historique traders
+Réplication proportionnelle des trades
+
+
+
+Recommandations prioritaires :
+
+Commencer par #1 (whale activity UI) - impact immédiat
+Puis #5 (score amélioré) - cœur de la détection
+Ensuite #6 (patterns) - différenciation clé
+Enfin #9 (ML) pour l'avantage concurrentiel
+
+Les points 1-4 peuvent être implémentés en une journée pour un impact visible immédiat !

@@ -1070,5 +1070,179 @@ th {
 }
 
 
+.whale-feed-item {
+  display: grid;
+  grid-template-columns: 80px 40px 50px 120px 1fr 100px 80px;
+  gap: 0.8rem;
+  padding: 0.8rem;
+  border-bottom: 1px solid var(--border-color);
+  font-family: monospace;
+  font-size: 0.85rem;
+  transition: background 0.3s ease;
+  align-items: center;
+}
+
+.whale-feed-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.whale-feed-time-full {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.whale-feed-token-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.whale-feed-token-symbol {
+  color: var(--text-accent);
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.whale-feed-token-name {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.whale-feed-token-address {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-family: monospace;
+  cursor: pointer;
+  transition: color 0.3s ease;
+}
+
+.whale-feed-token-address:hover {
+  color: var(--text-accent);
+}
+
+.whale-feed-amount-detailed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.whale-feed-amount-main {
+  color: var(--text-accent);
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.whale-feed-amount-precise {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.whale-feed-links {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.whale-feed-link {
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  text-decoration: none;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.3s ease;
+  border: 1px solid transparent;
+}
+
+.whale-feed-link-dex {
+  background: linear-gradient(45deg, #00d4ff, #0099cc);
+  color: white;
+}
+
+.whale-feed-link-pump {
+  background: linear-gradient(45deg, #ff6b35, #ff9800);
+  color: white;
+}
+
+.whale-feed-link-solscan {
+  background: linear-gradient(45deg, #9c27b0, #673ab7);
+  color: white;
+}
+
+.whale-feed-link:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.whale-feed-wallet-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.whale-feed-wallet-address {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-family: monospace;
+}
+
+.whale-feed-wallet-label {
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+/* Status indicators */
+.whale-token-status {
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.whale-token-status-new {
+  background: #4caf50;
+  color: white;
+}
+
+.whale-token-status-active {
+  background: #ff9800;
+  color: white;
+}
+
+.whale-token-status-migrated {
+  background: #9c27b0;
+  color: white;
+}
+
+/* Responsive whale feed */
+@media (max-width: 1200px) {
+  .whale-feed-item {
+    grid-template-columns: 70px 40px 45px 100px 1fr 90px;
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .whale-feed-item {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+    padding: 0.6rem;
+  }
+  
+  .whale-feed-token-info,
+  .whale-feed-amount-detailed,
+  .whale-feed-links,
+  .whale-feed-wallet-info {
+    justify-self: start;
+  }
+}
+
+
 
 

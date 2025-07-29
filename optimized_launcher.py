@@ -23,7 +23,7 @@ from system_optimization import (
 )
 
 # Configuration du logging optimisé
-def setup_optimized_logging(log_level: str, whale_log_level: str = 'WARNING', disable_whale_logs: bool = False):
+def setup_optimized_logging(log_level: str, whale_log_level: str = 'WARNING', disable_whale_logs: bool = False, whale_log_file: str = "whale_detector.log"):
     """Configuration logging optimisée pour haute performance"""
     
     # Format de log plus compact pour réduire l'overhead
@@ -48,25 +48,140 @@ def setup_optimized_logging(log_level: str, whale_log_level: str = 'WARNING', di
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
     
+    # === NOUVEAU: Handler séparé pour les whales ===
+    whale_file_handler = RotatingFileHandler(
+        whale_log_file,
+        maxBytes=20*1024*1024,  # Fichier plus petit car plus spécialisé
+        backupCount=5,
+        encoding='utf-8'
+    )
+    whale_file_handler.setLevel(getattr(logging, whale_log_level))
+    whale_file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s | %(levelname)s | 🐋 %(message)s',
+        datefmt='%H:%M:%S'
+    ))
+
     # Configuration du logger racine
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
     
-    if disable_whale_logs:
-        logging.getLogger('whale_detector').setLevel(logging.CRITICAL)
-        logging.info("🐋 Whale detector logs disabled")
-    else:
-        logging.getLogger('whale_detector').setLevel(getattr(logging, whale_log_level))
-        logging.info(f"🐋 Whale detector log level: {whale_log_level}")
+    whale_logger_names = ['whale_detector', 'whale_detection', 'whale', 'whales']
+    for logger_name in whale_logger_names:
+        whale_logger = logging.getLogger(logger_name)
+        
+        if disable_whale_logs:
+            # Complètement désactiver
+            whale_logger.setLevel(logging.CRITICAL + 1)  # Au-dessus de CRITICAL
+            whale_logger.propagate = False
+            whale_logger.handlers.clear()
+            logging.info(f"🚫 Whale logs completely disabled for {logger_name}")
+        else:
+            whale_logger.setLevel(getattr(logging, whale_log_level))
+            whale_logger.propagate = False  # IMPORTANT: Empêcher la propagation
+            
+            # Nettoyer les handlers existants
+            whale_logger.handlers.clear()
+            
+            # *** CHANGEMENT PRINCIPAL: AJOUTER UNIQUEMENT LE HANDLER FICHIER ***
+            whale_logger.addHandler(whale_file_handler)
+            
+            # *** SUPPRIMER CETTE SECTION QUI AJOUTAIT LA CONSOLE ***
+            # PAS DE CONSOLE HANDLER, MÊME POUR DEBUG/INFO
+            
+            logging.info(f"🐋 Whale logs for {logger_name}: {whale_log_level} level -> {whale_log_file} (FILE ONLY)")
 
-    logging.getLogger('solana_monitoring').addFilter(ParsingErrorFilter())
+    
     # Réduire les logs des libs externes
+
+    console_handler.addFilter(WhaleLogFilter())
+    logging.info("🚫 Anti-whale filter applied to console - ALL whale logs go to file ONLY")
+
     for lib in ['httpx', 'httpcore', 'aiohttp', 'websockets', 'urllib3']:
         logging.getLogger(lib).setLevel(logging.WARNING)
     
+    logging.getLogger('solana_monitoring').addFilter(ParsingErrorFilter())
+
+    if disable_whale_logs:
+        logging.info("🚫 ALL whale detector logs disabled")
+    else:
+        logging.info(f"🐋 Whale detector configuration:")
+        logging.info(f"   📄 Log level: {whale_log_level}")
+        logging.info(f"   📄 Log file: {whale_log_file}")
+        logging.info(f"   📺 Console: DISABLED (file only)")
+        logging.info(f"   🔒 Mode: FILE ONLY regardless of level")
+    
     logging.info("✅ Optimized logging configured")
+    logging.info(f"📄 Main logs: solana_scanner_optimized.log")
+
+def test_whale_logging_file_only():
+    """Test pour vérifier que les whale logs vont uniquement dans le fichier"""
+    import logging
+    import os
+    
+    print("\n=== TEST WHALE LOGGING (FILE ONLY) ===")
+    
+    # Tester différents loggers whale
+    whale_loggers = [
+        logging.getLogger('whale_detector'),
+        logging.getLogger('whale_detection'), 
+        logging.getLogger('whale'),
+        logging.getLogger('whales')
+    ]
+    
+    print("📝 Sending test logs to file...")
+    for logger in whale_loggers:
+        logger.debug(f"🐋 Test DEBUG from {logger.name} - should go to FILE ONLY")
+        logger.info(f"🐋 Test INFO from {logger.name} - should go to FILE ONLY")
+        logger.warning(f"🐋 Test WARNING from {logger.name} - should go to FILE ONLY")
+        logger.error(f"🐋 Test ERROR from {logger.name} - should go to FILE ONLY")
+        print(f"✅ Sent logs for {logger.name}")
+    
+    print("📺 Console: No whale logs should appear above")
+    print("📄 File: All whale logs should be in whale_detector.log")
+    
+    # Vérifier le fichier
+    import time
+    time.sleep(0.1)
+    
+    try:
+        if os.path.exists('whale_detector.log'):
+            with open('whale_detector.log', 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            recent_lines = [line for line in lines if '🐋 Test' in line]
+            print(f"📊 Found {len(recent_lines)} test whale logs in file")
+            
+            if recent_lines:
+                print("🔍 Recent whale logs from file:")
+                for line in recent_lines[-4:]:
+                    print(f"   {line.strip()}")
+            else:
+                print("⚠️  No test whale logs found in file")
+        else:
+            print("❌ whale_detector.log file not found!")
+    
+    except Exception as e:
+        print(f"⚠️  Error reading whale file: {e}")
+    
+    print("=== END TEST ===\n")
+
+class WhaleLogFilter(logging.Filter):
+        def filter(self, record):
+            # Bloquer TOUS les logs contenant des mots-clés whale dans la console
+            message = record.getMessage().lower()
+            logger_name = record.name.lower()
+            
+            # Mots-clés whale à bloquer
+            whale_keywords = ['whale', '🐋', 'large transaction', 'big transfer', 'whale detector']
+            
+            # Si c'est un logger whale ou contient des mots-clés whale
+            if any(keyword in logger_name for keyword in ['whale']) or \
+               any(keyword in message for keyword in whale_keywords):
+                return False  # Bloquer ce log pour la console
+            
+            return True  # Laisser passer les autres logs
 
 class ParsingErrorFilter(logging.Filter):
     """Filtrer les erreurs de parsing fréquentes mais normales"""
@@ -124,6 +239,10 @@ class OptimizedSolanaScanner:
         from solana_monitor_c4 import token_enricher
         await token_enricher.start()
         
+        # === NOUVEAU: Configurer le seuil whale ===
+        from whale_detector_integration import whale_detector
+        whale_detector.whale_threshold = self.args.whale_threshold
+
         # 4. Importer et configurer le monitoring Solana
         from solana_monitor_c4 import start_monitoring
         
@@ -499,16 +618,18 @@ def main():
                        help="Enrichment check interval in minutes (default: 5)")
     parser.add_argument("--monitoring-interval", type=int, default=120,
                        help="Performance monitoring interval in seconds (default: 120)")
-    
+    parser.add_argument("--test-whale-file-only", action="store_true",
+                    help="Test that whale logs go ONLY to file (no console)")
     parser.add_argument("--whale-log-level", 
                    choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-                   default='WARNING',
+                   default='ERROR',
                    help="Whale detector log level (default: WARNING)")
     parser.add_argument("--disable-whale-logs", action="store_true",
                     help="Disable whale detection verbose logging")
     parser.add_argument("--whale-threshold", type=int, default=10000,
                     help="Whale detection threshold in USD (default: 10000)")
-
+    parser.add_argument("--whale-log-file", type=str, default="whale_detector.log",
+                    help="Whale detector log file path (default: whale_detector.log)")
     # Options avancées
     parser.add_argument("--enable-performance-profiling", action="store_true",
                        help="Enable detailed performance profiling")
@@ -526,8 +647,10 @@ def main():
     args = parser.parse_args()
     
     # Configuration du logging optimisé
-    setup_optimized_logging(args.log_level, args.whale_log_level, args.disable_whale_logs)
-    
+    setup_optimized_logging(args.log_level, args.whale_log_level, args.disable_whale_logs, args.whale_log_file)
+    if args.test_whale_file_only:
+        test_whale_logging_file_only()
+        return
     # Information de démarrage
     logging.info("🚀 SOLANA TOKEN SCANNER - HIGH PERFORMANCE MODE")
     logging.info("=" * 60)

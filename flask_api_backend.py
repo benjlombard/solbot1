@@ -167,16 +167,28 @@ def get_whale_feed():
         for tx in activity:
             feed_items.append({
                 'timestamp': tx.get('timestamp'),
-                'timestamp_formatted': tx.get('timestamp_formatted'),
+                'timestamp_formatted': tx.get('timestamp_formatted', 'Invalid date'),
+                'timestamp_full': tx.get('timestamp', ''),
                 'type': tx.get('transaction_type', '').upper(),
                 'amount_usd': tx.get('amount_usd', 0),
-                'amount_formatted': f"${tx.get('amount_usd', 0):,.0f}",
+                'amount_formatted': tx.get('amount_formatted', '$0'),
+                'amount_detailed': f"${tx.get('amount_usd', 0):,.2f}",
                 'token_address': tx.get('token_address'),
-                'token_short': tx.get('token_address', '')[:8] + '...' if tx.get('token_address') else '',
+                'token_symbol': tx.get('token_symbol', 'NEW'),
+                'token_name': tx.get('token_name', 'New Token'),
+                'token_short': tx.get('token_short', ''),
+                'token_full': tx.get('token_full', ''),
+                'token_status': tx.get('token_status', 'new'),
+                'wallet_address': tx.get('wallet_address', ''),
+                'wallet_short': tx.get('wallet_address', '')[:8] + '...' if tx.get('wallet_address') else '',
                 'wallet_label': tx.get('wallet_label', 'Unknown'),
+                'dexscreener_url': tx.get('dexscreener_url', ''),
+                'pump_fun_url': tx.get('pump_fun_url', ''),
+                'dex_id': tx.get('dex_id', 'unknown'),
                 'is_critical': tx.get('amount_usd', 0) >= 50000,
                 'is_in_database': tx.get('is_in_database', False),
-                'dex_id': tx.get('dex_id', 'unknown')
+                'signature': tx.get('signature', ''),
+                'solscan_url': f"https://solscan.io/tx/{tx.get('signature', '')}" if tx.get('signature') else ''
             })
         
         return jsonify({

@@ -375,19 +375,19 @@
 
     <!-- Feed d'activité whale -->
     <div class="whale-feed-section">
-      <div class="whale-feed-header">
-        <h4>🔥 Feed Activité Whale</h4>
-        <div class="whale-feed-controls">
-          <select id="whaleFeedPeriod" onchange="updateWhaleFeed()">
-            <option value="1">Dernière heure</option>
-            <option value="6">6 dernières heures</option>
-            <option value="24">24 dernières heures</option>
-          </select>
-          <button onclick="refreshWhaleFeed()" class="refresh-whale-btn">🔄</button>
-        </div>
-      </div>
-      <div class="whale-feed-content" id="whaleFeedContent">
-        <div class="loading">Chargement de l'activité whale...</div>
+  <div class="whale-feed-header">
+    <h4>🔥 Feed Activité Whale</h4>
+    <div class="whale-feed-controls">
+      <select id="whaleFeedPeriod" onchange="fetchWhaleFeed()">
+        <option value="1">Dernière heure</option>
+        <option value="6">6 dernières heures</option>
+        <option value="24">24 dernières heures</option>
+      </select>
+      <button onclick="refreshWhaleFeed()" class="refresh-whale-btn">🔄 Actualiser</button>
+    </div>
+  </div> <!-- ✅ Fermeture de whale-feed-header -->
+  <div class="whale-feed-content" id="whaleFeedContent">
+    <div class="loading">Chargement de l'activité whale...</div>
       </div>
     </div>
   </div>

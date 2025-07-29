@@ -1384,22 +1384,91 @@ function renderWhaleFeed(feedItems) {
     const itemClass = item.is_critical ? 'whale-feed-critical' : 
                      item.is_in_database ? '' : 'whale-feed-new';
     
-    return `
+    // Préparer les liens
+    const links = [];
+    if (item.dexscreener_url) {
+      links.push(`<a href="${item.dexscreener_url}" target="_blank" class="whale-feed-link whale-feed-link-dex" title="Voir sur DexScreener">📊 DEX</a>`);
+    }
+    if (item.pump_fun_url && item.token_status !== 'migrated') {
+      links.push(`<a href="${item.pump_fun_url}" target="_blank" class="whale-feed-link whale-feed-link-pump" title="Voir sur Pump.fun">🚀 PUMP</a>`);
+    }
+    if (item.solscan_url) {
+      links.push(`<a href="${item.solscan_url}" target="_blank" class="whale-feed-link whale-feed-link-solscan" title="Voir transaction">🔍 TX</a>`);
+    }
+
+   return `
       <div class="whale-feed-item ${itemClass}">
-        <span class="whale-feed-time">${item.timestamp_formatted}</span>
-        <span class="whale-feed-emoji">${emoji}</span>
-        <span class="whale-feed-type">${item.type}</span>
-        <span class="whale-feed-amount">${item.amount_formatted}</span>
-        <span class="whale-feed-separator">•</span>
-        <span class="whale-feed-token">${item.token_short}</span>
-        <span class="whale-feed-separator">•</span>
-        <span class="whale-feed-wallet">${item.wallet_label}</span>
-        ${item.is_in_database ? '' : '<span class="whale-feed-new-badge">⭐ NEW</span>'}
+        <div class="whale-feed-time-full" title="${item.timestamp_full}">
+          ${item.timestamp_formatted}
+        </div>
+        
+        <div class="whale-feed-emoji">${emoji}</div>
+        
+        <div class="whale-feed-type">${item.type}</div>
+        
+        <div class="whale-feed-amount-detailed">
+          <div class="whale-feed-amount-main">${item.amount_formatted}</div>
+          <div class="whale-feed-amount-precise" title="Montant exact">${item.amount_detailed}</div>
+        </div>
+        
+        <div class="whale-feed-token-info">
+          <div style="display: flex; align-items: center; gap: 0.3rem;">
+            <span class="whale-feed-token-symbol">${item.token_symbol}</span>
+            <span class="whale-token-status whale-token-status-${item.token_status}">${item.token_status}</span>
+          </div>
+          <div class="whale-feed-token-name" title="${item.token_name}">${item.token_name}</div>
+          <div class="whale-feed-token-address" 
+               title="${item.token_full}" 
+               onclick="copyToClipboard('${item.token_full}')">
+            ${item.token_short}
+          </div>
+        </div>
+        
+        <div class="whale-feed-wallet-info">
+          <div class="whale-feed-wallet-label">${item.wallet_label}</div>
+          <div class="whale-feed-wallet-address" 
+               title="${item.wallet_address}"
+               onclick="copyToClipboard('${item.wallet_address}')">
+            ${item.wallet_short}
+          </div>
+        </div>
+        
+        <div class="whale-feed-links">
+          ${links.join('')}
+          ${item.is_in_database ? '' : '<span class="whale-feed-new-badge">⭐ NEW</span>'}
+        </div>
       </div>
     `;
   }).join('');
   
   container.innerHTML = feedHtml;
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    // Feedback visuel rapide
+    const notification = document.createElement('div');
+    notification.textContent = 'Copié!';
+    notification.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: var(--text-accent);
+      color: var(--bg-primary);
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      z-index: 10000;
+      font-weight: bold;
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      document.body.removeChild(notification);
+    }, 1000);
+  }).catch(err => {
+    console.error('Erreur copie:', err);
+  });
 }
 
 function getWhaleEmoji(type, amount) {
