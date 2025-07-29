@@ -60,6 +60,13 @@ HELIUS_WS_URL = f"wss://rpc.helius.xyz/?api-key={config('HELIUS_API_KEY', defaul
 SOLANA_RPC_URL = f"https://rpc.helius.xyz/?api-key={config('HELIUS_API_KEY', default='872ddf73-4cfd-4263-a418-521bbde27eb8')}"
 DATABASE_PATH = "tokens.db"
 
+parsing_stats = {
+    'pump_fun_attempts': 0,
+    'pump_fun_success': 0,
+    'raydium_attempts': 0,
+    'raydium_success': 0
+}
+
 def get_local_timestamp():
     """Obtenir un timestamp dans la timezone locale"""
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -561,6 +568,10 @@ async def monitor_pump_fun():
                                                 relevant_logs.append((i, log))
                                 
                                 if relevant_logs:
+                                    if len(signature) < 80 or any(char in signature for char in [' ', '\n', '\t']):
+                                        logger.debug(f"Invalid signature format, skipping: {signature[:20]}...")
+                                        continue
+                                    
                                     logger.debug(f"Found {len(relevant_logs)} relevant logs for {program_id}")
                                     
                                     # Analyser les logs pour déterminer le type d'événement
@@ -597,7 +608,7 @@ async def monitor_pump_fun():
                                             logger.debug(f"Pump.fun token event: address={token_address}, status={status}, event_type={event_type}, signature={signature}")
                                             await process_new_token(token_address, status, None)
                                     except Exception as parse_error:
-                                        logger.error(f"Error parsing transaction {signature}: {parse_error}")
+                                        logger.debug(f"Error parsing transaction {signature}: {parse_error}")
                                         continue
                                 
                                 # Log périodique de l'état de la connexion
@@ -715,6 +726,9 @@ async def monitor_raydium_pools():
                                         ]):
                                             logger.debug(f"Potential Raydium pool initialization detected at log {check_idx}: {logs[check_idx]}")
                                             try:
+                                                if len(signature) < 80 or any(char in signature for char in [' ', '\n', '\t']):
+                                                    logger.debug(f"Invalid Raydium signature format, skipping: {signature[:20]}...")
+                                                    continue
                                                 pool_data = await parse_raydium_pool(signature, client)
                                                 if pool_data:
                                                     logger.debug(
@@ -724,7 +738,7 @@ async def monitor_raydium_pools():
                                                     await process_new_token(pool_data["token_address"], "migrated", pool_data["pool_address"])
                                                     break
                                             except Exception as parse_error:
-                                                logger.error(f"Error parsing Raydium pool {signature}: {parse_error}")
+                                                logger.debug(f"Error parsing Raydium pool {signature}: {parse_error}")
                                                 continue
                             
                             if time.time() - last_log_time > 300:
@@ -758,7 +772,11 @@ async def monitor_raydium_pools():
 # Fonctions utilitaires pour parsing
 async def parse_pump_fun_event(signature: str, client: AsyncClient) -> str | None:
     """Parse Pump.fun transaction to extract token address with validation."""
-    max_retries = 3
+    if not signature or len(signature) < 80:  # Signature invalide
+        return None
+
+    parsing_stats['pump_fun_attempts'] += 1
+    max_retries = 1
     for attempt in range(max_retries):
         try:
             logger.debug(f"Fetching Pump.fun transaction for signature: {signature} (attempt {attempt + 1}/{max_retries})")
@@ -819,6 +837,7 @@ async def parse_pump_fun_event(signature: str, client: AsyncClient) -> str | Non
                 validated_token = await validate_and_filter_token_candidates(all_candidates, client)
                 if validated_token:
                     logger.info(f"🎯 Final validated token address: {validated_token}")
+                    parsing_stats['pump_fun_success'] += 1
                     return validated_token
                 else:
                     logger.warning(f"No candidates validated as token mints for signature {signature}")
@@ -837,7 +856,7 @@ async def parse_pump_fun_event(signature: str, client: AsyncClient) -> str | Non
             return None
         except Exception as e:
             if attempt == max_retries - 1:
-                logger.error(f"Error parsing Pump.fun event for signature {signature} after {max_retries} attempts: {str(e)}")
+                logger.debug(f"Error parsing Pump.fun event for signature {signature} after {max_retries} attempts: {str(e)}")
                 return None
             backoff = min(30, (2 ** (attempt + random.uniform(0.5, 1.5))))
             logger.warning(f"Error parsing signature {signature}, retrying in {backoff:.2f} seconds: {str(e)}")
@@ -847,6 +866,7 @@ async def parse_pump_fun_event(signature: str, client: AsyncClient) -> str | Non
 
 async def parse_raydium_pool(signature: str, client: AsyncClient) -> dict | None:
     """Parse Raydium transaction to extract token and pool address."""
+    parsing_stats['raydium_attempts'] += 1
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -882,6 +902,9 @@ async def parse_raydium_pool(signature: str, client: AsyncClient) -> dict | None
                     logger.debug(f"Error processing Raydium instruction {i}: {inst_error}")
                     continue
             
+            if pool_data and pool_data["token_address"]:
+                parsing_stats['raydium_success'] += 1
+
             return pool_data if pool_data["token_address"] else None
             
         except HTTPStatusError as e:
@@ -897,7 +920,7 @@ async def parse_raydium_pool(signature: str, client: AsyncClient) -> dict | None
                 logger.error(f"Failed to parse Raydium pool for signature {signature} after {max_retries} attempts: {str(e)}")
                 return None
             backoff = min(30, (2 ** (attempt + random.uniform(0.5, 1.5))))
-            logger.warning(f"Error parsing Raydium signature {signature}, retrying in {backoff:.2f} seconds: {str(e)}")
+            logger.debug(f"Failed to parse Raydium pool for signature {signature} after {max_retries} attempts: {str(e)}")
             await asyncio.sleep(backoff)
     
     return None
@@ -1127,6 +1150,15 @@ async def display_token_stats():
             
             conn.close()
             
+            pump_total = parsing_stats['pump_fun_attempts']
+            pump_success = parsing_stats['pump_fun_success']
+            raydium_total = parsing_stats['raydium_attempts']
+            raydium_success = parsing_stats['raydium_success']
+            
+            pump_rate = (pump_success / max(1, pump_total)) * 100
+            raydium_rate = (raydium_success / max(1, raydium_total)) * 100
+            
+            logger.info(f"📊 Parsing success rates - Pump.fun: {pump_rate:.1f}% ({pump_success}/{pump_total}) | Raydium: {raydium_rate:.1f}% ({raydium_success}/{raydium_total})")
             logger.info(f"📊 Stats: Total={total} | Enriched={enriched} | High Score={high_score} | Recent 1h={recent} | 🐋 Whales 1h={whale_activity}")
             
             if top_tokens:

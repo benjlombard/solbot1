@@ -24,7 +24,7 @@ HELIUS_WS_URL = "wss://rpc.helius.xyz/?api-key=872ddf73-4cfd-4263-a418-521bbde27
 SOLANA_RPC_URL = "https://rpc.helius.xyz/?api-key=872ddf73-4cfd-4263-a418-521bbde27eb8"
 
 # Seuils configurables
-WHALE_THRESHOLD_USD = 100  # Seuil minimum pour une transaction whale
+WHALE_THRESHOLD_USD = 5000  # Seuil minimum pour une transaction whale
 CRITICAL_THRESHOLD_USD = 50000  # Seuil pour les transactions critiques
 
 # Programmes Solana à surveiller
@@ -246,17 +246,17 @@ class WhaleTransactionDetector:
     async def parse_transaction_for_whale_activity(self, signature: str, logs: List[str]) -> Optional[WhaleTransaction]:
         """Parser une transaction pour détecter l'activité whale"""
         try:
-            logger.info(f"🔍 DEBUT parsing transaction: {signature[:20]}...")
+            logger.debug(f"🔍 DEBUT parsing transaction: {signature[:20]}...")
             
             # Analyser les logs pour détecter les gros swaps
             has_indicators = self.contains_large_swap_indicators(logs)
-            logger.info(f"🔍 Indicateurs détectés: {has_indicators}")
+            logger.debug(f"🔍 Indicateurs détectés: {has_indicators}")
             
             if not has_indicators:
                 logger.warning(f"❌ ARRÊT: Pas d'indicateurs pour {signature[:20]}...")
                 return None
             
-            logger.info(f"✅ CONTINUE: Récupération transaction {signature[:20]}...")
+            logger.debug(f"✅ CONTINUE: Récupération transaction {signature[:20]}...")
             
             sig = Signature.from_string(signature)
             tx = await self.client.get_transaction(
@@ -269,32 +269,32 @@ class WhaleTransactionDetector:
                 logger.warning(f"❌ TRANSACTION VIDE pour {signature[:20]}...")
                 return None
             
-            logger.info(f"✅ TRANSACTION RÉCUPÉRÉE pour {signature[:20]}...")
+            logger.debug(f"✅ TRANSACTION RÉCUPÉRÉE pour {signature[:20]}...")
             
             # Analyser les instructions de la transaction
             message = tx.value.transaction.transaction.message
-            logger.info(f"🔍 Analyse {len(message.instructions)} instructions...")
+            logger.debug(f"🔍 Analyse {len(message.instructions)} instructions...")
             
             # Rechercher les transferts de tokens importants
             for i, instruction in enumerate(message.instructions):
                 program_id = str(message.account_keys[instruction.program_id_index])
-                logger.info(f"   Instruction {i}: Programme {program_id[:8]}...")
+                logger.debug(f"   Instruction {i}: Programme {program_id[:8]}...")
                 
                 # Analyser les instructions des programmes DEX
                 if program_id in [JUPITER_PROGRAM, RAYDIUM_PROGRAM, PUMP_FUN_PROGRAM]:
-                    logger.info(f"🎯 PROGRAMME DEX TROUVÉ: {program_id[:8]}...")
+                    logger.debug(f"🎯 PROGRAMME DEX TROUVÉ: {program_id[:8]}...")
                     
                     whale_data = await self.extract_whale_data_from_instruction(
                         instruction, message, signature, program_id
                     )
                     
-                    logger.info(f"🔍 Whale data extraite: {whale_data is not None}")
+                    logger.debug(f"🔍 Whale data extraite: {whale_data is not None}")
                     
                     if whale_data:
-                        logger.info(f"💰 Montant USD: {whale_data.get('amount_usd', 0)}")
+                        logger.debug(f"💰 Montant USD: {whale_data.get('amount_usd', 0)}")
                         
                         if self.is_significant_transaction(whale_data):
-                            logger.info(f"✅ TRANSACTION SIGNIFICATIVE!")
+                            logger.debug(f"✅ TRANSACTION SIGNIFICATIVE!")
                             return await self.create_whale_transaction(whale_data)
                         else:
                             logger.warning(f"❌ Transaction pas assez significative")
@@ -308,7 +308,7 @@ class WhaleTransactionDetector:
     
     def contains_large_swap_indicators(self, logs: List[str]) -> bool:
         """Vérifier si les logs indiquent un gros swap"""
-        logger.info(f"🔍 Vérification indicateurs sur {len(logs)} logs...")
+        logger.debug(f"🔍 Vérification indicateurs sur {len(logs)} logs...")
         
         for i, log in enumerate(logs):
             log_lower = log.lower()
@@ -316,22 +316,22 @@ class WhaleTransactionDetector:
             # 🎯 INDICATEURS ÉLARGIS
             # 1. Toute mention de Jupiter
             if "jupiter" in log_lower:
-                logger.info(f"✅ INDICATEUR JUPITER trouvé log {i}: {log[:80]}...")
+                logger.debug(f"✅ INDICATEUR JUPITER trouvé log {i}: {log[:80]}...")
                 return True
             
             # 2. Toute mention de "route"
             if "route" in log_lower:
-                logger.info(f"✅ INDICATEUR ROUTE trouvé log {i}: {log[:80]}...")
+                logger.debug(f"✅ INDICATEUR ROUTE trouvé log {i}: {log[:80]}...")
                 return True
             
             # 3. Swaps, transfers, instructions avec montants
             if any(word in log_lower for word in ["swap", "transfer", "instruction:"]):
-                logger.info(f"✅ INDICATEUR GÉNÉRIQUE trouvé log {i}: {log[:80]}...")
+                logger.debug(f"✅ INDICATEUR GÉNÉRIQUE trouvé log {i}: {log[:80]}...")
                 return True
             
             # 4. Raydium, Pump.fun, autres DEX
             if any(word in log_lower for word in ["raydium", "pump", "orca", "meteora"]):
-                logger.info(f"✅ INDICATEUR DEX trouvé log {i}: {log[:80]}...")
+                logger.debug(f"✅ INDICATEUR DEX trouvé log {i}: {log[:80]}...")
                 return True
         
         logger.warning("❌ AUCUN INDICATEUR TROUVÉ dans les logs")
@@ -343,7 +343,7 @@ class WhaleTransactionDetector:
         wallet = tx_data.get('wallet_address', '')
         
         # Filtrer par montant minimum
-        if amount_usd < WHALE_THRESHOLD_USD:
+        if amount_usd < self.whale_threshold:
             return False
         
         # Filtrer les wallets spam
@@ -355,7 +355,7 @@ class WhaleTransactionDetector:
     async def extract_whale_data_from_instruction(self, instruction, message, signature: str, program_id: str) -> Optional[Dict]:
         """Extraire les données whale d'une instruction"""
         try:
-            logger.info(f"🔍 Extraction données pour programme: {program_id[:8]}...")
+            logger.debug(f"🔍 Extraction données pour programme: {program_id[:8]}...")
             
             # Vérifier les indices avant de les utiliser
             try:
@@ -366,13 +366,13 @@ class WhaleTransactionDetector:
                     else:
                         logger.warning(f"⚠️ Index {idx} dépasse {len(message.account_keys)} comptes")
                 
-                logger.info(f"🔍 {len(accounts)} comptes valides récupérés")
+                logger.debug(f"🔍 {len(accounts)} comptes valides récupérés")
                 
             except Exception as e:
                 logger.error(f"❌ Erreur extraction comptes: {e}")
                 # FALLBACK: Utiliser tous les comptes disponibles
                 accounts = [str(key) for key in message.account_keys]
-                logger.info(f"🔄 Fallback: {len(accounts)} comptes totaux utilisés")
+                logger.debug(f"🔄 Fallback: {len(accounts)} comptes totaux utilisés")
             
             # FIX: Filtrer les comptes système pour trouver le vrai user wallet
             system_accounts = {
@@ -388,7 +388,7 @@ class WhaleTransactionDetector:
             for account in accounts:
                 if account not in system_accounts and not account.startswith("11111"):
                     user_wallet = account
-                    logger.info(f"🎯 User wallet trouvé: {user_wallet[:8]}...")
+                    logger.debug(f"🎯 User wallet trouvé: {user_wallet[:8]}...")
                     break
             
             if not user_wallet and accounts:
@@ -401,25 +401,25 @@ class WhaleTransactionDetector:
 
             # Logique spécifique selon le programme
             if program_id == JUPITER_PROGRAM:
-                logger.info("🪐 APPEL parse_jupiter_instruction...")
+                logger.debug("🪐 APPEL parse_jupiter_instruction...")
                 result = await self.parse_jupiter_instruction([user_wallet] + accounts, instruction, signature)
-                logger.info(f"🪐 RÉSULTAT Jupiter: {result is not None}")
+                logger.debug(f"🪐 RÉSULTAT Jupiter: {result is not None}")
                 if result:
-                    logger.info(f"💰 Montant: ${result.get('amount_usd', 0)}")
+                    logger.debug(f"💰 Montant: ${result.get('amount_usd', 0)}")
                 return result
             elif program_id == RAYDIUM_PROGRAM:
-                logger.info("🌊 APPEL parse_raydium_instruction...")
+                logger.debug("🌊 APPEL parse_raydium_instruction...")
                 result = await self.parse_raydium_instruction([user_wallet] + accounts, instruction, signature)
-                logger.info(f"🌊 RÉSULTAT Raydium: {result is not None}")
+                logger.debug(f"🌊 RÉSULTAT Raydium: {result is not None}")
                 if result:
-                    logger.info(f"💰 Montant: ${result.get('amount_usd', 0)}")
+                    logger.debug(f"💰 Montant: ${result.get('amount_usd', 0)}")
                 return result
             elif program_id == PUMP_FUN_PROGRAM:
-                logger.info("🚀 APPEL parse_pump_fun_instruction...")
+                logger.debug("🚀 APPEL parse_pump_fun_instruction...")
                 result = await self.parse_pump_fun_instruction([user_wallet] + accounts, instruction, signature)
-                logger.info(f"🚀 RÉSULTAT Pump.fun: {result is not None}")
+                logger.debug(f"🚀 RÉSULTAT Pump.fun: {result is not None}")
                 if result:
-                    logger.info(f"💰 Montant: ${result.get('amount_usd', 0)}")
+                    logger.debug(f"💰 Montant: ${result.get('amount_usd', 0)}")
                 return result
             
         except Exception as e:
@@ -432,7 +432,7 @@ class WhaleTransactionDetector:
     async def parse_jupiter_instruction(self, accounts: List[str], instruction, signature: str) -> Optional[Dict]:
         """Parser une instruction Jupiter pour extraire les données de swap"""
         try:
-            logger.info(f"🪐 Jupiter: {len(accounts)} comptes disponibles")
+            logger.debug(f"🪐 Jupiter: {len(accounts)} comptes disponibles")
             
             if len(accounts) < 1:
                 logger.warning(f"❌ Pas assez de comptes Jupiter: {len(accounts)}")
@@ -443,7 +443,7 @@ class WhaleTransactionDetector:
             # accounts[1] = user source token account
             # accounts[2] = user dest token account
             user_wallet = accounts[0]
-            logger.info(f"🪐 User wallet: {user_wallet[:8]}...")
+            logger.debug(f"🪐 User wallet: {user_wallet[:8]}...")
             
             # Analyser les données de l'instruction pour extraire les montants
             try:
@@ -458,7 +458,7 @@ class WhaleTransactionDetector:
                 else:
                     instruction_data = b''
                     
-                logger.info(f"🪐 Instruction data length: {len(instruction_data)}")
+                logger.debug(f"🪐 Instruction data length: {len(instruction_data)}")
                 
             except Exception as data_error:
                 logger.debug(f"⚠️ Erreur lecture instruction data: {data_error}")
@@ -487,7 +487,7 @@ class WhaleTransactionDetector:
                         )
                         
                         if token_changes:
-                            logger.info(f"🪐 Token changes détectés: {len(token_changes)}")
+                            logger.debug(f"🪐 Token changes détectés: {len(token_changes)}")
                             
                             # Prendre le plus gros changement comme base
                             largest_change = max(token_changes, key=lambda x: abs(x['amount_change']))
@@ -496,7 +496,7 @@ class WhaleTransactionDetector:
                             price = await self.get_token_price_estimate(largest_change['mint'])
                             amount_usd = abs(largest_change['amount_change']) * price
                             
-                            logger.info(f"🪐 Largest change: {largest_change['amount_change']} tokens, ${amount_usd}")
+                            logger.debug(f"🪐 Largest change: {largest_change['amount_change']} tokens, ${amount_usd}")
                             
                             return {
                                 'wallet_address': user_wallet,
@@ -530,7 +530,7 @@ class WhaleTransactionDetector:
     async def parse_raydium_instruction(self, accounts: List[str], instruction, signature: str) -> Optional[Dict]:
         """Parser une instruction Raydium pour extraire les données de swap"""
         try:
-            logger.info(f"🌊 Raydium: {len(accounts)} comptes disponibles")
+            logger.debug(f"🌊 Raydium: {len(accounts)} comptes disponibles")
             
             if len(accounts) < 5:
                 logger.warning(f"❌ Pas assez de comptes Raydium: {len(accounts)}")
@@ -542,7 +542,7 @@ class WhaleTransactionDetector:
             # accounts[2] = user dest token account
             # accounts[3] = AMM pool
             user_wallet = accounts[0]
-            logger.info(f"🌊 User wallet: {user_wallet[:8]}...")
+            logger.debug(f"🌊 User wallet: {user_wallet[:8]}...")
             
             # Analyser les données de l'instruction
             try:
@@ -556,7 +556,7 @@ class WhaleTransactionDetector:
                 else:
                     instruction_data = b''
                     
-                logger.info(f"🌊 Instruction data length: {len(instruction_data)}")
+                logger.debug(f"🌊 Instruction data length: {len(instruction_data)}")
                 
             except Exception as data_error:
                 logger.debug(f"⚠️ Erreur lecture instruction data Raydium: {data_error}")
@@ -565,7 +565,7 @@ class WhaleTransactionDetector:
             # Le premier byte indique le type d'instruction Raydium
             if len(instruction_data) >= 1:
                 instruction_type = instruction_data[0]
-                logger.info(f"🌊 Raydium instruction type: {instruction_type}")
+                logger.debug(f"🌊 Raydium instruction type: {instruction_type}")
                 
                 # Types courants:
                 # 9 = swap_base_in
@@ -591,7 +591,7 @@ class WhaleTransactionDetector:
                                 )
                                 
                                 if token_changes:
-                                    logger.info(f"🌊 Token changes Raydium: {len(token_changes)}")
+                                    logger.debug(f"🌊 Token changes Raydium: {len(token_changes)}")
                                     
                                     # Prendre le plus gros changement
                                     largest_change = max(token_changes, key=lambda x: abs(x['amount_change']))
@@ -600,7 +600,7 @@ class WhaleTransactionDetector:
                                     price = await self.get_token_price_estimate(largest_change['mint'])
                                     amount_usd = abs(largest_change['amount_change']) * price
                                     
-                                    logger.info(f"🌊 Raydium change: {largest_change['amount_change']} tokens, ${amount_usd}")
+                                    logger.debug(f"🌊 Raydium change: {largest_change['amount_change']} tokens, ${amount_usd}")
                                     
                                     return {
                                         'wallet_address': user_wallet,
@@ -634,7 +634,7 @@ class WhaleTransactionDetector:
     async def parse_pump_fun_instruction(self, accounts: List[str], instruction, signature: str) -> Optional[Dict]:
         """Parser une instruction Pump.fun pour extraire les données de trade"""
         try:
-            logger.info(f"🚀 Pump.fun: {len(accounts)} comptes disponibles")
+            logger.debug(f"🚀 Pump.fun: {len(accounts)} comptes disponibles")
             
             if len(accounts) < 1:
                 logger.warning(f"❌ Pas assez de comptes Pump.fun: {len(accounts)}")
@@ -645,7 +645,7 @@ class WhaleTransactionDetector:
             # accounts[1] = bonding curve
             # accounts[2] = associated token account
             user_wallet = accounts[0]
-            logger.info(f"🚀 User wallet: {user_wallet[:8]}...")
+            logger.debug(f"🚀 User wallet: {user_wallet[:8]}...")
             
             try:
                 if hasattr(instruction, 'data') and instruction.data:
@@ -658,7 +658,7 @@ class WhaleTransactionDetector:
                 else:
                     instruction_data = b''
                     
-                logger.info(f"🚀 Instruction data length: {len(instruction_data)}")
+                logger.indebugfo(f"🚀 Instruction data length: {len(instruction_data)}")
                 
             except Exception as data_error:
                 logger.debug(f"⚠️ Erreur lecture instruction data Pump: {data_error}")
@@ -666,7 +666,7 @@ class WhaleTransactionDetector:
             
             if len(instruction_data) >= 1:
                 instruction_type = instruction_data[0]
-                logger.info(f"🚀 Pump.fun instruction type: {instruction_type}")
+                logger.debug(f"🚀 Pump.fun instruction type: {instruction_type}")
                 
                 # Types Pump.fun courants:
                 # 102 = buy
@@ -688,7 +688,7 @@ class WhaleTransactionDetector:
                             if hasattr(meta, 'log_messages'):
                                 pump_data = self.parse_pump_fun_logs(meta.log_messages)
                                 if pump_data:
-                                    logger.info(f"🚀 Pump.fun data des logs: {pump_data}")
+                                    logger.debug(f"🚀 Pump.fun data des logs: {pump_data}")
                                     
                                     return {
                                         'wallet_address': user_wallet,
@@ -709,7 +709,7 @@ class WhaleTransactionDetector:
                                 )
                                 
                                 if token_changes:
-                                    logger.info(f"🚀 Pump.fun token changes: {len(token_changes)}")
+                                    logger.debug(f"🚀 Pump.fun token changes: {len(token_changes)}")
                                     
                                     largest_change = max(token_changes, key=lambda x: abs(x['amount_change']))
                                     
@@ -717,7 +717,7 @@ class WhaleTransactionDetector:
                                     price = await self.get_token_price_estimate(largest_change['mint'])
                                     amount_usd = abs(largest_change['amount_change']) * price
                                     
-                                    logger.info(f"🚀 Pump.fun change: {largest_change['amount_change']} tokens, ${amount_usd}")
+                                    logger.debug(f"🚀 Pump.fun change: {largest_change['amount_change']} tokens, ${amount_usd}")
                                     
                                     return {
                                         'wallet_address': user_wallet,
@@ -789,7 +789,7 @@ class WhaleTransactionDetector:
                         'amount_change': change
                     })
             
-            logger.info(f"📊 Analysé {len(changes)} changements de balance significatifs")
+            logger.debug(f"📊 Analysé {len(changes)} changements de balance significatifs")
             
         except Exception as e:
             logger.error(f"❌ Erreur analyse token balances: {e}")
@@ -827,7 +827,7 @@ class WhaleTransactionDetector:
                         # Déterminer le type de transaction
                         tx_type = 'buy' if 'buy' in log_lower else 'sell'
                         
-                        logger.info(f"🚀 Pump.fun log parsed: {tx_type} ${usd_amount}")
+                        logger.debug(f"🚀 Pump.fun log parsed: {tx_type} ${usd_amount}")
                         
                         return {
                             'transaction_type': tx_type,
@@ -911,14 +911,14 @@ class WhaleTransactionDetector:
         await self.save_whale_transaction(whale_tx)
         
         if whale_tx.is_in_database:
-            logger.info(f"📈 Whale activity on tracked token: {whale_tx.token_address}")
+            logger.debug(f"📈 Whale activity on tracked token: {whale_tx.token_address}")
         else:
             logger.info(f"📊 New whale activity: {whale_tx.token_address}")
             
             # Si transaction critique, considérer l'ajout du token
             if whale_tx.amount_usd >= CRITICAL_THRESHOLD_USD:
                 await self.queue_token_for_discovery(whale_tx.token_address)
-                logger.info(f"🎯 Queued critical token for discovery: {whale_tx.token_address}")
+                logger.debug(f"🎯 Queued critical token for discovery: {whale_tx.token_address}")
     
     async def queue_token_for_discovery(self, token_address: str):
         """Ajouter un token à la queue de découverte automatique"""
@@ -926,7 +926,7 @@ class WhaleTransactionDetector:
             # Intégrer avec le système d'enrichissement existant
             from solana_monitor_c4 import token_enricher
             await token_enricher.queue_for_enrichment(token_address)
-            logger.info(f"🔍 Token queued for enrichment: {token_address}")
+            logger.debug(f"🔍 Token queued for enrichment: {token_address}")
         except Exception as e:
             logger.error(f"Error queuing token for discovery: {e}")
 
@@ -934,8 +934,9 @@ class WhaleTransactionDetector:
 class WhaleActivityAPI:
     """API pour récupérer les données d'activité whale"""
     
-    def __init__(self, database_path: str = "tokens.db"):
+    def __init__(self, database_path: str = "tokens.db", whale_threshold: int = 10000):
         self.database_path = database_path
+        self.whale_threshold = whale_threshold  # Seuil configurable
     
     def get_recent_whale_activity(self, hours: int = 1, limit: int = 50) -> List[Dict]:
         """Récupérer l'activité whale récente"""

@@ -23,7 +23,7 @@ from system_optimization import (
 )
 
 # Configuration du logging optimisé
-def setup_optimized_logging(log_level: str):
+def setup_optimized_logging(log_level: str, whale_log_level: str = 'WARNING', disable_whale_logs: bool = False):
     """Configuration logging optimisée pour haute performance"""
     
     # Format de log plus compact pour réduire l'overhead
@@ -54,11 +54,34 @@ def setup_optimized_logging(log_level: str):
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
     
+    if disable_whale_logs:
+        logging.getLogger('whale_detector').setLevel(logging.CRITICAL)
+        logging.info("🐋 Whale detector logs disabled")
+    else:
+        logging.getLogger('whale_detector').setLevel(getattr(logging, whale_log_level))
+        logging.info(f"🐋 Whale detector log level: {whale_log_level}")
+
+    logging.getLogger('solana_monitoring').addFilter(ParsingErrorFilter())
     # Réduire les logs des libs externes
     for lib in ['httpx', 'httpcore', 'aiohttp', 'websockets', 'urllib3']:
         logging.getLogger(lib).setLevel(logging.WARNING)
     
     logging.info("✅ Optimized logging configured")
+
+class ParsingErrorFilter(logging.Filter):
+    """Filtrer les erreurs de parsing fréquentes mais normales"""
+    def filter(self, record):
+        message = record.getMessage()
+        # Filtrer les erreurs de parsing communes
+        if any(phrase in message for phrase in [
+            "Error parsing signature",
+            "Error parsing transaction", 
+            "Error parsing Raydium",
+            "No valid transaction data",
+            "No transaction data for signature"
+        ]):
+            return False  # Ne pas logger ces erreurs
+        return True
 
 class OptimizedSolanaScanner:
     """Scanner Solana optimisé pour débit maximal"""
@@ -340,13 +363,21 @@ class OptimizedSolanaScanner:
                 await asyncio.sleep(60)  # Vérifier chaque minute
                 
                 # Statistiques de la queue d'enrichissement
-                queue_size = token_enricher.enrichment_queue.qsize()
-                
-                if queue_size > 50:
-                    logging.warning(f"⚠️  High enrichment queue: {queue_size} tokens")
-                elif queue_size > 20:
-                    logging.info(f"📊 Enrichment queue: {queue_size} tokens")
-                
+                try:
+                    from solana_monitor_c4 import token_enricher
+                    queue_size = token_enricher.enrichment_queue.qsize()
+                    
+                    if queue_size > 50:
+                        logging.warning(f"⚠️  High enrichment queue: {queue_size} tokens")
+                    elif queue_size > 20:
+                        logging.info(f"📊 Enrichment queue: {queue_size} tokens")
+                    else:
+                        logging.debug(f"📊 Enrichment queue: {queue_size} tokens")
+                        
+                except ImportError as e:
+                    logging.debug(f"Token enricher not available for monitoring: {e}")
+                except AttributeError as e:
+                    logging.debug(f"Token enricher queue not accessible: {e}")
             except Exception as e:
                 logging.error(f"Error in enrichment monitoring: {e}")
     
@@ -383,19 +414,25 @@ class OptimizedSolanaScanner:
             try:
                 await asyncio.sleep(300)  # Vérifier toutes les 5 minutes
                 
-                from optimized_enricher_integration import token_enricher
-                queue_size = token_enricher.enrichment_queue.qsize()
-                
-                # Auto-scaling simple basé sur la taille de la queue
-                if queue_size > 75:
-                    # Queue très pleine - augmenter le batch size temporairement
-                    token_enricher.batch_size = min(20, token_enricher.batch_size + 2)
-                    logging.info(f"📈 Auto-scaling UP: batch_size -> {token_enricher.batch_size}")
+                try:
+                    from solana_monitor_c4 import token_enricher
+                    queue_size = token_enricher.enrichment_queue.qsize()
                     
-                elif queue_size < 10 and token_enricher.batch_size > 10:
-                    # Queue vide - réduire le batch size
-                    token_enricher.batch_size = max(10, token_enricher.batch_size - 1)
-                    logging.info(f"📉 Auto-scaling DOWN: batch_size -> {token_enricher.batch_size}")
+                    # Auto-scaling simple basé sur la taille de la queue
+                    if queue_size > 75:
+                        # Queue très pleine - augmenter le batch size temporairement
+                        token_enricher.batch_size = min(20, token_enricher.batch_size + 2)
+                        logging.info(f"📈 Auto-scaling UP: batch_size -> {token_enricher.batch_size}")
+                        
+                    elif queue_size < 10 and token_enricher.batch_size > 10:
+                        # Queue vide - réduire le batch size
+                        token_enricher.batch_size = max(10, token_enricher.batch_size - 1)
+                        logging.info(f"📉 Auto-scaling DOWN: batch_size -> {token_enricher.batch_size}")
+                        
+                except ImportError as e:
+                    logging.debug(f"Token enricher not available for auto-scaling: {e}")
+                except AttributeError as e:
+                    logging.debug(f"Token enricher attributes not accessible: {e}")
                 
             except Exception as e:
                 logging.error(f"Error in auto-scaling: {e}")
@@ -463,6 +500,15 @@ def main():
     parser.add_argument("--monitoring-interval", type=int, default=120,
                        help="Performance monitoring interval in seconds (default: 120)")
     
+    parser.add_argument("--whale-log-level", 
+                   choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                   default='WARNING',
+                   help="Whale detector log level (default: WARNING)")
+    parser.add_argument("--disable-whale-logs", action="store_true",
+                    help="Disable whale detection verbose logging")
+    parser.add_argument("--whale-threshold", type=int, default=10000,
+                    help="Whale detection threshold in USD (default: 10000)")
+
     # Options avancées
     parser.add_argument("--enable-performance-profiling", action="store_true",
                        help="Enable detailed performance profiling")
@@ -480,7 +526,7 @@ def main():
     args = parser.parse_args()
     
     # Configuration du logging optimisé
-    setup_optimized_logging(args.log_level)
+    setup_optimized_logging(args.log_level, args.whale_log_level, args.disable_whale_logs)
     
     # Information de démarrage
     logging.info("🚀 SOLANA TOKEN SCANNER - HIGH PERFORMANCE MODE")
