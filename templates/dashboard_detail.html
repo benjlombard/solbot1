@@ -59,7 +59,22 @@
             <span>🔄</span>
             <span id="refreshStatus">Auto-refresh: 30s</span>
         </div>
-    </div>
+        <div class="whale-auto-refresh">
+          <label>
+            <input type="checkbox" id="whaleAutoRefresh" checked onchange="toggleWhaleAutoRefresh()">
+            Auto-refresh Whales
+          </label>
+        </div>
+        <div class="whale-period-control">
+          <label>🐋 Période Whale:</label>
+          <select id="whalePeriodSelector" onchange="changeWhalePeriod()">
+            <option value="1">1 heure</option>
+            <option value="6">6 heures</option>
+            <option value="24" selected>24 heures</option>
+            <option value="168">7 jours</option>
+          </select>
+        </div>
+      </div>
   </div>
 
   <!-- Onglets -->
@@ -68,6 +83,7 @@
       <button class="tab active" onclick="switchTab('base', this)">📊 Données de Base</button>
       <button class="tab" onclick="switchTab('dexscreener', this)">📈 DexScreener</button>
       <button class="tab" onclick="switchTab('analysis', this)">🔬 Analyse</button>
+      <button class="tab" onclick="switchTab('whale', this)">🐋 Whale Activity</button>
     </div>
   </div>
 
@@ -163,6 +179,7 @@
       </div>
     </div>
 
+    
     <!-- Tableau données de base -->
     <table id="baseTable">
       <thead>
@@ -192,29 +209,39 @@
       <div class="filter-group">
         <label>Symbol:</label><input type="text" id="dexFilterSymbol" placeholder="Symbol">
         <label>🛡️ Rug Score Min:</label>
-          <input type="number" id="dexFilterRugScoreMin" placeholder="70 (risky tokens)" min="0" max="100" step="1" style="width: 80px;" title="Score minimum - plus haut = plus risqué">
+        <input type="number" id="dexFilterRugScoreMin" placeholder="70 (risky tokens)" min="0" max="100" step="1" style="width: 80px;" title="Score minimum - plus haut = plus risqué">
         <label>🛡️ Rug Score Max:</label>
-          <input type="number" id="dexFilterRugScoreMax" placeholder="30 (good tokens)" min="0" max="100" step="1" style="width: 80px;" title="Score maximum - plus bas = mieux">
-        <label>📊 Status:</label> <select id="dexFilterStatus" class="status-filter"> <option value="">Tous les status</option> <option value="active">Active</option> <option value="inactive">Inactive</option> <option value="no_dex_data">No Dex Data</option> <option value="archived">Archived</option> <option value="blacklisted">Blacklisted</option> </select>
+        <input type="number" id="dexFilterRugScoreMax" placeholder="30 (good tokens)" min="0" max="100" step="1" style="width: 80px;" title="Score maximum - plus bas = mieux">
+        <label>📊 Status:</label>
+        <select id="dexFilterStatus" class="status-filter">
+          <option value="">Tous les status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="no_dex_data">No Dex Data</option>
+          <option value="archived">Archived</option>
+          <option value="blacklisted">Blacklisted</option>
+        </select>
         <label>Prix DexScreener Min ($):</label><input type="number" id="dexFilterPriceMin" placeholder="Min" step="0.000001">
         <label>Prix DexScreener Max ($):</label><input type="number" id="dexFilterPriceMax" placeholder="Max" step="0.000001">
         <label>Market Cap Min ($):</label><input type="number" id="dexFilterMarketCapMin" placeholder="Min">
         <label>Market Cap Max ($):</label><input type="number" id="dexFilterMarketCapMax" placeholder="Max">
         <label>Δ Prix 1h Min (%):</label><input type="number" id="dexFilterPriceChange1hMin" placeholder="5" step="0.1" style="width: 80px;" title="Variation prix 1h minimum (ex: 5 = +5% min)">
-  <label>Δ Prix 6h Min (%):</label><input type="number" id="dexFilterPriceChange6hMin" placeholder="10" step="0.1" style="width: 80px;" title="Variation prix 6h minimum">
-  <label>Δ Prix 24h Min (%):</label><input type="number" id="dexFilterPriceChange24hMin" placeholder="20" step="0.1" style="width: 80px;" title="Variation prix 24h minimum">
+        <label>Δ Prix 6h Min (%):</label><input type="number" id="dexFilterPriceChange6hMin" placeholder="10" step="0.1" style="width: 80px;" title="Variation prix 6h minimum">
+        <label>Δ Prix 24h Min (%):</label><input type="number" id="dexFilterPriceChange24hMin" placeholder="20" step="0.1" style="width: 80px;" title="Variation prix 24h minimum">
       </div>
+      
       <div class="filter-group">
         <label>Volume 1h Min:</label><input type="number" id="dexFilterVolume1hMin" placeholder="Min">
         <label>Volume 6h Min:</label><input type="number" id="dexFilterVolume6hMin" placeholder="Min">
         <label>Volume 24h Min:</label><input type="number" id="dexFilterVolume24hMin" placeholder="Min">
         <label>Transactions 24h Min:</label><input type="number" id="dexFilterTxns24hMin" placeholder="Min">
       </div>
+      
       <div class="filter-group">
         <label>Buys 24h Min:</label><input type="number" id="dexFilterBuys24hMin" placeholder="Min">
         <label>Sells 24h Max:</label><input type="number" id="dexFilterSells24hMax" placeholder="Max">
-         <label>Ratio Buys/Sells 1h Min:</label><input type="number" id="dexFilterBuySellRatio1h" placeholder="1.0" step="0.1" style="width: 80px;" title="Ex: 1.5 = 50% plus d'achats que de ventes">
-  <label>Ratio Buys/Sells 24h Min:</label><input type="number" id="dexFilterBuySellRatio24h" placeholder="1.0" step="0.1" style="width: 80px;" title="Ex: 2.0 = 2x plus d'achats que de ventes">
+        <label>Ratio Buys/Sells 1h Min:</label><input type="number" id="dexFilterBuySellRatio1h" placeholder="1.0" step="0.1" style="width: 80px;" title="Ex: 1.5 = 50% plus d'achats que de ventes">
+        <label>Ratio Buys/Sells 24h Min:</label><input type="number" id="dexFilterBuySellRatio24h" placeholder="1.0" step="0.1" style="width: 80px;" title="Ex: 2.0 = 2x plus d'achats que de ventes">
         <label>Liquidity Quote Min:</label><input type="number" id="dexFilterLiquidityQuoteMin" placeholder="Min">
         <label>Avec données DexScreener:</label>
         <select id="dexFilterHasData">
@@ -223,6 +250,7 @@
           <option value="false">Non</option>
         </select>
       </div>
+
       <div class="filter-group">
         <label>Dernière MAJ DexScreener:</label>
         <div class="preset-buttons">
@@ -234,8 +262,9 @@
           <button class="preset-btn" onclick="clearDexTimeFilter(this)">Tout</button>
         </div>
       </div>
-      <div class="filter-group"></div>
-      <!-- Filtre âge du token -->
+      
+      <div class="filter-group">
+        <!-- Filtre âge du token -->
         <label>🕐 Âge du Token:</label>
         <div class="preset-buttons age-presets">
           <button class="preset-btn" onclick="setAgeFilter(0, 1, 'hours', this)">Très récent (0-1h)</button>
@@ -246,9 +275,19 @@
           <button class="preset-btn" onclick="setAgeFilter(168, null, 'hours', this)">Mature (>7j)</button>
           <button class="preset-btn" onclick="clearAgeFilter(this)">Tous âges</button>
         </div>
+      </div>
+      
+      <div class="filter-group">
+        <label>🔥 Filtres Whale Rapides:</label>
+        <div class="preset-buttons whale-presets">
+          <button class="preset-btn whale-preset-btn" onclick="setWhaleActivityFilter('has_whale', this)">Avec Whales</button>
+          <button class="preset-btn whale-preset-btn" onclick="setWhaleActivityFilter('critical_whale', this)">Whales Critiques</button>
+          <button class="preset-btn whale-preset-btn" onclick="setWhaleActivityFilter('recent_whale', this)">Récentes 1h</button>
+          <button class="preset-btn whale-preset-btn" onclick="clearWhaleActivityFilter(this)">Tous tokens</button>
         </div>
-    </div>
-
+      </div>
+    </div> <!-- ✅ FERMETURE DE filter-panel -->
+    
     <!-- Tableau DexScreener -->
     <table id="dexscreenerTable">
       <thead>
@@ -275,6 +314,7 @@
           <th>Buys 24h</th>
           <th>Sells 24h</th>
           <th>Progress</th>
+          <th>🔥 Activité Whale</th>
           <th>URL DexScreener</th>
           <th>Créé le</th>
           <th>MAJ DS</th>
@@ -304,6 +344,54 @@
       </div>
     </div>
   </div>
+
+
+
+  <!-- Nouvel onglet Whale Activity -->
+<div id="whale-content" class="tab-content">
+  <div class="whale-container">
+    <!-- Résumé de l'activité whale -->
+    <div class="whale-summary-section">
+      <h3>🚨 Activité Whale en Temps Réel</h3>
+      <div class="whale-stats-grid">
+        <div class="whale-stat-card">
+          <div class="whale-stat-label">Transactions 1h</div>
+          <div class="whale-stat-value" id="whaleTransactions1h">-</div>
+        </div>
+        <div class="whale-stat-card">
+          <div class="whale-stat-label">Volume Total 1h</div>
+          <div class="whale-stat-value" id="whaleVolume1h">-</div>
+        </div>
+        <div class="whale-stat-card">
+          <div class="whale-stat-label">Tokens Uniques</div>
+          <div class="whale-stat-value" id="whaleUniqueTokens">-</div>
+        </div>
+        <div class="whale-stat-card">
+          <div class="whale-stat-label">Wallets Uniques</div>
+          <div class="whale-stat-value" id="whaleUniqueWallets">-</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feed d'activité whale -->
+    <div class="whale-feed-section">
+      <div class="whale-feed-header">
+        <h4>🔥 Feed Activité Whale</h4>
+        <div class="whale-feed-controls">
+          <select id="whaleFeedPeriod" onchange="updateWhaleFeed()">
+            <option value="1">Dernière heure</option>
+            <option value="6">6 dernières heures</option>
+            <option value="24">24 dernières heures</option>
+          </select>
+          <button onclick="refreshWhaleFeed()" class="refresh-whale-btn">🔄</button>
+        </div>
+      </div>
+      <div class="whale-feed-content" id="whaleFeedContent">
+        <div class="loading">Chargement de l'activité whale...</div>
+      </div>
+    </div>
+  </div>
+</div>
 
   <!-- Pagination -->
   <div class="pagination">

@@ -12,6 +12,8 @@ from typing import Dict, List
 import json
 from flask import make_response
 import random
+# Ajouter cette ligne avec les autres imports
+from whale_detector_integration import whale_api
 
 app = Flask(__name__)
 CORS(app)
@@ -107,8 +109,84 @@ class TokenAPI:
         finally:
             conn.close()
 
+@app.route('/api/whale-activity')
+def get_whale_activity():
+    """Endpoint pour récupérer l'activité whale récente"""
+    hours = request.args.get('hours', 1, type=int)
+    limit = request.args.get('limit', 50, type=int)
+    
+    try:
+        activity = whale_api.get_recent_whale_activity(hours, limit)
+        return jsonify({
+            'whale_transactions': activity,
+            'period_hours': hours,
+            'total_found': len(activity)
+        })
+    except Exception as e:
+        logger.error(f"Error in whale activity API: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
-# Ajouter ces routes à votre fichier flask_api.py existant
+@app.route('/api/whale-activity/<token_address>')
+def get_token_whale_activity(token_address):
+    """Endpoint pour l'activité whale d'un token spécifique"""
+    hours = request.args.get('hours', 24, type=int)
+    
+    try:
+        activity = whale_api.get_whale_activity_for_token(token_address, hours)
+        return jsonify({
+            'token_address': token_address,
+            'whale_transactions': activity,
+            'period_hours': hours,
+            'total_transactions': len(activity)
+        })
+    except Exception as e:
+        logger.error(f"Error in token whale activity API: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/whale-summary')
+def get_whale_summary():
+    """Endpoint pour le résumé de l'activité whale"""
+    try:
+        summary = whale_api.get_whale_activity_summary()
+        return jsonify(summary)
+    except Exception as e:
+        logger.error(f"Error in whale summary API: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/whale-feed')
+def get_whale_feed():
+    """Endpoint pour le feed temps réel des whales"""
+    hours = request.args.get('hours', 1, type=int)
+    limit = request.args.get('limit', 20, type=int)
+    
+    try:
+        activity = whale_api.get_recent_whale_activity(hours, limit)
+        
+        # Formater pour le feed
+        feed_items = []
+        for tx in activity:
+            feed_items.append({
+                'timestamp': tx.get('timestamp'),
+                'timestamp_formatted': tx.get('timestamp_formatted'),
+                'type': tx.get('transaction_type', '').upper(),
+                'amount_usd': tx.get('amount_usd', 0),
+                'amount_formatted': f"${tx.get('amount_usd', 0):,.0f}",
+                'token_address': tx.get('token_address'),
+                'token_short': tx.get('token_address', '')[:8] + '...' if tx.get('token_address') else '',
+                'wallet_label': tx.get('wallet_label', 'Unknown'),
+                'is_critical': tx.get('amount_usd', 0) >= 50000,
+                'is_in_database': tx.get('is_in_database', False),
+                'dex_id': tx.get('dex_id', 'unknown')
+            })
+        
+        return jsonify({
+            'feed_items': feed_items,
+            'period_hours': hours,
+            'total_items': len(feed_items)
+        })
+    except Exception as e:
+        logger.error(f"Error in whale feed API: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/dashboard/history')
 def dashboard_history():
@@ -427,13 +505,13 @@ def get_token_trends(address):
 # Mise à jour de l'endpoint tokens-detail pour inclure DexScreener
 @app.route('/api/tokens-detail')
 def get_tokens_detail():
-    """Endpoint pour récupérer tous les tokens avec détails DexScreener"""
+    """Endpoint pour récupérer tous les tokens avec détails DexScreener ET whale"""
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     try:
-        # ✅ REQUÊTE MISE À JOUR avec toutes les colonnes DexScreener
+        # ✅ REQUÊTE CORRIGÉE avec whale data
         cursor.execute('''
             SELECT address, symbol, name, price_usdc, invest_score, liquidity_usd,
                    volume_24h, holders, age_hours, rug_score, is_tradeable,
@@ -458,7 +536,45 @@ def get_tokens_detail():
                    dexscreener_sells_1h,
                    dexscreener_buys_24h,
                    dexscreener_sells_24h,
-                   COALESCE(updated_at, first_discovered_at) as last_update
+                   COALESCE(updated_at, first_discovered_at) as last_update,
+                   
+                   -- === COLONNES WHALE CORRIGÉES ===
+                   -- Activité whale 1h
+                   (SELECT COUNT(*) FROM whale_transactions_live w 
+                    WHERE w.token_address = tokens.address 
+                    AND w.timestamp > datetime('now', '-1 hour', 'localtime')) as whale_activity_1h,
+                   
+                   -- Montant max whale 1h  
+                   (SELECT MAX(w.amount_usd) FROM whale_transactions_live w 
+                    WHERE w.token_address = tokens.address 
+                    AND w.timestamp > datetime('now', '-1 hour', 'localtime')) as whale_max_amount_1h,
+                   
+                   -- Type de dernière transaction whale 1h
+                   (SELECT w.transaction_type FROM whale_transactions_live w 
+                    WHERE w.token_address = tokens.address 
+                    AND w.timestamp > datetime('now', '-1 hour', 'localtime')
+                    ORDER BY w.timestamp DESC LIMIT 1) as whale_last_type_1h,
+                   
+                   -- Activité whale 6h
+                   (SELECT COUNT(*) FROM whale_transactions_live w 
+                    WHERE w.token_address = tokens.address 
+                    AND w.timestamp > datetime('now', '-6 hours', 'localtime')) as whale_activity_6h,
+                   
+                   -- Montant max whale 6h
+                   (SELECT MAX(w.amount_usd) FROM whale_transactions_live w 
+                    WHERE w.token_address = tokens.address 
+                    AND w.timestamp > datetime('now', '-6 hours', 'localtime')) as whale_max_amount_6h,
+                   
+                   -- Activité whale 24h
+                   (SELECT COUNT(*) FROM whale_transactions_live w 
+                    WHERE w.token_address = tokens.address 
+                    AND w.timestamp > datetime('now', '-24 hours', 'localtime')) as whale_activity_24h,
+                   
+                   -- Montant max whale 24h
+                   (SELECT MAX(w.amount_usd) FROM whale_transactions_live w 
+                    WHERE w.token_address = tokens.address 
+                    AND w.timestamp > datetime('now', '-24 hours', 'localtime')) as whale_max_amount_24h
+
             FROM tokens
             ORDER BY last_update DESC, invest_score DESC
         ''')
@@ -474,12 +590,11 @@ def get_tokens_detail():
                 row_dict['dexscreener_url'] = None
             
             # ✅ AJOUT: Calculer la date de dernière mise à jour DexScreener
-            # (Pour l'instant, on utilise updated_at, mais vous pourrez ajouter une colonne spécifique plus tard)
             row_dict['last_dexscreener_update'] = row_dict.get('updated_at')
             
             rows.append(row_dict)
         
-        logger.info(f"📊 Returned {len(rows)} tokens with DexScreener data")
+        logger.info(f"📊 Returned {len(rows)} tokens with DexScreener and whale data")
         return jsonify(rows)
         
     except Exception as e:
@@ -488,6 +603,128 @@ def get_tokens_detail():
     finally:
         conn.close()
 
+
+@app.route('/api/debug-whale-data')
+def debug_whale_data():
+    """Endpoint de debug pour vérifier les données whale"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        # Vérifier les données whale existantes
+        cursor.execute('''
+            SELECT token_address, transaction_type, amount_usd, timestamp
+            FROM whale_transactions_live 
+            ORDER BY timestamp DESC LIMIT 10
+        ''')
+        whale_transactions = [dict(row) for row in cursor.fetchall()]
+        
+        # Vérifier combien de tokens matchent
+        cursor.execute('''
+            SELECT DISTINCT w.token_address, t.symbol, t.address
+            FROM whale_transactions_live w
+            LEFT JOIN tokens t ON w.token_address = t.address
+            WHERE w.timestamp > datetime('now', '-24 hours', 'localtime')
+        ''')
+        matching_tokens = [dict(row) for row in cursor.fetchall()]
+        
+        # Compter les tokens avec whale activity
+        cursor.execute('''
+            SELECT COUNT(DISTINCT t.address) as token_count
+            FROM tokens t
+            WHERE EXISTS (
+                SELECT 1 FROM whale_transactions_live w 
+                WHERE w.token_address = t.address 
+                AND w.timestamp > datetime('now', '-24 hours', 'localtime')
+            )
+        ''')
+        tokens_with_whale = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return jsonify({
+            'whale_transactions_sample': whale_transactions,
+            'matching_tokens': matching_tokens,
+            'tokens_with_whale_activity': tokens_with_whale,
+            'total_whale_transactions': len(whale_transactions)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in debug whale data: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/api/test-whale-data')
+def create_test_whale_data():
+    """Créer des données de test whale pour des tokens existants"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Récupérer quelques tokens existants
+        cursor.execute('''
+            SELECT address, symbol FROM tokens 
+            WHERE symbol IS NOT NULL AND symbol != 'UNKNOWN'
+            ORDER BY updated_at DESC LIMIT 5
+        ''')
+        tokens = cursor.fetchall()
+        
+        if not tokens:
+            return jsonify({"error": "No tokens found to create test data"})
+        
+        # Créer des données whale de test
+        test_data = []
+        for i, (address, symbol) in enumerate(tokens):
+            amounts = [15000, 25000, 50000, 75000, 100000]
+            types = ['buy', 'sell']
+            
+            # Insérer 2-3 transactions par token
+            for j in range(2):
+                amount = amounts[i % len(amounts)]
+                tx_type = types[j % len(types)]
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO whale_transactions_live 
+                    (signature, token_address, wallet_address, transaction_type, 
+                     amount_usd, amount_sol, timestamp, gas_fee, priority_fee,
+                     wallet_label, is_first_time_interaction, dex_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now', '-30 minutes', 'localtime'), 
+                            0.001, 0, ?, 0, 'jupiter', datetime('now', 'localtime'))
+                ''', (
+                    f'test_sig_{address}_{j}',
+                    address,
+                    f'test_wallet_{i}_{j}',
+                    tx_type,
+                    amount,
+                    amount / 150,  # Prix SOL approximatif
+                    f'Test Whale {symbol} #{j+1}'
+                ))
+                
+                test_data.append({
+                    'token_address': address,
+                    'symbol': symbol,
+                    'amount_usd': amount,
+                    'type': tx_type
+                })
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'message': 'Test whale data created successfully',
+            'test_data': test_data,
+            'tokens_updated': len(tokens)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error creating test whale data: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        conn.close()
+        
 @app.route('/api/token-has-history/<address>')
 def check_token_history(address):
     """Vérifier si un token a des données historiques"""
@@ -983,15 +1220,32 @@ def get_dashboard_data():
             WHERE dexscreener_price_usd > 0
         """)
         dexscreener_tokens = cursor.fetchone()[0]
+
+        cursor.execute("""
+            SELECT COUNT(*) FROM whale_transactions_live 
+            WHERE timestamp > datetime('now', '-1 hour', 'localtime')
+        """)
+        whale_activity_1h = cursor.fetchone()[0]
+
+        cursor.execute("""
+            SELECT SUM(amount_usd) FROM whale_transactions_live 
+            WHERE timestamp > datetime('now', '-24 hours', 'localtime')
+        """)
+        whale_volume_24h = cursor.fetchone()[0] or 0
+
+        
         
         conn.close()
         
+
         corrected_stats = {
             "totalTokens": total_tokens,
             "highScoreTokens": high_score_tokens,
             "newTokens": new_tokens,
             "activeTokens": active_tokens,
-            "dexscreenerTokens": dexscreener_tokens
+            "dexscreenerTokens": dexscreener_tokens,
+            "whaleActivity1h": whale_activity_1h,
+            "whaleVolume24h": whale_volume_24h
         }
         
         dashboard_data = {
@@ -1062,7 +1316,11 @@ def index():
             "/api/health",
             "/dashboard",
             "/dashboard/detail",
-            "/dashboard/history"
+            "/dashboard/history",
+            "/api/whale-activity",
+            "/api/whale-activity/<token_address>", 
+            "/api/whale-summary",
+            "/api/whale-feed"
         ]
     })
 
