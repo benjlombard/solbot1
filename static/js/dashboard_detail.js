@@ -18,6 +18,167 @@ let whaleRefreshInterval = 30000; // 30 secondes
 let currentWhaleFilter = '';
 let currentWhaleAmountMin = null;
 let currentWhalePeriod = null;
+// Variables pour les stratégies
+let currentStrategy = null;
+const strategies = {
+  momentum: {
+    name: "🚀 Momentum",
+    filters: {
+      dexFilterPriceChange1hMin: 10,
+      dexFilterPriceChange6hMin: 20,
+      dexFilterVolume24hMin: 50000,
+      dexFilterTxns24hMin: 100,
+      dexFilterBuySellRatio24h: 1.5
+    }
+  },
+  early: {
+    name: "💎 Early Gems", 
+    filters: {
+      ageMin: 0,
+      ageMax: 6,
+      dexFilterRugScoreMax: 30,
+      dexFilterLiquidityQuoteMin: 10000,
+      dexFilterMarketCapMax: 100000,
+      dexFilterHasData: 'true'
+    }
+  },
+  whale: {
+    name: "🐋 Whale Magnet",
+    filters: {
+      whaleActivity: 'has_whale',
+      dexFilterVolume1hMin: 5000,
+      dexFilterTxns24hMin: 50,
+      dexFilterLiquidityQuoteMin: 25000
+    }
+  },
+  breakout: {
+    name: "⚡ Breakout",
+    filters: {
+      dexFilterPriceChange24hMin: 50,
+      dexFilterVolume24hMin: 100000,
+      dexFilterBuySellRatio1h: 2.0,
+      dexFilterMarketCapMin: 500000,
+      dexFilterTxns24hMin: 200
+    }
+  },
+  safe: {
+    name: "🛡️ Safe Growth",
+    filters: {
+      dexFilterRugScoreMax: 20,
+      dexFilterPriceChange24hMin: 5,
+      dexFilterPriceChange24hMax: 30, // Nouveau champ à ajouter
+      ageMin: 24,
+      ageMax: 168,
+      dexFilterLiquidityQuoteMin: 50000,
+      dexFilterBuySellRatio24h: 1.2
+    }
+  }
+};
+
+
+
+// === FONCTIONS STRATÉGIES ===
+
+function applyStrategy(strategyName, btn) {
+  // Réinitialiser tous les filtres d'abord
+  resetDexFilters();
+  
+  // Marquer la stratégie comme active
+  currentStrategy = strategyName;
+  
+  // Retirer active de tous les boutons stratégie
+  document.querySelectorAll('.strategy-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  
+  // Appliquer les filtres de la stratégie
+  const strategy = strategies[strategyName];
+  if (strategy && strategy.filters) {
+    applyStrategyFilters(strategy.filters);
+  }
+  
+  console.log(`📊 Stratégie appliquée: ${strategy.name}`);
+  
+  // Appliquer les filtres
+  setTimeout(() => {
+    applyDexFilters();
+  }, 100);
+}
+
+function applyStrategyFilters(filters) {
+  Object.keys(filters).forEach(filterKey => {
+    const value = filters[filterKey];
+    
+    // Gérer les filtres spéciaux (âge, whale)
+    if (filterKey === 'ageMin') {
+      currentAgeMin = value;
+      return;
+    }
+    if (filterKey === 'ageMax') {
+      currentAgeMax = value;
+      return;
+    }
+    if (filterKey === 'whaleActivity') {
+      currentWhaleFilter = value;
+      return;
+    }
+    
+    // Gérer les filtres normaux (éléments HTML)
+    const element = document.getElementById(filterKey);
+    if (element) {
+      element.value = value;
+      element.classList.add('filter-active');
+    }
+  });
+}
+
+function resetDexFilters() {
+  // Réinitialiser tous les champs de filtres DexScreener
+  const dexFilterIds = [
+    'dexFilterSymbol', 'dexFilterStatus', 'dexFilterPriceMin', 'dexFilterPriceMax',
+    'dexFilterMarketCapMin', 'dexFilterMarketCapMax', 'dexFilterVolume1hMin',
+    'dexFilterVolume6hMin', 'dexFilterVolume24hMin', 'dexFilterTxns24hMin',
+    'dexFilterBuys24hMin', 'dexFilterSells24hMax', 'dexFilterLiquidityQuoteMin',
+    'dexFilterHasData', 'dexFilterBuySellRatio1h', 'dexFilterBuySellRatio24h',
+    'dexFilterRugScoreMin', 'dexFilterRugScoreMax', 'dexFilterPriceChange1hMin',
+    'dexFilterPriceChange6hMin', 'dexFilterPriceChange24hMin', 'dexFilterPriceChange24hMax'
+  ];
+  
+  dexFilterIds.forEach(id => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.value = '';
+      element.classList.remove('filter-active');
+    }
+  });
+  
+  // Réinitialiser les variables spéciales
+  currentAgeMin = null;
+  currentAgeMax = null;
+  currentWhaleFilter = '';
+  currentWhaleAmountMin = null;
+  currentWhalePeriod = null;
+  window.dexTimeValue = null;
+  window.dexTimeUnit = null;
+  
+  // Désactiver tous les boutons présets
+  document.querySelectorAll('#dexscreener-content .preset-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  
+  // Réinitialiser la stratégie
+  currentStrategy = null;
+}
+
+function clearStrategy() {
+  // Fonction pour désactiver la stratégie courante
+  currentStrategy = null;
+  document.querySelectorAll('.strategy-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  
+  resetDexFilters();
+  applyDexFilters();
+}
 
 
 // === GESTION DES ONGLETS ===
@@ -638,7 +799,7 @@ function applyDexFilters() {
     priceChange1hMin: document.getElementById('dexFilterPriceChange1hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange1hMin').value) : null,
     priceChange6hMin: document.getElementById('dexFilterPriceChange6hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange6hMin').value) : null,
     priceChange24hMin: document.getElementById('dexFilterPriceChange24hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange24hMin').value) : null,
-    
+    priceChange24hMax: document.getElementById('dexFilterPriceChange24hMax').value ? parseFloat(document.getElementById('dexFilterPriceChange24hMax').value) : null,
     // === UTILISER LES VARIABLES AU LIEU DES ÉLÉMENTS HTML ===
     whaleActivity: currentWhaleFilter.toLowerCase().trim(),
     whaleAmountMin: currentWhaleAmountMin,
@@ -749,6 +910,7 @@ function applyDexFilters() {
       (dexFilters.priceChange1hMin === null || (row.dexscreener_price_change_1h || 0) >= dexFilters.priceChange1hMin) &&
       (dexFilters.priceChange6hMin === null || (row.dexscreener_price_change_6h || 0) >= dexFilters.priceChange6hMin) &&
       (dexFilters.priceChange24hMin === null || (row.dexscreener_price_change_h24 || 0) >= dexFilters.priceChange24hMin) &&
+      (dexFilters.priceChange24hMax === null || (row.dexscreener_price_change_h24 || 0) <= dexFilters.priceChange24hMax) &&
       ageFilterPassed && 
       whaleFilterPassed
     );
@@ -1277,6 +1439,8 @@ function resetFilters() {
   document.getElementById('filterDiscoveredAt').value = '';
   document.getElementById('dexFilterHasData').value = '';
   document.getElementById('dexFilterStatus').value = '';
+  document.querySelectorAll('.strategy-btn').forEach(btn => btn.classList.remove('active'));
+  currentStrategy = null;
   document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
   window.dexTimeValue = null;
   window.dexTimeUnit = null;
@@ -1289,6 +1453,19 @@ function resetFilters() {
   currentPage = 1;
   updateFiltersIndicator();
   renderPage();
+}
+
+function testStrategy(strategyName) {
+  console.log(`🧪 Test de la stratégie: ${strategyName}`);
+  const strategy = strategies[strategyName];
+  console.log('Filtres à appliquer:', strategy.filters);
+  
+  // Test d'application
+  applyStrategy(strategyName, document.querySelector(`.strategy-${strategyName}`));
+  
+  setTimeout(() => {
+    console.log(`Résultats: ${filteredData.length} tokens trouvés`);
+  }, 500);
 }
 
 // Vérifier l'historique de manière asynchrone

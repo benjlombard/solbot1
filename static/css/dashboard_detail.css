@@ -1244,5 +1244,62 @@ th {
 }
 
 
+/* Styles pour les boutons de stratégies */
+.strategy-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto; /* Alignement à droite */
+  flex-wrap: wrap;
+}
+
+.strategy-btn {
+  padding: 0.4rem 0.8rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: bold;
+  transition: all 0.3s ease;
+  min-width: 80px;
+  text-align: center;
+}
+
+.strategy-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.strategy-btn.active {
+  transform: scale(1.08);
+  box-shadow: 0 0 12px rgba(255,255,255,0.4);
+}
+
+/* Couleurs spécifiques par stratégie */
+.strategy-momentum {
+  background: linear-gradient(45deg, #ff6b35, #ff9800);
+  color: white;
+}
+
+.strategy-early {
+  background: linear-gradient(45deg, #4caf50, #8bc34a);
+  color: white;
+}
+
+.strategy-whale {
+  background: linear-gradient(45deg, #9c27b0, #e91e63);
+  color: white;
+}
+
+.strategy-breakout {
+  background: linear-gradient(45deg, #f44336, #ff5722);
+  color: white;
+}
+
+.strategy-safe {
+  background: linear-gradient(45deg, #2196f3, #03a9f4);
+  color: white;
+}
+
+
 
 

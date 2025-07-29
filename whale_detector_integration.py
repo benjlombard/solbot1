@@ -1300,7 +1300,7 @@ async def process_websocket_logs_for_whales(signature: str, logs: List[str]):
     # Traiter par lots plus gros pour réduire la fréquence
     if len(whale_detector.signature_queue) >= 3:  # Au lieu de 5
         await whale_detector.process_signature_batch()
-
+    
 async def start_whale_monitoring():
     """Démarrer le monitoring des transactions whales"""
     logger.info("🐋 Starting Whale Transaction Monitoring System")
