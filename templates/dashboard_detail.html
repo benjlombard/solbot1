@@ -237,7 +237,43 @@
         <label>Volume 24h Min:</label><input type="number" id="dexFilterVolume24hMin" placeholder="Min">
         <label>Transactions 24h Min:</label><input type="number" id="dexFilterTxns24hMin" placeholder="Min">
       </div>
-      
+      <div class="filter-group">
+  <label>👥 Holders Min:</label>
+  <input type="number" id="dexFilterHoldersMin" placeholder="100" min="0" step="1" style="width: 80px;" title="Nombre minimum de holders">
+  
+  <label>👥 Holders Max:</label>
+  <input type="number" id="dexFilterHoldersMax" placeholder="10000" min="0" step="1" style="width: 80px;" title="Nombre maximum de holders">
+  
+  <label>📈 Croissance Holders:</label>
+  <select id="dexFilterHoldersGrowth" style="width: 120px;" title="Tokens avec croissance de holders">
+    <option value="">Tous</option>
+    <option value="growing">En croissance</option>
+    <option value="stable">Stables (±5%)</option>
+    <option value="declining">En déclin</option>
+  </select>
+  
+  <label>🎯 Distribution Holders:</label>
+  <select id="dexFilterHoldersDistribution" style="width: 140px;" title="Qualité de la distribution">
+    <option value="">Toutes</option>
+    <option value="good">Bonne distribution</option>
+    <option value="concentrated">Concentrée</option>
+    <option value="whale_heavy">Dominée par whales</option>
+  </select>
+</div>
+
+<div class="filter-group">
+  <label>🎯 Filtres Holders Rapides:</label>
+  <div class="preset-buttons holders-presets">
+    <button class="preset-btn holders-preset-btn" onclick="setHoldersFilter('microcap', this)">Micro (0-100)</button>
+    <button class="preset-btn holders-preset-btn" onclick="setHoldersFilter('small', this)">Small (100-500)</button>
+    <button class="preset-btn holders-preset-btn" onclick="setHoldersFilter('medium', this)">Medium (500-2K)</button>
+    <button class="preset-btn holders-preset-btn" onclick="setHoldersFilter('large', this)">Large (2K-10K)</button>
+    <button class="preset-btn holders-preset-btn" onclick="setHoldersFilter('mega', this)">Mega (10K+)</button>
+    <button class="preset-btn holders-preset-btn" onclick="clearHoldersFilter(this)">Tous</button>
+  </div>
+</div>
+
+
       <div class="filter-group">
         <label>Buys 24h Min:</label><input type="number" id="dexFilterBuys24hMin" placeholder="Min">
         <label>Sells 24h Max:</label><input type="number" id="dexFilterSells24hMax" placeholder="Max">
@@ -312,6 +348,7 @@
           <th>Status</th>
           <th>Prix DS ($)</th>
           <th>Market Cap ($)</th>
+          <th>👥 Holders</th>
           <th>Liq. Base</th>
           <th>Liq. Quote ($)</th>
           <th>🛡️ Rug Score</th>

@@ -1301,5 +1301,75 @@ th {
 }
 
 
+.holders-presets .preset-btn {
+  background: linear-gradient(45deg, #2196f3, #03a9f4);
+  color: white;
+  border: 1px solid #2196f3;
+}
+
+.holders-presets .preset-btn:hover,
+.holders-presets .preset-btn.active {
+  background: linear-gradient(45deg, #1976d2, #0288d1);
+  transform: scale(1.05);
+  box-shadow: 0 0 8px rgba(33, 150, 243, 0.6);
+}
+
+/* Styles pour les indicateurs de holders */
+.holders-indicator {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  text-align: center;
+  min-width: 50px;
+  display: inline-block;
+}
+
+.holders-micro { 
+  background: linear-gradient(45deg, #f44336, #ff5722); 
+  color: white; 
+}
+
+.holders-small { 
+  background: linear-gradient(45deg, #ff9800, #ffc107); 
+  color: black; 
+}
+
+.holders-medium { 
+  background: linear-gradient(45deg, #4caf50, #8bc34a); 
+  color: white; 
+}
+
+.holders-large { 
+  background: linear-gradient(45deg, #2196f3, #03a9f4); 
+  color: white; 
+}
+
+.holders-mega { 
+  background: linear-gradient(45deg, #9c27b0, #e91e63); 
+  color: white; 
+}
+
+.holders-growth-positive {
+  color: #00ff88;
+  font-weight: bold;
+}
+
+.holders-growth-negative {
+  color: #ff6b6b;
+  font-weight: bold;
+}
+
+.holders-distribution-good {
+  background: rgba(76, 175, 80, 0.2);
+  border-left: 3px solid #4caf50;
+}
+
+.holders-distribution-concentrated {
+  background: rgba(255, 152, 0, 0.2);
+  border-left: 3px solid #ff9800;
+}
+
+
 
 

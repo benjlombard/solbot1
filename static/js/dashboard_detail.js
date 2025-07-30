@@ -28,7 +28,9 @@ const strategies = {
       dexFilterPriceChange6hMin: 20,
       dexFilterVolume24hMin: 50000,
       dexFilterTxns24hMin: 100,
-      dexFilterBuySellRatio24h: 1.5
+      dexFilterBuySellRatio24h: 1.5,
+      dexFilterHoldersMin: 200 // Minimum viable pour momentum
+      
     }
   },
   early: {
@@ -39,7 +41,9 @@ const strategies = {
       dexFilterRugScoreMax: 30,
       dexFilterLiquidityQuoteMin: 10000,
       dexFilterMarketCapMax: 100000,
-      dexFilterHasData: 'true'
+      dexFilterHasData: 'true',
+      dexFilterHoldersMin: 50,  // Très récent, peu de holders
+      dexFilterHoldersMax: 500  // Pas encore mainstream
     }
   },
   whale: {
@@ -48,7 +52,8 @@ const strategies = {
       whaleActivity: 'has_whale',
       dexFilterVolume1hMin: 5000,
       dexFilterTxns24hMin: 50,
-      dexFilterLiquidityQuoteMin: 25000
+      dexFilterLiquidityQuoteMin: 25000,
+      dexFilterHoldersMin: 300
     }
   },
   breakout: {
@@ -70,10 +75,115 @@ const strategies = {
       ageMin: 24,
       ageMax: 168,
       dexFilterLiquidityQuoteMin: 50000,
-      dexFilterBuySellRatio24h: 1.2
+      dexFilterBuySellRatio24h: 1.2,
+      dexFilterHoldersMin: 1000, // Base de holders solide
+      dexFilterHoldersDistribution: 'good' // Bonne distributio
     }
   }
 };
+
+
+let currentHoldersMin = null;
+let currentHoldersMax = null;
+let currentHoldersCategory = '';
+
+
+// ==== FONCTIONS HOLDERS =====
+
+function setHoldersFilter(category, btn) {
+  currentHoldersCategory = category;
+  
+  // Définir les ranges selon la catégorie
+  const ranges = {
+    'microcap': { min: 0, max: 100 },
+    'small': { min: 100, max: 500 },
+    'medium': { min: 500, max: 2000 },
+    'large': { min: 2000, max: 10000 },
+    'mega': { min: 10000, max: null }
+  };
+  
+  const range = ranges[category];
+  if (range) {
+    currentHoldersMin = range.min;
+    currentHoldersMax = range.max;
+    
+    // Mettre à jour les champs (avec vérification d'existence)
+    const minElement = document.getElementById('dexFilterHoldersMin');
+    const maxElement = document.getElementById('dexFilterHoldersMax');
+    
+    if (minElement) minElement.value = range.min || '';
+    if (maxElement) maxElement.value = range.max || '';
+  }
+
+  
+  // Marquer le bouton comme actif
+  document.querySelectorAll('.holders-preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  console.log(`🎯 Filtre holders appliqué: ${category} (${currentHoldersMin}-${currentHoldersMax})`);
+  applyDexFilters();
+}
+
+function clearHoldersFilter(btn) {
+  currentHoldersMin = null;
+  currentHoldersMax = null;
+  currentHoldersCategory = '';
+  
+  const elementsToReset = [
+    'dexFilterHoldersMin', 'dexFilterHoldersMax', 
+    'dexFilterHoldersGrowth', 'dexFilterHoldersDistribution'
+  ];
+  
+  elementsToReset.forEach(id => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.value = '';
+      element.classList.remove('filter-active');
+    }
+  });
+  
+  document.querySelectorAll('.holders-preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  
+  console.log('🧹 Filtres holders réinitialisés');
+  applyDexFilters();
+}
+
+
+// Fonction pour générer l'affichage des holders
+function getHoldersDisplay(holders, holderDistribution) {
+  if (!holders || holders === 0) {
+    return '<span class="holders-indicator holders-micro">0</span>';
+  }
+  
+  let category, categoryClass;
+  if (holders < 100) {
+    category = 'MICRO';
+    categoryClass = 'holders-micro';
+  } else if (holders < 500) {
+    category = 'SMALL';
+    categoryClass = 'holders-small';
+  } else if (holders < 2000) {
+    category = 'MED';
+    categoryClass = 'holders-medium';
+  } else if (holders < 10000) {
+    category = 'LARGE';
+    categoryClass = 'holders-large';
+  } else {
+    category = 'MEGA';
+    categoryClass = 'holders-mega';
+  }
+  
+  const distributionInfo = holderDistribution && holderDistribution !== 'Unknown' ? 
+    `<br><small style="color: #888; font-size: 0.65rem;" title="${holderDistribution}">${holderDistribution.substring(0, 20)}...</small>` : '';
+  
+  return `
+    <div style="text-align: center;">
+      <span class="holders-indicator ${categoryClass}" title="${holders} holders (${category})">${holders.toLocaleString()}</span>
+      ${distributionInfo}
+    </div>
+  `;
+}
+
 
 
 
@@ -122,6 +232,20 @@ function applyStrategyFilters(filters) {
       return;
     }
     
+    // === AJOUT: Gérer les filtres holders ===
+    if (filterKey === 'dexFilterHoldersMin') {
+      currentHoldersMin = value;
+      const element = document.getElementById('dexFilterHoldersMin');
+      if (element) element.value = value;
+      return;
+    }
+    if (filterKey === 'dexFilterHoldersMax') {
+      currentHoldersMax = value;
+      const element = document.getElementById('dexFilterHoldersMax');
+      if (element) element.value = value;
+      return;
+    }
+    
     // Gérer les filtres normaux (éléments HTML)
     const element = document.getElementById(filterKey);
     if (element) {
@@ -131,8 +255,9 @@ function applyStrategyFilters(filters) {
   });
 }
 
+
 function resetDexFilters() {
-  // Réinitialiser tous les champs de filtres DexScreener
+
   const dexFilterIds = [
     'dexFilterSymbol', 'dexFilterStatus', 'dexFilterPriceMin', 'dexFilterPriceMax',
     'dexFilterMarketCapMin', 'dexFilterMarketCapMax', 'dexFilterVolume1hMin',
@@ -140,7 +265,9 @@ function resetDexFilters() {
     'dexFilterBuys24hMin', 'dexFilterSells24hMax', 'dexFilterLiquidityQuoteMin',
     'dexFilterHasData', 'dexFilterBuySellRatio1h', 'dexFilterBuySellRatio24h',
     'dexFilterRugScoreMin', 'dexFilterRugScoreMax', 'dexFilterPriceChange1hMin',
-    'dexFilterPriceChange6hMin', 'dexFilterPriceChange24hMin', 'dexFilterPriceChange24hMax'
+    'dexFilterPriceChange6hMin', 'dexFilterPriceChange24hMin', 'dexFilterPriceChange24hMax',
+    'dexFilterHoldersMin', 'dexFilterHoldersMax', 
+    'dexFilterHoldersGrowth', 'dexFilterHoldersDistribution'
   ];
   
   dexFilterIds.forEach(id => {
@@ -159,9 +286,18 @@ function resetDexFilters() {
   currentWhalePeriod = null;
   window.dexTimeValue = null;
   window.dexTimeUnit = null;
+  currentHoldersMin = null;
+  currentHoldersMax = null;
+  currentHoldersCategory = '';
   
   // Désactiver tous les boutons présets
   document.querySelectorAll('#dexscreener-content .preset-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  document.querySelectorAll('.holders-preset-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  document.querySelectorAll('.whale-preset-btn').forEach(btn => {
     btn.classList.remove('active');
   });
   
@@ -631,16 +767,24 @@ function applyDexFilters_old() {
     priceChange1hMin: document.getElementById('dexFilterPriceChange1hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange1hMin').value) : null,
     priceChange6hMin: document.getElementById('dexFilterPriceChange6hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange6hMin').value) : null,
     priceChange24hMin: document.getElementById('dexFilterPriceChange24hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange24hMin').value) : null,
-    whaleActivity: document.getElementById('dexFilterWhaleActivity').value.toLowerCase().trim(),
-    whaleAmountMin: document.getElementById('dexFilterWhaleAmountMin').value ? parseFloat(document.getElementById('dexFilterWhaleAmountMin').value) : null,
-    whalePeriod: document.getElementById('dexFilterWhalePeriod').value,
+    // === FILTRES WHALE ===
+    whaleActivity: currentWhaleFilter.toLowerCase().trim(),
+    whaleAmountMin: currentWhaleAmountMin,
+    whalePeriod: currentWhalePeriod,
+    // === FILTRES HOLDERS AJOUTÉS ===
+    holdersMin: currentHoldersMin,
+    holdersMax: currentHoldersMax,
+    holdersGrowth: document.getElementById('dexFilterHoldersGrowth') ? document.getElementById('dexFilterHoldersGrowth').value.toLowerCase().trim() : '',
+    holdersDistribution: document.getElementById('dexFilterHoldersDistribution') ? document.getElementById('dexFilterHoldersDistribution').value.toLowerCase().trim() : '',
   };
 
   filteredData = data.filter(row => {
     const hasDexData = (row.dexscreener_price_usd || 0) > 0;
     const lastDexUpdate = row.last_dexscreener_update || row.updated_at;
     const tokenAgeHours = parseFloat(row.age_hours) || 0;
-    
+    const holders = row.holders || 0;
+    const holderDistribution = row.holder_distribution || '';
+
     // Vérification du filtre d'âge des boutons présets
     let ageFilterPassed = true;
     if (currentAgeMin !== null || currentAgeMax !== null) {
@@ -696,8 +840,6 @@ function applyDexFilters_old() {
           whaleText.includes('🟡') || whaleText.includes('⚡');
       }
       
-      console.log(`Token ${row.symbol}: whale_activity_1h=${whaleActivity1h}, max_amount_1h=${whaleMaxAmount1h}, realtime=${hasRealtimeWhaleActivity}, amount=${realtimeWhaleAmount}`);
-      
       switch (dexFilters.whaleActivity) {
         case 'has_whale':
           whaleFilterPassed = whaleActivity1h > 0 || whaleActivity6h > 0 || whaleActivity24h > 0 || hasRealtimeWhaleActivity;
@@ -713,27 +855,48 @@ function applyDexFilters_old() {
           break;
       }
     }
+
+    let holdersFilterPassed = true;
+    if (dexFilters.holdersMin !== null && holders < dexFilters.holdersMin) {
+      holdersFilterPassed = false;
+    }
+    if (dexFilters.holdersMax !== null && holders > dexFilters.holdersMax) {
+      holdersFilterPassed = false;
+    }
     
-    // Filtre par montant minimum
-    if (dexFilters.whaleAmountMin !== null) {
-      const whaleMaxAmount1h = row.whale_max_amount_1h || 0;
-      const whaleMaxAmount6h = row.whale_max_amount_6h || 0;
-      const whaleMaxAmount24h = row.whale_max_amount_24h || 0;
-      
-      // Chercher aussi dans les données temps réel
-      const whaleIndicatorElement = document.getElementById(`whale-activity-${row.address}`);
-      let realtimeWhaleAmount = 0;
-      if (whaleIndicatorElement) {
-        const whaleText = whaleIndicatorElement.textContent || '';
-        const amountMatch = whaleText.match(/\$(\d+(?:\.\d+)?)K/);
-        if (amountMatch) {
-          realtimeWhaleAmount = parseFloat(amountMatch[1]) * 1000;
-        }
+    
+    // Filtre croissance holders (simulation basée sur d'autres métriques)
+    let growthFilterPassed = true;
+    if (dexFilters.holdersGrowth) {
+      switch (dexFilters.holdersGrowth) {
+        case 'growing':
+          growthFilterPassed = (row.volume_24h || 0) > 50000 && (row.invest_score || 0) > 60;
+          break;
+        case 'stable':
+          growthFilterPassed = (row.volume_24h || 0) > 10000 && (row.invest_score || 0) > 40;
+          break;
+        case 'declining':
+          growthFilterPassed = (row.volume_24h || 0) < 10000 || (row.invest_score || 0) < 40;
+          break;
       }
-      
-      const maxWhaleAmount = Math.max(whaleMaxAmount1h, whaleMaxAmount6h, whaleMaxAmount24h, realtimeWhaleAmount);
-      if (maxWhaleAmount < dexFilters.whaleAmountMin) {
-        whaleFilterPassed = false;
+    }
+    
+    // Filtre distribution holders
+    let distributionFilterPassed = true;
+    if (dexFilters.holdersDistribution && holderDistribution) {
+      switch (dexFilters.holdersDistribution) {
+        case 'good':
+          distributionFilterPassed = holderDistribution.includes('Top 10 holders') && 
+            parseFloat(holderDistribution.match(/(\d+\.\d+)%/) || [0, 30])[1] < 30;
+          break;
+        case 'concentrated':
+          distributionFilterPassed = holderDistribution.includes('Top 10 holders') && 
+            parseFloat(holderDistribution.match(/(\d+\.\d+)%/) || [0, 60])[1] > 50;
+          break;
+        case 'whale_heavy':
+          distributionFilterPassed = holderDistribution.includes('Top 10 holders') && 
+            parseFloat(holderDistribution.match(/(\d+\.\d+)%/) || [0, 80])[1] > 70;
+          break;
       }
     }
 
@@ -765,7 +928,10 @@ function applyDexFilters_old() {
       (dexFilters.priceChange6hMin === null || (row.dexscreener_price_change_6h || 0) >= dexFilters.priceChange6hMin) &&
       (dexFilters.priceChange24hMin === null || (row.dexscreener_price_change_h24 || 0) >= dexFilters.priceChange24hMin) &&
       ageFilterPassed && 
-      whaleFilterPassed
+      whaleFilterPassed &&
+      holdersFilterPassed &&
+      growthFilterPassed &&
+      distributionFilterPassed
     );
   });
 
@@ -994,11 +1160,23 @@ function updateFiltersIndicator() {
     'dexFilterBuys24hMin', 'dexFilterSells24hMax', 'dexFilterLiquidityQuoteMin', 'dexFilterHasData',
     'dexFilterBuySellRatio1h', 'dexFilterBuySellRatio24h', 'dexFilterRugScoreMin', 'dexFilterRugScoreMax'
   ];
-  
+
   dexInputs.forEach(id => {
     const el = document.getElementById(id);
     if (el && el.value.trim() !== '') count++;
   });
+
+  const holdersInputs = [
+    'dexFilterHoldersMin', 'dexFilterHoldersMax', 
+    'dexFilterHoldersGrowth', 'dexFilterHoldersDistribution'
+  ];
+
+  holdersInputs.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value.trim() !== '') count++;
+  });
+  if (currentHoldersCategory !== '') count++;
+  
   
   // Compter les filtres d'âge et temporels
   if (currentAgeMin !== null || currentAgeMax !== null) count++;
@@ -1011,15 +1189,36 @@ function updateFiltersIndicator() {
   activeFiltersCount = count;
   
   const indicator = document.getElementById('filtersIndicator');
-  const filterCount = indicator.querySelector('.filter-count');
-  
-  if (count === 0) {
-    filterCount.textContent = 'Aucun filtre actif';
-    indicator.style.opacity = '0.6';
-  } else {
-    filterCount.textContent = `${count} filtre${count > 1 ? 's' : ''} actif${count > 1 ? 's' : ''}`;
-    indicator.style.opacity = '1';
+   if (indicator) {
+    const filterCount = indicator.querySelector('.filter-count');
+    if (filterCount) {
+      if (count === 0) {
+        filterCount.textContent = 'Aucun filtre actif';
+        indicator.style.opacity = '0.6';
+      } else {
+        filterCount.textContent = `${count} filtre${count > 1 ? 's' : ''} actif${count > 1 ? 's' : ''}`;
+        indicator.style.opacity = '1';
+      }
+    }
   }
+}
+
+function analyzeHoldersDistribution(holders, distribution) {
+  if (!holders || holders === 0) return 'no_holders';
+  
+  if (!distribution || distribution === 'Unknown') return 'unknown';
+  
+  // Extraire le pourcentage de concentration des top 10
+  const match = distribution.match(/(\d+\.\d+)%/);
+  if (match) {
+    const concentration = parseFloat(match[1]);
+    if (concentration < 20) return 'excellent';
+    if (concentration < 40) return 'good';
+    if (concentration < 60) return 'fair';
+    return 'poor';
+  }
+  
+  return 'unknown';
 }
 
 // Fonction d'export des données
@@ -1204,6 +1403,7 @@ function renderDexScreenerTable(rows) {
           </a>
         </div>
       `;
+      const holdersDisplay = getHoldersDisplay(r.holders, r.holder_distribution);
       return `
         <tr>
           <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
@@ -1218,6 +1418,7 @@ function renderDexScreenerTable(rows) {
           <td>${getTokenStatusDisplay(r.status)}</td>
           <td class="price">${(r.dexscreener_price_usd || 0).toFixed(8)}</td>
           <td>${Math.round(r.dexscreener_market_cap || 0).toLocaleString()}</td>
+          <td>${holdersDisplay}</td>
           <td>${(r.dexscreener_liquidity_base || 0).toFixed(2)}</td>
           <td>${Math.round(r.dexscreener_liquidity_quote || 0).toLocaleString()}</td>
           <td>${rugScoreDisplay}</td>
@@ -2122,6 +2323,37 @@ function clearWhaleActivityFilter(btn) {
   applyDexFilters();
 }
 
+function setupDexFiltersEventListeners() {
+  // Event listeners pour tous les filtres DexScreener incluant holders
+  const allDexFilterSelectors = [
+    '#dexscreener-content .filter-panel input',
+    '#dexscreener-content .filter-panel select'
+  ];
+  
+  allDexFilterSelectors.forEach(selector => {
+    document.querySelectorAll(selector).forEach(input => { 
+      // Supprimer les anciens listeners pour éviter les doublons
+      input.removeEventListener('input', dexFilterHandler);
+      // Ajouter le nouveau listener
+      input.addEventListener('input', dexFilterHandler);
+    }); 
+  });
+}
+
+function dexFilterHandler() {
+  clearTimeout(debounceTimeout); 
+  debounceTimeout = setTimeout(() => { 
+    applyDexFilters();
+  }, 300);
+}
+
+function baseFilterHandler() {
+  clearTimeout(debounceTimeout);
+  debounceTimeout = setTimeout(() => {
+    applyFilters();
+  }, 300);
+}
+
 function highlightActiveFilters() {
   // Base filters
   const baseInputs = [
@@ -2150,6 +2382,7 @@ function highlightActiveFilters() {
     'dexFilterVolume6hMin', 'dexFilterVolume24hMin', 'dexFilterTxns24hMin',
     'dexFilterBuys24hMin', 'dexFilterSells24hMax', 'dexFilterLiquidityQuoteMin', 'dexFilterHasData',
     //'dexFilterPriceChange1hMin', 'dexFilterPriceChange6hMin', 'dexFilterPriceChange24hMin'
+    'dexFilterHoldersMin', 'dexFilterHoldersMax', 'dexFilterHoldersGrowth', 'dexFilterHoldersDistribution'
   ];
 
   dexInputs.forEach(id => {
@@ -2176,14 +2409,15 @@ let debounceTimeout;
 
 // Filtres onglet base
 document.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('#base-content .filter-panel input, #base-content .filter-panel select').forEach(input => {
+  console.log('🚀 Initialisation du dashboard...');
+  /*document.querySelectorAll('#base-content .filter-panel input, #base-content .filter-panel select').forEach(input => {
     input.addEventListener('input', () => {
       clearTimeout(debounceTimeout);
       debounceTimeout = setTimeout(() => {
         applyFilters();
       }, 300);
     });
-  });
+  });*/
 
   // Filtres onglet DexScreener
   document.querySelectorAll('#dexscreener-content .filter-panel input, #dexscreener-content .filter-panel select').forEach(input => { 
@@ -2195,17 +2429,26 @@ document.addEventListener('DOMContentLoaded', function() {
     }); 
   });
 
+  // Setup des listeners DexScreener
+  setupDexFiltersEventListeners();
+
   // === INITIALISATION ===
   loadSavedTheme();
   fetchData();
   startAutoRefresh();
   updateRefreshStatus();
   updateFiltersIndicator();
-
-
   startWhaleAutoRefresh();
 
    setTimeout(() => {
     updateWhaleIndicators();
   }, 2000);
+
+  // Ajouter les fonctions de debug au window pour accès console
+  window.debugFilters = debugFilters;
+  window.forceResetAllFilters = forceResetAllFilters;
+  
+  console.log('✅ Dashboard initialisé');
+  console.log('💡 Fonctions de debug disponibles: debugFilters(), forceResetAllFilters()');
+
 });
