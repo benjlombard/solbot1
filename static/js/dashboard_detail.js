@@ -1,3 +1,8 @@
+// =============================================================================
+// DASHBOARD DETAIL - Fichier principal allégé
+// =============================================================================
+
+// Variables globales principales
 let data = [], filteredData = [], currentPage = 1, perPage = 10;
 let refreshInterval = 30000;
 let refreshTimer = null;
@@ -5,348 +10,19 @@ let isAutoRefreshEnabled = true;
 let currentTab = 'base';
 let activeFiltersCount = 0;
 
-// Variables pour le filtre d'âge
-let currentAgeMin = null;
-let currentAgeMax = null;
-
 // Variables whale
 let whaleData = [];
 let isWhaleAutoRefreshEnabled = true;
 let whaleRefreshTimer = null;
-let whaleRefreshInterval = 30000; // 30 secondes
+let whaleRefreshInterval = 30000;
 
-let currentWhaleFilter = '';
-let currentWhaleAmountMin = null;
-let currentWhalePeriod = null;
-// Variables pour les stratégies
-let currentStrategy = null;
-const strategies = {
-  momentum: {
-    name: "🚀 Momentum",
-    filters: {
-      dexFilterPriceChange1hMin: 10,
-      dexFilterPriceChange6hMin: 20,
-      dexFilterVolume24hMin: 50000,
-      dexFilterTxns24hMin: 100,
-      dexFilterBuySellRatio24h: 1.5,
-      dexFilterHoldersMin: 200 // Minimum viable pour momentum
-      
-    }
-  },
-  early: {
-    name: "💎 Early Gems", 
-    filters: {
-      ageMin: 0,
-      ageMax: 6,
-      dexFilterRugScoreMax: 30,
-      dexFilterLiquidityQuoteMin: 10000,
-      dexFilterMarketCapMax: 100000,
-      dexFilterHasData: 'true',
-      dexFilterHoldersMin: 50,  // Très récent, peu de holders
-      dexFilterHoldersMax: 500  // Pas encore mainstream
-    }
-  },
-  whale: {
-    name: "🐋 Whale Magnet",
-    filters: {
-      whaleActivity: 'has_whale',
-      dexFilterVolume1hMin: 5000,
-      dexFilterTxns24hMin: 50,
-      dexFilterLiquidityQuoteMin: 25000,
-      dexFilterHoldersMin: 300
-    }
-  },
-  breakout: {
-    name: "⚡ Breakout",
-    filters: {
-      dexFilterPriceChange24hMin: 50,
-      dexFilterVolume24hMin: 100000,
-      dexFilterBuySellRatio1h: 2.0,
-      dexFilterMarketCapMin: 500000,
-      dexFilterTxns24hMin: 200
-    }
-  },
-  safe: {
-    name: "🛡️ Safe Growth",
-    filters: {
-      dexFilterRugScoreMax: 20,
-      dexFilterPriceChange24hMin: 5,
-      dexFilterPriceChange24hMax: 30, // Nouveau champ à ajouter
-      ageMin: 24,
-      ageMax: 168,
-      dexFilterLiquidityQuoteMin: 50000,
-      dexFilterBuySellRatio24h: 1.2,
-      dexFilterHoldersMin: 1000, // Base de holders solide
-      dexFilterHoldersDistribution: 'good' // Bonne distributio
-    }
-  }
-};
+// Variables pour le debounce
+let debounceTimeout;
 
+// =============================================================================
+// FONCTIONS UTILITAIRES
+// =============================================================================
 
-let currentHoldersMin = null;
-let currentHoldersMax = null;
-let currentHoldersCategory = '';
-
-
-// ==== FONCTIONS HOLDERS =====
-
-function setHoldersFilter(category, btn) {
-  currentHoldersCategory = category;
-  
-  // Définir les ranges selon la catégorie
-  const ranges = {
-    'microcap': { min: 0, max: 100 },
-    'small': { min: 100, max: 500 },
-    'medium': { min: 500, max: 2000 },
-    'large': { min: 2000, max: 10000 },
-    'mega': { min: 10000, max: null }
-  };
-  
-  const range = ranges[category];
-  if (range) {
-    currentHoldersMin = range.min;
-    currentHoldersMax = range.max;
-    
-    // Mettre à jour les champs (avec vérification d'existence)
-    const minElement = document.getElementById('dexFilterHoldersMin');
-    const maxElement = document.getElementById('dexFilterHoldersMax');
-    
-    if (minElement) minElement.value = range.min || '';
-    if (maxElement) maxElement.value = range.max || '';
-  }
-
-  
-  // Marquer le bouton comme actif
-  document.querySelectorAll('.holders-preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  console.log(`🎯 Filtre holders appliqué: ${category} (${currentHoldersMin}-${currentHoldersMax})`);
-  applyDexFilters();
-}
-
-function clearHoldersFilter(btn) {
-  currentHoldersMin = null;
-  currentHoldersMax = null;
-  currentHoldersCategory = '';
-  
-  const elementsToReset = [
-    'dexFilterHoldersMin', 'dexFilterHoldersMax', 
-    'dexFilterHoldersGrowth', 'dexFilterHoldersDistribution'
-  ];
-  
-  elementsToReset.forEach(id => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.value = '';
-      element.classList.remove('filter-active');
-    }
-  });
-  
-  document.querySelectorAll('.holders-preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  
-  console.log('🧹 Filtres holders réinitialisés');
-  applyDexFilters();
-}
-
-
-// Fonction pour générer l'affichage des holders
-function getHoldersDisplay(holders, holderDistribution) {
-  if (!holders || holders === 0) {
-    return '<span class="holders-indicator holders-micro">0</span>';
-  }
-  
-  let category, categoryClass;
-  if (holders < 100) {
-    category = 'MICRO';
-    categoryClass = 'holders-micro';
-  } else if (holders < 500) {
-    category = 'SMALL';
-    categoryClass = 'holders-small';
-  } else if (holders < 2000) {
-    category = 'MED';
-    categoryClass = 'holders-medium';
-  } else if (holders < 10000) {
-    category = 'LARGE';
-    categoryClass = 'holders-large';
-  } else {
-    category = 'MEGA';
-    categoryClass = 'holders-mega';
-  }
-  
-  const distributionInfo = holderDistribution && holderDistribution !== 'Unknown' ? 
-    `<br><small style="color: #888; font-size: 0.65rem;" title="${holderDistribution}">${holderDistribution.substring(0, 20)}...</small>` : '';
-  
-  return `
-    <div style="text-align: center;">
-      <span class="holders-indicator ${categoryClass}" title="${holders} holders (${category})">${holders.toLocaleString()}</span>
-      ${distributionInfo}
-    </div>
-  `;
-}
-
-
-
-
-// === FONCTIONS STRATÉGIES ===
-
-function applyStrategy(strategyName, btn) {
-  // Réinitialiser tous les filtres d'abord
-  resetDexFilters();
-  
-  // Marquer la stratégie comme active
-  currentStrategy = strategyName;
-  
-  // Retirer active de tous les boutons stratégie
-  document.querySelectorAll('.strategy-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  
-  // Appliquer les filtres de la stratégie
-  const strategy = strategies[strategyName];
-  if (strategy && strategy.filters) {
-    applyStrategyFilters(strategy.filters);
-  }
-  
-  console.log(`📊 Stratégie appliquée: ${strategy.name}`);
-  
-  // Appliquer les filtres
-  setTimeout(() => {
-    applyDexFilters();
-  }, 100);
-}
-
-function applyStrategyFilters(filters) {
-  Object.keys(filters).forEach(filterKey => {
-    const value = filters[filterKey];
-    
-    // Gérer les filtres spéciaux (âge, whale)
-    if (filterKey === 'ageMin') {
-      currentAgeMin = value;
-      return;
-    }
-    if (filterKey === 'ageMax') {
-      currentAgeMax = value;
-      return;
-    }
-    if (filterKey === 'whaleActivity') {
-      currentWhaleFilter = value;
-      return;
-    }
-    
-    // === AJOUT: Gérer les filtres holders ===
-    if (filterKey === 'dexFilterHoldersMin') {
-      currentHoldersMin = value;
-      const element = document.getElementById('dexFilterHoldersMin');
-      if (element) element.value = value;
-      return;
-    }
-    if (filterKey === 'dexFilterHoldersMax') {
-      currentHoldersMax = value;
-      const element = document.getElementById('dexFilterHoldersMax');
-      if (element) element.value = value;
-      return;
-    }
-    
-    // Gérer les filtres normaux (éléments HTML)
-    const element = document.getElementById(filterKey);
-    if (element) {
-      element.value = value;
-      element.classList.add('filter-active');
-    }
-  });
-}
-
-
-function resetDexFilters() {
-
-  const dexFilterIds = [
-    'dexFilterSymbol', 'dexFilterStatus', 'dexFilterPriceMin', 'dexFilterPriceMax',
-    'dexFilterMarketCapMin', 'dexFilterMarketCapMax', 'dexFilterVolume1hMin',
-    'dexFilterVolume6hMin', 'dexFilterVolume24hMin', 'dexFilterTxns24hMin',
-    'dexFilterBuys24hMin', 'dexFilterSells24hMax', 'dexFilterLiquidityQuoteMin',
-    'dexFilterHasData', 'dexFilterBuySellRatio1h', 'dexFilterBuySellRatio24h',
-    'dexFilterRugScoreMin', 'dexFilterRugScoreMax', 'dexFilterPriceChange1hMin',
-    'dexFilterPriceChange6hMin', 'dexFilterPriceChange24hMin', 'dexFilterPriceChange24hMax',
-    'dexFilterHoldersMin', 'dexFilterHoldersMax', 
-    'dexFilterHoldersGrowth', 'dexFilterHoldersDistribution'
-  ];
-  
-  dexFilterIds.forEach(id => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.value = '';
-      element.classList.remove('filter-active');
-    }
-  });
-  
-  // Réinitialiser les variables spéciales
-  currentAgeMin = null;
-  currentAgeMax = null;
-  currentWhaleFilter = '';
-  currentWhaleAmountMin = null;
-  currentWhalePeriod = null;
-  window.dexTimeValue = null;
-  window.dexTimeUnit = null;
-  currentHoldersMin = null;
-  currentHoldersMax = null;
-  currentHoldersCategory = '';
-  
-  // Désactiver tous les boutons présets
-  document.querySelectorAll('#dexscreener-content .preset-btn').forEach(btn => {
-    btn.classList.remove('active');
-  });
-  document.querySelectorAll('.holders-preset-btn').forEach(btn => {
-    btn.classList.remove('active');
-  });
-  document.querySelectorAll('.whale-preset-btn').forEach(btn => {
-    btn.classList.remove('active');
-  });
-  
-  // Réinitialiser la stratégie
-  currentStrategy = null;
-}
-
-function clearStrategy() {
-  // Fonction pour désactiver la stratégie courante
-  currentStrategy = null;
-  document.querySelectorAll('.strategy-btn').forEach(btn => {
-    btn.classList.remove('active');
-  });
-  
-  resetDexFilters();
-  applyDexFilters();
-}
-
-
-// === GESTION DES ONGLETS ===
-function switchTab(tabName, button) {
-  document.querySelectorAll('.tab-content').forEach(content => {
-    content.classList.remove('active');
-  });
-  
-  document.querySelectorAll('.tab').forEach(tab => {
-    tab.classList.remove('active');
-  });
-  
-  document.getElementById(tabName + '-content').classList.add('active');
-  button.classList.add('active');
-  
-  currentTab = tabName;
-  renderPage();
-  if (currentTab === 'whale') {
-    updateWhaleActivity();
-    // Forcer la mise à jour des indicateurs whale dans les tableaux
-    setTimeout(() => {
-      updateWhaleIndicators();
-    }, 1000);
-  } else if (currentTab === 'dexscreener') {
-    // Forcer la mise à jour des indicateurs whale pour DexScreener
-    setTimeout(() => {
-      updateWhaleIndicators();
-    }, 1000);
-  }
-}
-
-// === FONCTIONS UTILITAIRES ===
 function parseDateTime(dateString) {
   if (!dateString) return null;
   
@@ -416,173 +92,6 @@ function formatPriceChange(value) {
   return { text: `${prefix}${percentage}%`, className };
 }
 
-// === FONCTIONS AUTO-REFRESH ===
-function toggleAutoRefresh() {
-    isAutoRefreshEnabled = !isAutoRefreshEnabled;
-    const toggle = document.getElementById('autoRefreshToggle');
-    const indicator = document.getElementById('refreshIndicator');
-    
-    if (isAutoRefreshEnabled) {
-        toggle.classList.add('active');
-        indicator.classList.remove('paused');
-        indicator.classList.add('active');
-        startAutoRefresh();
-    } else {
-        toggle.classList.remove('active');
-        indicator.classList.remove('active');
-        indicator.classList.add('paused');
-        stopAutoRefresh();
-    }
-    
-    updateRefreshStatus();
-}
-
-function updateRefreshInterval() {
-    const select = document.getElementById('refreshInterval');
-    refreshInterval = parseInt(select.value);
-    
-    if (isAutoRefreshEnabled) {
-        stopAutoRefresh();
-        startAutoRefresh();
-    }
-    
-    updateRefreshStatus();
-}
-
-function startAutoRefresh() {
-    if (refreshTimer) clearInterval(refreshTimer);
-    
-    if (isAutoRefreshEnabled) {
-        refreshTimer = setInterval(() => {
-            fetchData();
-        }, refreshInterval);
-    }
-}
-
-function stopAutoRefresh() {
-    if (refreshTimer) {
-        clearInterval(refreshTimer);
-        refreshTimer = null;
-    }
-}
-
-function updateRefreshStatus() {
-    const statusElement = document.getElementById('refreshStatus');
-    const intervalText = refreshInterval >= 60000 ? 
-        `${refreshInterval/60000}min` : 
-        `${refreshInterval/1000}s`;
-    
-    if (isAutoRefreshEnabled) {
-        statusElement.textContent = `Auto-refresh: ${intervalText}`;
-    } else {
-        statusElement.textContent = `Paused (${intervalText})`;
-    }
-}
-
-function showRefreshIndicator(active) {
-    const indicator = document.getElementById('refreshIndicator');
-    if (!indicator) return;
-    
-    if (active && isAutoRefreshEnabled) {
-        indicator.innerHTML = `
-            <div class="spinner"></div>
-            <span>Actualisation...</span>
-        `;
-    } else {
-        const intervalText = refreshInterval >= 60000 ? 
-            `${refreshInterval/60000}min` : 
-            `${refreshInterval/1000}s`;
-        
-        const statusText = isAutoRefreshEnabled ? 
-            `Auto-refresh: ${intervalText}` : 
-            `Paused (${intervalText})`;
-            
-        indicator.innerHTML = `
-            <span>${isAutoRefreshEnabled ? '🔄' : '⏸️'}</span>
-            <span>${statusText}</span>
-        `;
-    }
-}
-
-// === FONCTIONS PROGRESSION BONDING CURVE ===
-function getBondingProgressDisplay(status, progress) {
-    if (!status || !['active', 'created'].includes(status.toLowerCase())) {
-        return '<div class="no-progress">N/A</div>';
-    }
-    
-    const progressValue = parseFloat(progress) || 0;
-    
-    if (progressValue <= 0) {
-        return '<div class="no-progress">0%</div>';
-    }
-    
-    let progressClass = '';
-    if (progressValue >= 90) {
-        progressClass = 'completed';
-    } else if (progressValue < 30) {
-        progressClass = 'low';
-    }
-    
-    return `
-        <div class="progress-container ${progressClass}" title="Progression: ${progressValue}%">
-            <div class="progress-bar" style="width: ${Math.min(progressValue, 100)}%"></div>
-            <div class="progress-text">${progressValue}%</div>
-        </div>
-    `;
-}
-
-function getBondingCurveDisplay(status) {
-    if (!status) return '<span class="bonding-status bonding-unknown">Unknown</span>';
-    
-    const statusLower = String(status).toLowerCase().trim();
-    const statusMap = {
-        'created': '<span class="bonding-status bonding-created">Created</span>',
-        'active': '<span class="bonding-status bonding-active">Active</span>',
-        'completed': '<span class="bonding-status bonding-completed">Completed</span>',
-        'migrated': '<span class="bonding-status bonding-migrated">Migrated</span>',
-        'terminated': '<span class="bonding-status bonding-terminated">Terminated</span>'
-    };
-    
-    return statusMap[statusLower] || 
-           `<span class="bonding-status bonding-unknown">${status}</span>`;
-}
-
-// === FONCTIONS DE DONNÉES ===
-async function fetchData() {
-  showRefreshIndicator(true);
-  try {
-    const response = await fetch('/api/tokens-detail');
-    if (!response.ok) throw new Error('Réponse API invalide');
-    data = await response.json();
-    filteredData = [...data];
-    currentPage = 1;
-    renderPage();
-    
-    if (currentTab === 'analysis') {
-      updateAnalysis();
-    }
-    if (currentTab === 'whale') {
-      updateWhaleActivity();
-    }
-    setTimeout(() => {
-      updateWhaleIndicators();
-      // Ajouter un deuxième appel au cas où le premier échoue
-      setTimeout(() => {
-        updateWhaleIndicators();
-      }, 2000);
-    }, 1000);
-
-  } catch (error) {
-    console.error('Erreur lors du chargement des données:', error);
-    const tbody = document.getElementById('baseTbody');
-    if (tbody) {
-      tbody.innerHTML = '<tr><td colspan="13">Erreur lors du chargement des données</td></tr>';
-    }
-  } finally {
-    showRefreshIndicator(false);
-  }
-}
-
 function isWithinTimeFilter(dateString, filterValue, filterUnit) {
   if (!dateString || !filterValue || !filterUnit) return true;
   
@@ -611,7 +120,216 @@ function isWithinTimeFilter(dateString, filterValue, filterUnit) {
   return diffMs <= thresholdMs;
 }
 
-// === FONCTIONS DE FILTRAGE ===
+// =============================================================================
+// FONCTIONS BONDING CURVE
+// =============================================================================
+
+function getBondingProgressDisplay(status, progress) {
+  if (!status || !['active', 'created'].includes(status.toLowerCase())) {
+    return '<div class="no-progress">N/A</div>';
+  }
+  
+  const progressValue = parseFloat(progress) || 0;
+  
+  if (progressValue <= 0) {
+    return '<div class="no-progress">0%</div>';
+  }
+  
+  let progressClass = '';
+  if (progressValue >= 90) {
+    progressClass = 'completed';
+  } else if (progressValue < 30) {
+    progressClass = 'low';
+  }
+  
+  return `
+    <div class="progress-container ${progressClass}" title="Progression: ${progressValue}%">
+      <div class="progress-bar" style="width: ${Math.min(progressValue, 100)}%"></div>
+      <div class="progress-text">${progressValue}%</div>
+    </div>
+  `;
+}
+
+function getBondingCurveDisplay(status) {
+  if (!status) return '<span class="bonding-status bonding-unknown">Unknown</span>';
+  
+  const statusLower = String(status).toLowerCase().trim();
+  const statusMap = {
+    'created': '<span class="bonding-status bonding-created">Created</span>',
+    'active': '<span class="bonding-status bonding-active">Active</span>',
+    'completed': '<span class="bonding-status bonding-completed">Completed</span>',
+    'migrated': '<span class="bonding-status bonding-migrated">Migrated</span>',
+    'terminated': '<span class="bonding-status bonding-terminated">Terminated</span>'
+  };
+  
+  return statusMap[statusLower] || 
+         `<span class="bonding-status bonding-unknown">${status}</span>`;
+}
+
+// =============================================================================
+// GESTION DES ONGLETS
+// =============================================================================
+
+function switchTab(tabName, button) {
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.classList.remove('active');
+  });
+  
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  
+  document.getElementById(tabName + '-content').classList.add('active');
+  button.classList.add('active');
+  
+  currentTab = tabName;
+  renderPage();
+  
+  if (currentTab === 'whale') {
+    updateWhaleActivity();
+    setTimeout(() => {
+      updateWhaleIndicators();
+    }, 1000);
+  } else if (currentTab === 'dexscreener' || currentTab === 'pumpfun') {
+    setTimeout(() => {
+      updateWhaleIndicators();
+    }, 1000);
+  }
+}
+
+// =============================================================================
+// FONCTIONS AUTO-REFRESH
+// =============================================================================
+
+function toggleAutoRefresh() {
+  isAutoRefreshEnabled = !isAutoRefreshEnabled;
+  const toggle = document.getElementById('autoRefreshToggle');
+  const indicator = document.getElementById('refreshIndicator');
+  
+  if (isAutoRefreshEnabled) {
+    toggle.classList.add('active');
+    indicator.classList.remove('paused');
+    indicator.classList.add('active');
+    startAutoRefresh();
+  } else {
+    toggle.classList.remove('active');
+    indicator.classList.remove('active');
+    indicator.classList.add('paused');
+    stopAutoRefresh();
+  }
+  
+  updateRefreshStatus();
+}
+
+function updateRefreshInterval() {
+  const select = document.getElementById('refreshInterval');
+  refreshInterval = parseInt(select.value);
+  
+  if (isAutoRefreshEnabled) {
+    stopAutoRefresh();
+    startAutoRefresh();
+  }
+  
+  updateRefreshStatus();
+}
+
+function startAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  
+  if (isAutoRefreshEnabled) {
+    refreshTimer = setInterval(() => {
+      fetchData();
+    }, refreshInterval);
+  }
+}
+
+function stopAutoRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+function updateRefreshStatus() {
+  const statusElement = document.getElementById('refreshStatus');
+  const intervalText = refreshInterval >= 60000 ? 
+    `${refreshInterval/60000}min` : 
+    `${refreshInterval/1000}s`;
+  
+  if (isAutoRefreshEnabled) {
+    statusElement.textContent = `Auto-refresh: ${intervalText}`;
+  } else {
+    statusElement.textContent = `Paused (${intervalText})`;
+  }
+}
+
+function showRefreshIndicator(active) {
+  const indicator = document.getElementById('refreshIndicator');
+  if (!indicator) return;
+  
+  if (active && isAutoRefreshEnabled) {
+    indicator.innerHTML = `
+      <div class="spinner"></div>
+      <span>Actualisation...</span>
+    `;
+  } else {
+    const intervalText = refreshInterval >= 60000 ? 
+      `${refreshInterval/60000}min` : 
+      `${refreshInterval/1000}s`;
+    
+    const statusText = isAutoRefreshEnabled ? 
+      `Auto-refresh: ${intervalText}` : 
+      `Paused (${intervalText})`;
+      
+    indicator.innerHTML = `
+      <span>${isAutoRefreshEnabled ? '🔄' : '⏸️'}</span>
+      <span>${statusText}</span>
+    `;
+  }
+}
+
+// =============================================================================
+// FONCTIONS DE DONNÉES
+// =============================================================================
+
+async function fetchData() {
+  showRefreshIndicator(true);
+  try {
+    const response = await fetch('/api/tokens-detail');
+    if (!response.ok) throw new Error('Réponse API invalide');
+    data = await response.json();
+    filteredData = [...data];
+    currentPage = 1;
+    renderPage();
+    
+    if (currentTab === 'analysis') {
+      updateAnalysis();
+    }
+    if (currentTab === 'whale') {
+      updateWhaleActivity();
+    }
+    setTimeout(() => {
+      updateWhaleIndicators();
+      setTimeout(() => {
+        updateWhaleIndicators();
+      }, 2000);
+    }, 1000);
+
+  } catch (error) {
+    console.error('Erreur lors du chargement des données:', error);
+    const tbody = document.getElementById('baseTbody');
+    if (tbody) {
+      tbody.innerHTML = '<tr><td colspan="13">Erreur lors du chargement des données</td></tr>';
+    }
+  } finally {
+    showRefreshIndicator(false);
+  }
+}
+
+// =============================================================================
+// FONCTIONS DE FILTRAGE (ONGLET BASE)
+// =============================================================================
+
 function setTimeFilter(value, unit, btn) {
   document.getElementById('filterTimeValue').value = value;
   document.getElementById('filterTimeUnit').value = unit;
@@ -628,46 +346,6 @@ function clearTimeFilter(btn) {
   document.querySelectorAll('#base-content .preset-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   applyFilters();
-}
-
-// Nouvelles fonctions pour le filtre d'âge
-function setAgeFilter(minHours, maxHours, unit, btn) {
-  currentAgeMin = minHours;
-  currentAgeMax = maxHours;
-  
-  // Cibler spécifiquement les boutons d'âge, pas tous les boutons présets
-  document.querySelectorAll('#dexscreener-content .age-presets .preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  applyDexFilters();
-}
-
-function clearAgeFilter(btn) {
-  currentAgeMin = null;
-  currentAgeMax = null;
-  
-  // Cibler spécifiquement les boutons d'âge, pas tous les boutons présets
-  document.querySelectorAll('#dexscreener-content .age-presets .preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  applyDexFilters();
-}
-
-
-function setDexTimeFilter(value, unit, btn) {
-  window.dexTimeValue = value;
-  window.dexTimeUnit = unit;
-  // Enlever 'active' de TOUS les boutons présets DexScreener (pas seulement les boutons de temps)
-  document.querySelectorAll('#dexscreener-content .preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  applyDexFilters();
-}
-
-function clearDexTimeFilter(btn) {
-  window.dexTimeValue = null;
-  window.dexTimeUnit = null;
-  // Enlever 'active' de TOUS les boutons présets DexScreener
-  document.querySelectorAll('#dexscreener-content .preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  applyDexFilters();
 }
 
 function applyFilters() {
@@ -702,17 +380,6 @@ function applyFilters() {
     const progressValue = parseFloat(row.bonding_curve_progress) || 0;
     const tokenAgeHours = parseFloat(row.age_hours) || 0;
     
-    // Vérification du filtre d'âge des boutons présets
-    let ageFilterPassed = true;
-    if (currentAgeMin !== null || currentAgeMax !== null) {
-      if (currentAgeMin !== null && tokenAgeHours < currentAgeMin) {
-        ageFilterPassed = false;
-      }
-      if (currentAgeMax !== null && tokenAgeHours > currentAgeMax) {
-        ageFilterPassed = false;
-      }
-    }
-    
     return (
       (!filters.symbol || row.symbol.toLowerCase().includes(filters.symbol)) &&
       (!filters.bondingStatus || rowBondingStatus === filters.bondingStatus) &&
@@ -733,8 +400,7 @@ function applyFilters() {
       (filters.riskMin === null || riskValue >= filters.riskMin) &&
       (filters.riskMax === null || riskValue <= filters.riskMax) &&
       (!filters.discoveredAt || new Date(row.first_discovered_at).toISOString().startsWith(filters.discoveredAt)) &&
-      isWithinTimeFilter(updatedAt, filters.timeValue, filters.timeUnit) &&
-      ageFilterPassed
+      isWithinTimeFilter(updatedAt, filters.timeValue, filters.timeUnit)
     );
   });
 
@@ -744,577 +410,10 @@ function applyFilters() {
   renderPage();
 }
 
-function applyDexFilters_old() {
-  const dexFilters = {
-    symbol: document.getElementById('dexFilterSymbol').value.toLowerCase().trim(),
-    status: document.getElementById('dexFilterStatus').value.toLowerCase().trim(),
-    priceMin: document.getElementById('dexFilterPriceMin').value ? parseFloat(document.getElementById('dexFilterPriceMin').value) : null,
-    priceMax: document.getElementById('dexFilterPriceMax').value ? parseFloat(document.getElementById('dexFilterPriceMax').value) : null,
-    marketCapMin: document.getElementById('dexFilterMarketCapMin').value ? parseFloat(document.getElementById('dexFilterMarketCapMin').value) : null,
-    marketCapMax: document.getElementById('dexFilterMarketCapMax').value ? parseFloat(document.getElementById('dexFilterMarketCapMax').value) : null,
-    volume1hMin: document.getElementById('dexFilterVolume1hMin').value ? parseFloat(document.getElementById('dexFilterVolume1hMin').value) : null,
-    volume6hMin: document.getElementById('dexFilterVolume6hMin').value ? parseFloat(document.getElementById('dexFilterVolume6hMin').value) : null,
-    volume24hMin: document.getElementById('dexFilterVolume24hMin').value ? parseFloat(document.getElementById('dexFilterVolume24hMin').value) : null,
-    txns24hMin: document.getElementById('dexFilterTxns24hMin').value ? parseFloat(document.getElementById('dexFilterTxns24hMin').value) : null,
-    buys24hMin: document.getElementById('dexFilterBuys24hMin').value ? parseFloat(document.getElementById('dexFilterBuys24hMin').value) : null,
-    sells24hMax: document.getElementById('dexFilterSells24hMax').value ? parseFloat(document.getElementById('dexFilterSells24hMax').value) : null,
-    liquidityQuoteMin: document.getElementById('dexFilterLiquidityQuoteMin').value ? parseFloat(document.getElementById('dexFilterLiquidityQuoteMin').value) : null,
-    rugScoreMin: document.getElementById('dexFilterRugScoreMin').value ? parseFloat(document.getElementById('dexFilterRugScoreMin').value) : null, 
-    rugScoreMax: document.getElementById('dexFilterRugScoreMax').value ? parseFloat(document.getElementById('dexFilterRugScoreMax').value) : null,
-    hasData: document.getElementById('dexFilterHasData').value,
-    buySellRatio1hMin: document.getElementById('dexFilterBuySellRatio1h').value ? parseFloat(document.getElementById('dexFilterBuySellRatio1h').value) : null,
-    buySellRatio24hMin: document.getElementById('dexFilterBuySellRatio24h').value ? parseFloat(document.getElementById('dexFilterBuySellRatio24h').value) : null,
-    priceChange1hMin: document.getElementById('dexFilterPriceChange1hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange1hMin').value) : null,
-    priceChange6hMin: document.getElementById('dexFilterPriceChange6hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange6hMin').value) : null,
-    priceChange24hMin: document.getElementById('dexFilterPriceChange24hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange24hMin').value) : null,
-    // === FILTRES WHALE ===
-    whaleActivity: currentWhaleFilter.toLowerCase().trim(),
-    whaleAmountMin: currentWhaleAmountMin,
-    whalePeriod: currentWhalePeriod,
-    // === FILTRES HOLDERS AJOUTÉS ===
-    holdersMin: currentHoldersMin,
-    holdersMax: currentHoldersMax,
-    holdersGrowth: document.getElementById('dexFilterHoldersGrowth') ? document.getElementById('dexFilterHoldersGrowth').value.toLowerCase().trim() : '',
-    holdersDistribution: document.getElementById('dexFilterHoldersDistribution') ? document.getElementById('dexFilterHoldersDistribution').value.toLowerCase().trim() : '',
-  };
+// =============================================================================
+// FONCTIONS D'AFFICHAGE
+// =============================================================================
 
-  filteredData = data.filter(row => {
-    const hasDexData = (row.dexscreener_price_usd || 0) > 0;
-    const lastDexUpdate = row.last_dexscreener_update || row.updated_at;
-    const tokenAgeHours = parseFloat(row.age_hours) || 0;
-    const holders = row.holders || 0;
-    const holderDistribution = row.holder_distribution || '';
-
-    // Vérification du filtre d'âge des boutons présets
-    let ageFilterPassed = true;
-    if (currentAgeMin !== null || currentAgeMax !== null) {
-      const pairCreatedAt = row.dexscreener_pair_created_at;
-      if (pairCreatedAt) {
-        const now = new Date();
-        const creationTime = parseDateTime(pairCreatedAt);
-        if (creationTime && !isNaN(creationTime.getTime())) {
-          const ageHours = (now - creationTime) / (1000 * 60 * 60);
-          
-          if (currentAgeMin !== null && ageHours < currentAgeMin) {
-            ageFilterPassed = false;
-          }
-          if (currentAgeMax !== null && ageHours > currentAgeMax) {
-            ageFilterPassed = false;
-          }
-        } else {
-          // Si pas de date de création de paire, exclure du filtre
-          ageFilterPassed = false;
-        }
-      } else {
-        // Si pas de date de création de paire, exclure du filtre
-        ageFilterPassed = false;
-      }
-    }
-
-    let whaleFilterPassed = true;
-    if (dexFilters.whaleActivity) {
-      // D'abord, vérifier si on a des données whale dans les colonnes de base de données
-      const whaleActivity1h = row.whale_activity_1h || 0;
-      const whaleActivity6h = row.whale_activity_6h || 0;
-      const whaleActivity24h = row.whale_activity_24h || 0;
-      const whaleMaxAmount1h = row.whale_max_amount_1h || 0;
-      const whaleMaxAmount6h = row.whale_max_amount_6h || 0;
-      const whaleMaxAmount24h = row.whale_max_amount_24h || 0;
-      
-      // Ensuite, chercher dans les données whale en temps réel (si disponibles)
-      const whaleIndicatorElement = document.getElementById(`whale-activity-${row.address}`);
-      let hasRealtimeWhaleActivity = false;
-      let realtimeWhaleAmount = 0;
-      
-      if (whaleIndicatorElement) {
-        const whaleText = whaleIndicatorElement.textContent || '';
-        // Chercher des montants dans le texte de l'indicateur whale
-        const amountMatch = whaleText.match(/\$(\d+(?:\.\d+)?)K/);
-        if (amountMatch) {
-          realtimeWhaleAmount = parseFloat(amountMatch[1]) * 1000;
-          hasRealtimeWhaleActivity = realtimeWhaleAmount > 0;
-        }
-        // Vérifier aussi les emojis d'activité
-        hasRealtimeWhaleActivity = hasRealtimeWhaleActivity || 
-          whaleText.includes('🟢') || whaleText.includes('🔴') || 
-          whaleText.includes('🟡') || whaleText.includes('⚡');
-      }
-      
-      switch (dexFilters.whaleActivity) {
-        case 'has_whale':
-          whaleFilterPassed = whaleActivity1h > 0 || whaleActivity6h > 0 || whaleActivity24h > 0 || hasRealtimeWhaleActivity;
-          break;
-        case 'no_whale':
-          whaleFilterPassed = whaleActivity1h === 0 && whaleActivity6h === 0 && whaleActivity24h === 0 && !hasRealtimeWhaleActivity;
-          break;
-        case 'critical_whale':
-          whaleFilterPassed = whaleMaxAmount1h >= 50000 || whaleMaxAmount6h >= 50000 || whaleMaxAmount24h >= 50000 || realtimeWhaleAmount >= 50000;
-          break;
-        case 'recent_whale':
-          whaleFilterPassed = whaleActivity1h > 0 || hasRealtimeWhaleActivity;
-          break;
-      }
-    }
-
-    let holdersFilterPassed = true;
-    if (dexFilters.holdersMin !== null && holders < dexFilters.holdersMin) {
-      holdersFilterPassed = false;
-    }
-    if (dexFilters.holdersMax !== null && holders > dexFilters.holdersMax) {
-      holdersFilterPassed = false;
-    }
-    
-    
-    // Filtre croissance holders (simulation basée sur d'autres métriques)
-    let growthFilterPassed = true;
-    if (dexFilters.holdersGrowth) {
-      switch (dexFilters.holdersGrowth) {
-        case 'growing':
-          growthFilterPassed = (row.volume_24h || 0) > 50000 && (row.invest_score || 0) > 60;
-          break;
-        case 'stable':
-          growthFilterPassed = (row.volume_24h || 0) > 10000 && (row.invest_score || 0) > 40;
-          break;
-        case 'declining':
-          growthFilterPassed = (row.volume_24h || 0) < 10000 || (row.invest_score || 0) < 40;
-          break;
-      }
-    }
-    
-    // Filtre distribution holders
-    let distributionFilterPassed = true;
-    if (dexFilters.holdersDistribution && holderDistribution) {
-      switch (dexFilters.holdersDistribution) {
-        case 'good':
-          distributionFilterPassed = holderDistribution.includes('Top 10 holders') && 
-            parseFloat(holderDistribution.match(/(\d+\.\d+)%/) || [0, 30])[1] < 30;
-          break;
-        case 'concentrated':
-          distributionFilterPassed = holderDistribution.includes('Top 10 holders') && 
-            parseFloat(holderDistribution.match(/(\d+\.\d+)%/) || [0, 60])[1] > 50;
-          break;
-        case 'whale_heavy':
-          distributionFilterPassed = holderDistribution.includes('Top 10 holders') && 
-            parseFloat(holderDistribution.match(/(\d+\.\d+)%/) || [0, 80])[1] > 70;
-          break;
-      }
-    }
-
-    return (
-      (!dexFilters.symbol || row.symbol.toLowerCase().includes(dexFilters.symbol)) &&
-      (!dexFilters.status || row.status.toLowerCase() === dexFilters.status) &&
-      (dexFilters.priceMin === null || (row.dexscreener_price_usd || 0) >= dexFilters.priceMin) &&
-      (dexFilters.priceMax === null || (row.dexscreener_price_usd || 0) <= dexFilters.priceMax) &&
-      (dexFilters.marketCapMin === null || (row.dexscreener_market_cap || 0) >= dexFilters.marketCapMin) &&
-      (dexFilters.marketCapMax === null || (row.dexscreener_market_cap || 0) <= dexFilters.marketCapMax) &&
-      (dexFilters.volume1hMin === null || (row.dexscreener_volume_1h || 0) >= dexFilters.volume1hMin) &&
-      (dexFilters.volume6hMin === null || (row.dexscreener_volume_6h || 0) >= dexFilters.volume6hMin) &&
-      (dexFilters.volume24hMin === null || (row.dexscreener_volume_24h || 0) >= dexFilters.volume24hMin) &&
-      (dexFilters.txns24hMin === null || (row.dexscreener_txns_24h || 0) >= dexFilters.txns24hMin) &&
-      (dexFilters.buys24hMin === null || (row.dexscreener_buys_24h || 0) >= dexFilters.buys24hMin) &&
-      (dexFilters.sells24hMax === null || (row.dexscreener_sells_24h || 0) <= dexFilters.sells24hMax) &&
-      (dexFilters.liquidityQuoteMin === null || (row.dexscreener_liquidity_quote || 0) >= dexFilters.liquidityQuoteMin) &&
-      (dexFilters.rugScoreMin === null || (row.rug_score || 50) >= dexFilters.rugScoreMin) && 
-      (dexFilters.rugScoreMax === null || (row.rug_score || 50) <= dexFilters.rugScoreMax) &&
-      (!dexFilters.hasData || (dexFilters.hasData === 'true' ? hasDexData : !hasDexData)) &&
-      (!window.dexTimeValue || !window.dexTimeUnit || isWithinTimeFilter(lastDexUpdate, window.dexTimeValue, window.dexTimeUnit)) &&
-      (dexFilters.buySellRatio1hMin === null || 
-        ((row.dexscreener_sells_1h || 0) > 0 && 
-        (row.dexscreener_buys_1h || 0) / (row.dexscreener_sells_1h || 1) >= dexFilters.buySellRatio1hMin)) &&
-      (dexFilters.buySellRatio24hMin === null || 
-        ((row.dexscreener_sells_24h || 0) > 0 && 
-        (row.dexscreener_buys_24h || 0) / (row.dexscreener_sells_24h || 1) >= dexFilters.buySellRatio24hMin)) &&
-      (dexFilters.priceChange1hMin === null || (row.dexscreener_price_change_1h || 0) >= dexFilters.priceChange1hMin) &&
-      (dexFilters.priceChange6hMin === null || (row.dexscreener_price_change_6h || 0) >= dexFilters.priceChange6hMin) &&
-      (dexFilters.priceChange24hMin === null || (row.dexscreener_price_change_h24 || 0) >= dexFilters.priceChange24hMin) &&
-      ageFilterPassed && 
-      whaleFilterPassed &&
-      holdersFilterPassed &&
-      growthFilterPassed &&
-      distributionFilterPassed
-    );
-  });
-
-  highlightActiveFilters();
-  updateFiltersIndicator();
-  currentPage = 1;
-  renderPage();
-}
-
-
-function applyDexFilters() {
-  const dexFilters = {
-    symbol: document.getElementById('dexFilterSymbol').value.toLowerCase().trim(),
-    status: document.getElementById('dexFilterStatus').value.toLowerCase().trim(),
-    priceMin: document.getElementById('dexFilterPriceMin').value ? parseFloat(document.getElementById('dexFilterPriceMin').value) : null,
-    priceMax: document.getElementById('dexFilterPriceMax').value ? parseFloat(document.getElementById('dexFilterPriceMax').value) : null,
-    marketCapMin: document.getElementById('dexFilterMarketCapMin').value ? parseFloat(document.getElementById('dexFilterMarketCapMin').value) : null,
-    marketCapMax: document.getElementById('dexFilterMarketCapMax').value ? parseFloat(document.getElementById('dexFilterMarketCapMax').value) : null,
-    volume1hMin: document.getElementById('dexFilterVolume1hMin').value ? parseFloat(document.getElementById('dexFilterVolume1hMin').value) : null,
-    volume6hMin: document.getElementById('dexFilterVolume6hMin').value ? parseFloat(document.getElementById('dexFilterVolume6hMin').value) : null,
-    volume24hMin: document.getElementById('dexFilterVolume24hMin').value ? parseFloat(document.getElementById('dexFilterVolume24hMin').value) : null,
-    txns24hMin: document.getElementById('dexFilterTxns24hMin').value ? parseFloat(document.getElementById('dexFilterTxns24hMin').value) : null,
-    buys24hMin: document.getElementById('dexFilterBuys24hMin').value ? parseFloat(document.getElementById('dexFilterBuys24hMin').value) : null,
-    sells24hMax: document.getElementById('dexFilterSells24hMax').value ? parseFloat(document.getElementById('dexFilterSells24hMax').value) : null,
-    liquidityQuoteMin: document.getElementById('dexFilterLiquidityQuoteMin').value ? parseFloat(document.getElementById('dexFilterLiquidityQuoteMin').value) : null,
-    rugScoreMin: document.getElementById('dexFilterRugScoreMin').value ? parseFloat(document.getElementById('dexFilterRugScoreMin').value) : null, 
-    rugScoreMax: document.getElementById('dexFilterRugScoreMax').value ? parseFloat(document.getElementById('dexFilterRugScoreMax').value) : null,
-    hasData: document.getElementById('dexFilterHasData').value,
-    buySellRatio1hMin: document.getElementById('dexFilterBuySellRatio1h').value ? parseFloat(document.getElementById('dexFilterBuySellRatio1h').value) : null,
-    buySellRatio24hMin: document.getElementById('dexFilterBuySellRatio24h').value ? parseFloat(document.getElementById('dexFilterBuySellRatio24h').value) : null,
-    priceChange1hMin: document.getElementById('dexFilterPriceChange1hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange1hMin').value) : null,
-    priceChange6hMin: document.getElementById('dexFilterPriceChange6hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange6hMin').value) : null,
-    priceChange24hMin: document.getElementById('dexFilterPriceChange24hMin').value ? parseFloat(document.getElementById('dexFilterPriceChange24hMin').value) : null,
-    priceChange24hMax: document.getElementById('dexFilterPriceChange24hMax').value ? parseFloat(document.getElementById('dexFilterPriceChange24hMax').value) : null,
-    // === UTILISER LES VARIABLES AU LIEU DES ÉLÉMENTS HTML ===
-    whaleActivity: currentWhaleFilter.toLowerCase().trim(),
-    whaleAmountMin: currentWhaleAmountMin,
-    whalePeriod: currentWhalePeriod,
-  };
-
-  filteredData = data.filter(row => {
-    const hasDexData = (row.dexscreener_price_usd || 0) > 0;
-    const lastDexUpdate = row.last_dexscreener_update || row.updated_at;
-    const tokenAgeHours = parseFloat(row.age_hours) || 0;
-    
-    // Vérification du filtre d'âge des boutons présets
-    let ageFilterPassed = true;
-    if (currentAgeMin !== null || currentAgeMax !== null) {
-      const pairCreatedAt = row.dexscreener_pair_created_at;
-      if (pairCreatedAt) {
-        const now = new Date();
-        const creationTime = parseDateTime(pairCreatedAt);
-        if (creationTime && !isNaN(creationTime.getTime())) {
-          const ageHours = (now - creationTime) / (1000 * 60 * 60);
-          
-          if (currentAgeMin !== null && ageHours < currentAgeMin) {
-            ageFilterPassed = false;
-          }
-          if (currentAgeMax !== null && ageHours > currentAgeMax) {
-            ageFilterPassed = false;
-          }
-        } else {
-          ageFilterPassed = false;
-        }
-      } else {
-        ageFilterPassed = false;
-      }
-    }
-
-    let whaleFilterPassed = true;
-    if (dexFilters.whaleActivity) {
-      // Vérifier les données whale dans les colonnes de base de données
-      const whaleActivity1h = row.whale_activity_1h || 0;
-      const whaleActivity6h = row.whale_activity_6h || 0;
-      const whaleActivity24h = row.whale_activity_24h || 0;
-      const whaleMaxAmount1h = row.whale_max_amount_1h || 0;
-      const whaleMaxAmount6h = row.whale_max_amount_6h || 0;
-      const whaleMaxAmount24h = row.whale_max_amount_24h || 0;
-      
-      // Chercher dans les données whale en temps réel
-      const whaleIndicatorElement = document.getElementById(`whale-activity-${row.address}`);
-      let hasRealtimeWhaleActivity = false;
-      let realtimeWhaleAmount = 0;
-      
-      if (whaleIndicatorElement) {
-        const whaleText = whaleIndicatorElement.textContent || '';
-        const amountMatch = whaleText.match(/\$(\d+(?:\.\d+)?)K/);
-        if (amountMatch) {
-          realtimeWhaleAmount = parseFloat(amountMatch[1]) * 1000;
-          hasRealtimeWhaleActivity = realtimeWhaleAmount > 0;
-        }
-        hasRealtimeWhaleActivity = hasRealtimeWhaleActivity || 
-          whaleText.includes('🟢') || whaleText.includes('🔴') || 
-          whaleText.includes('🟡') || whaleText.includes('⚡');
-      }
-      
-      // Debug temporaire - supprimez après test
-      if (dexFilters.whaleActivity === 'has_whale' && (whaleActivity1h > 0 || hasRealtimeWhaleActivity)) {
-        console.log(`Token ${row.symbol}: whale_activity_1h=${whaleActivity1h}, realtime=${hasRealtimeWhaleActivity}`);
-      }
-      
-      switch (dexFilters.whaleActivity) {
-        case 'has_whale':
-          whaleFilterPassed = whaleActivity1h > 0 || whaleActivity6h > 0 || whaleActivity24h > 0 || hasRealtimeWhaleActivity;
-          break;
-        case 'no_whale':
-          whaleFilterPassed = whaleActivity1h === 0 && whaleActivity6h === 0 && whaleActivity24h === 0 && !hasRealtimeWhaleActivity;
-          break;
-        case 'critical_whale':
-          whaleFilterPassed = whaleMaxAmount1h >= 50000 || whaleMaxAmount6h >= 50000 || whaleMaxAmount24h >= 50000 || realtimeWhaleAmount >= 50000;
-          break;
-        case 'recent_whale':
-          whaleFilterPassed = whaleActivity1h > 0 || hasRealtimeWhaleActivity;
-          break;
-      }
-    }
-    
-    return (
-      (!dexFilters.symbol || row.symbol.toLowerCase().includes(dexFilters.symbol)) &&
-      (!dexFilters.status || row.status.toLowerCase() === dexFilters.status) &&
-      (dexFilters.priceMin === null || (row.dexscreener_price_usd || 0) >= dexFilters.priceMin) &&
-      (dexFilters.priceMax === null || (row.dexscreener_price_usd || 0) <= dexFilters.priceMax) &&
-      (dexFilters.marketCapMin === null || (row.dexscreener_market_cap || 0) >= dexFilters.marketCapMin) &&
-      (dexFilters.marketCapMax === null || (row.dexscreener_market_cap || 0) <= dexFilters.marketCapMax) &&
-      (dexFilters.volume1hMin === null || (row.dexscreener_volume_1h || 0) >= dexFilters.volume1hMin) &&
-      (dexFilters.volume6hMin === null || (row.dexscreener_volume_6h || 0) >= dexFilters.volume6hMin) &&
-      (dexFilters.volume24hMin === null || (row.dexscreener_volume_24h || 0) >= dexFilters.volume24hMin) &&
-      (dexFilters.txns24hMin === null || (row.dexscreener_txns_24h || 0) >= dexFilters.txns24hMin) &&
-      (dexFilters.buys24hMin === null || (row.dexscreener_buys_24h || 0) >= dexFilters.buys24hMin) &&
-      (dexFilters.sells24hMax === null || (row.dexscreener_sells_24h || 0) <= dexFilters.sells24hMax) &&
-      (dexFilters.liquidityQuoteMin === null || (row.dexscreener_liquidity_quote || 0) >= dexFilters.liquidityQuoteMin) &&
-      (dexFilters.rugScoreMin === null || (row.rug_score || 50) >= dexFilters.rugScoreMin) && 
-      (dexFilters.rugScoreMax === null || (row.rug_score || 50) <= dexFilters.rugScoreMax) &&
-      (!dexFilters.hasData || (dexFilters.hasData === 'true' ? hasDexData : !hasDexData)) &&
-      (!window.dexTimeValue || !window.dexTimeUnit || isWithinTimeFilter(lastDexUpdate, window.dexTimeValue, window.dexTimeUnit)) &&
-      (dexFilters.buySellRatio1hMin === null || 
-        ((row.dexscreener_sells_1h || 0) > 0 && 
-        (row.dexscreener_buys_1h || 0) / (row.dexscreener_sells_1h || 1) >= dexFilters.buySellRatio1hMin)) &&
-      (dexFilters.buySellRatio24hMin === null || 
-        ((row.dexscreener_sells_24h || 0) > 0 && 
-        (row.dexscreener_buys_24h || 0) / (row.dexscreener_sells_24h || 1) >= dexFilters.buySellRatio24hMin)) &&
-      (dexFilters.priceChange1hMin === null || (row.dexscreener_price_change_1h || 0) >= dexFilters.priceChange1hMin) &&
-      (dexFilters.priceChange6hMin === null || (row.dexscreener_price_change_6h || 0) >= dexFilters.priceChange6hMin) &&
-      (dexFilters.priceChange24hMin === null || (row.dexscreener_price_change_h24 || 0) >= dexFilters.priceChange24hMin) &&
-      (dexFilters.priceChange24hMax === null || (row.dexscreener_price_change_h24 || 0) <= dexFilters.priceChange24hMax) &&
-      ageFilterPassed && 
-      whaleFilterPassed
-    );
-  });
-
-  // Debug temporaire
-  if (currentWhaleFilter === 'has_whale') {
-    console.log(`Filtre whale "has_whale" appliqué: ${filteredData.length} tokens trouvés`);
-  }
-
-  highlightActiveFilters();
-  updateFiltersIndicator();
-  currentPage = 1;
-  renderPage();
-}
-
-function testWhaleButtonsComplete() {
-  console.log('=== TEST COMPLET DES BOUTONS WHALE ===');
-  
-  // Vérifier que les boutons existent
-  const whaleButtons = document.querySelectorAll('.whale-preset-btn');
-  console.log(`Nombre de boutons whale trouvés: ${whaleButtons.length}`);
-  
-  // Tester chaque bouton
-  whaleButtons.forEach((btn, index) => {
-    console.log(`Bouton ${index}: ${btn.textContent} - onclick: ${btn.getAttribute('onclick')}`);
-  });
-  
-  // Tester les variables globales
-  console.log('Variables whale avant test:', {
-    currentWhaleFilter,
-    currentWhaleAmountMin,
-    currentWhalePeriod
-  });
-  
-  // Test programmatique complet
-  console.log('\n=== TEST PROGRAMMATIQUE ===');
-  if (whaleButtons.length > 0) {
-    console.log('1. Test "Avec Whales"');
-    setWhaleActivityFilter('has_whale', whaleButtons[0]);
-    
-    setTimeout(() => {
-      console.log('2. Test "Tous tokens"');
-      clearWhaleActivityFilter(whaleButtons[3]);
-      
-      console.log('Variables whale après test:', {
-        currentWhaleFilter,
-        currentWhaleAmountMin,
-        currentWhalePeriod
-      });
-    }, 1000);
-  }
-}
-// === NOUVELLES FONCTIONS ===
-
-// Fonction pour mettre à jour l'indicateur de filtres
-function updateFiltersIndicator() {
-  let count = 0;
-  
-  // Compter les filtres de base actifs
-  const baseInputs = [
-    'filterSymbol', 'filterBondingStatus', 'filterProgressMin', 'filterProgressMax',
-    'filterPriceMin', 'filterPriceMax', 'filterScoreMin', 'filterScoreMax',
-    'filterLiquidityMin', 'filterLiquidityMax', 'filterVolumeMin', 'filterVolumeMax',
-    'filterHoldersMin', 'filterHoldersMax', 'filterAgeMin', 'filterAgeMax',
-    'filterRiskMin', 'filterRiskMax', 'filterDiscoveredAt', 'filterTimeValue',
-    'dexFilterPriceChange1hMin', 'dexFilterPriceChange6hMin', 'dexFilterPriceChange24hMin',
-    //'dexFilterWhaleActivity', 'dexFilterWhaleAmountMin', 'dexFilterWhalePeriod'
-  ];
-  
-  baseInputs.forEach(id => {
-    const el = document.getElementById(id);
-    if (el && el.value.trim() !== '') count++;
-  });
-  
-  // Compter les filtres DexScreener actifs
-  const dexInputs = [
-    'dexFilterSymbol', 'dexFilterStatus', 'dexFilterPriceMin', 'dexFilterPriceMax',
-    'dexFilterMarketCapMin', 'dexFilterMarketCapMax', 'dexFilterVolume1hMin',
-    'dexFilterVolume6hMin', 'dexFilterVolume24hMin', 'dexFilterTxns24hMin',
-    'dexFilterBuys24hMin', 'dexFilterSells24hMax', 'dexFilterLiquidityQuoteMin', 'dexFilterHasData',
-    'dexFilterBuySellRatio1h', 'dexFilterBuySellRatio24h', 'dexFilterRugScoreMin', 'dexFilterRugScoreMax'
-  ];
-
-  dexInputs.forEach(id => {
-    const el = document.getElementById(id);
-    if (el && el.value.trim() !== '') count++;
-  });
-
-  const holdersInputs = [
-    'dexFilterHoldersMin', 'dexFilterHoldersMax', 
-    'dexFilterHoldersGrowth', 'dexFilterHoldersDistribution'
-  ];
-
-  holdersInputs.forEach(id => {
-    const el = document.getElementById(id);
-    if (el && el.value.trim() !== '') count++;
-  });
-  if (currentHoldersCategory !== '') count++;
-  
-  
-  // Compter les filtres d'âge et temporels
-  if (currentAgeMin !== null || currentAgeMax !== null) count++;
-  if (window.dexTimeValue && window.dexTimeUnit) count++;
-  
-  if (currentWhaleFilter !== '') count++;
-  if (currentWhaleAmountMin !== null) count++;
-  if (currentWhalePeriod !== null) count++;
-
-  activeFiltersCount = count;
-  
-  const indicator = document.getElementById('filtersIndicator');
-   if (indicator) {
-    const filterCount = indicator.querySelector('.filter-count');
-    if (filterCount) {
-      if (count === 0) {
-        filterCount.textContent = 'Aucun filtre actif';
-        indicator.style.opacity = '0.6';
-      } else {
-        filterCount.textContent = `${count} filtre${count > 1 ? 's' : ''} actif${count > 1 ? 's' : ''}`;
-        indicator.style.opacity = '1';
-      }
-    }
-  }
-}
-
-function analyzeHoldersDistribution(holders, distribution) {
-  if (!holders || holders === 0) return 'no_holders';
-  
-  if (!distribution || distribution === 'Unknown') return 'unknown';
-  
-  // Extraire le pourcentage de concentration des top 10
-  const match = distribution.match(/(\d+\.\d+)%/);
-  if (match) {
-    const concentration = parseFloat(match[1]);
-    if (concentration < 20) return 'excellent';
-    if (concentration < 40) return 'good';
-    if (concentration < 60) return 'fair';
-    return 'poor';
-  }
-  
-  return 'unknown';
-}
-
-// Fonction d'export des données
-function exportData(format) {
-  if (filteredData.length === 0) {
-    alert('Aucune donnée à exporter avec les filtres actuels');
-    return;
-  }
-  
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-  const filename = `tokens_export_${timestamp}`;
-  
-  if (format === 'csv') {
-    exportToCSV(filteredData, filename);
-  } else if (format === 'json') {
-    exportToJSON(filteredData, filename);
-  }
-}
-
-function exportToCSV(data, filename) {
-  // Définir les colonnes à exporter
-  const columns = [
-    'symbol', 'address', 'price_usdc', 'invest_score', 'liquidity_usd', 'volume_24h',
-    'holders', 'age_hours', 'rug_score', 'bonding_curve_status', 'bonding_curve_progress',
-    'dexscreener_price_usd', 'dexscreener_market_cap', 'dexscreener_volume_24h',
-    'dexscreener_txns_24h', 'status', 'first_discovered_at', 'updated_at'
-  ];
-  
-  const headers = [
-    'Symbol', 'Address', 'Price USD', 'Score', 'Liquidity USD', 'Volume 24h',
-    'Holders', 'Age Hours', 'Rug Score', 'Bonding Status', 'Progress %',
-    'Dex Price USD', 'Dex Market Cap', 'Dex Volume 24h',
-    'Dex Txns 24h', 'Status', 'Discovered At', 'Updated At'
-  ];
-  
-  let csvContent = headers.join(',') + '\n';
-  
-  data.forEach(row => {
-    const values = columns.map(col => {
-      let value = row[col] || '';
-      // Échapper les guillemets et virgules
-      if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-        value = '"' + value.replace(/"/g, '""') + '"';
-      }
-      return value;
-    });
-    csvContent += values.join(',') + '\n';
-  });
-  
-  downloadFile(csvContent, `${filename}.csv`, 'text/csv');
-}
-
-function exportToJSON(data, filename) {
-  const jsonContent = JSON.stringify(data, null, 2);
-  downloadFile(jsonContent, `${filename}.json`, 'application/json');
-}
-
-function downloadFile(content, filename, contentType) {
-  const blob = new Blob([content], { type: contentType });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
-}
-
-// Fonction pour basculer entre les thèmes
-function toggleTheme() {
-  const currentTheme = document.documentElement.getAttribute('data-theme');
-  const newTheme = currentTheme === 'light' ? null : 'light';
-  
-  document.documentElement.setAttribute('data-theme', newTheme || 'dark');
-  
-  const themeButton = document.getElementById('themeToggle');
-  if (newTheme === 'light') {
-    themeButton.textContent = '🌙 Mode Sombre';
-    localStorage.setItem('theme', 'light');
-  } else {
-    themeButton.textContent = '☀️ Mode Clair';
-    localStorage.setItem('theme', 'dark');
-  }
-}
-
-// Charger le thème sauvegardé
-function loadSavedTheme() {
-  const savedTheme = localStorage.getItem('theme');
-  if (savedTheme === 'light') {
-    document.documentElement.setAttribute('data-theme', 'light');
-    document.getElementById('themeToggle').textContent = '🌙 Mode Sombre';
-  }
-}
-
-// === FONCTIONS D'AFFICHAGE ===
 function renderPage() {
   const start = (currentPage - 1) * perPage;
   const rows = filteredData.slice(start, start + perPage);
@@ -1323,6 +422,8 @@ function renderPage() {
     renderBaseTable(rows);
   } else if (currentTab === 'dexscreener') {
     renderDexScreenerTable(rows);
+  } else if (currentTab === 'pumpfun') {
+    renderPumpFunTable(rows);
   } else if (currentTab === 'analysis') {
     updateAnalysis();
   }
@@ -1365,126 +466,6 @@ function renderBaseTable(rows) {
   }
 }
 
-function renderDexScreenerTable(rows) {
-  const tbody = document.getElementById('dexscreenerTbody');
-  
-  if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="24" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
-  } else {
-    tbody.innerHTML = rows.map(r => {
-      const dexUrl = r.dexscreener_url || `https://dexscreener.com/solana/${r.address}`;
-      const dexUrlDisplay = (r.dexscreener_price_usd || 0) > 0 ? 
-        `<a href="${dexUrl}" target="_blank">🔗 Voir</a>` : 
-        'N/A';
-      
-      // Nouvelles colonnes avec formatage temporel
-      const pairCreatedAt = r.dexscreener_pair_created_at;
-      const pairCreatedTimeAgo = getTimeAgo(pairCreatedAt);
-      const pairCreatedFull = formatLocalDateTime(pairCreatedAt);
-      
-      const lastDexUpdate = r.last_dexscreener_update || r.updated_at;
-      const dexUpdateTimeAgo = getTimeAgo(lastDexUpdate);
-      const dexUpdateFull = formatLocalDateTime(lastDexUpdate);
-      
-      const priceChange1h = formatPriceChange(r.dexscreener_price_change_1h);
-      const priceChange6h = formatPriceChange(r.dexscreener_price_change_6h);
-      const priceChange24h = formatPriceChange(r.dexscreener_price_change_h24);
-      
-      // Ajout de la colonne Progress
-      const progressDisplay = getBondingProgressDisplay(r.bonding_curve_status, r.bonding_curve_progress);
-      const rugScore = r.rug_score || 50; 
-      const rugScoreClass = rugScore <= 30 ? 'rug-good' : rugScore <= 60 ? 'rug-medium' : 'rug-bad';
-      const rugcheckUrl = `https://rugcheck.xyz/tokens/${r.address}`;
-      const rugScoreDisplay = `
-        <div style="display: flex; align-items: center; gap: 4px; justify-content: center;">
-          <span class="rug-score ${rugScoreClass}" title="Score RugCheck: ${rugScore}/100 (plus bas = mieux)">${rugScore}</span>
-          <a href="${rugcheckUrl}" target="_blank" style="color: #00d4ff; text-decoration: none; font-size: 0.8rem;" title="Vérifier sur RugCheck.xyz">
-            🔍
-          </a>
-        </div>
-      `;
-      const holdersDisplay = getHoldersDisplay(r.holders, r.holder_distribution);
-      return `
-        <tr>
-          <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
-          <td>
-            <strong>${r.symbol}</strong><br>
-            <small>
-              <span id="history-${r.address}" style="font-size: 0.7rem;">
-                <span style="color: #888;">⏳ Vérification...</span>
-              </span>
-            </small>
-          </td>
-          <td>${getTokenStatusDisplay(r.status)}</td>
-          <td class="price">${(r.dexscreener_price_usd || 0).toFixed(8)}</td>
-          <td>${Math.round(r.dexscreener_market_cap || 0).toLocaleString()}</td>
-          <td>${holdersDisplay}</td>
-          <td>${(r.dexscreener_liquidity_base || 0).toFixed(2)}</td>
-          <td>${Math.round(r.dexscreener_liquidity_quote || 0).toLocaleString()}</td>
-          <td>${rugScoreDisplay}</td>
-          <td>${Math.round(r.dexscreener_volume_1h || 0).toLocaleString()}</td>
-          <td>${Math.round(r.dexscreener_volume_6h || 0).toLocaleString()}</td>
-          <td>${Math.round(r.dexscreener_volume_24h || 0).toLocaleString()}</td>
-          <td class="${priceChange1h.className}">${priceChange1h.text}</td>
-          <td class="${priceChange6h.className}">${priceChange6h.text}</td>
-          <td class="${priceChange24h.className}">${priceChange24h.text}</td>
-          <td>${r.dexscreener_txns_1h || 0}</td>
-          <td>${r.dexscreener_txns_6h || 0}</td>
-          <td>${r.dexscreener_txns_24h || 0}</td>
-          <td style="color: #00ff88">${r.dexscreener_buys_1h || 0}</td>
-          <td style="color: #ff6b6b">${r.dexscreener_sells_1h || 0}</td>
-          <td style="color: #00ff88">${r.dexscreener_buys_24h || 0}</td>
-          <td style="color: #ff6b6b">${r.dexscreener_sells_24h || 0}</td>
-          <td>${progressDisplay}</td>
-          <td id="whale-activity-${r.address}">
-  <span class="whale-indicator-loading">⏳</span>
-</td>
-          <td>${dexUrlDisplay}</td>
-          <td class="${pairCreatedTimeAgo.className}" title="${pairCreatedFull}">${pairCreatedTimeAgo.text}</td>
-          <td class="${dexUpdateTimeAgo.className}" title="${dexUpdateFull}">${dexUpdateTimeAgo.text}</td>
-        </tr>
-      `;
-    }).join('');
-    
-    rows.forEach(r => {
-      setTimeout(() => checkTokenHistory(r.address), Math.random() * 1000);
-      setTimeout(() => {
-      console.log('Triggering whale indicators update after table render');
-      updateWhaleIndicators();
-    }, 1500);
-    });
-  }
-}
-
-function testWhaleIndicators() {
-  console.log('=== TEST WHALE INDICATORS ===');
-  console.log('Current tab:', currentTab);
-  console.log('Filtered data:', filteredData.length, 'tokens');
-  
-  const whaleElements = document.querySelectorAll('[id^="whale-activity-"]');
-  console.log('Whale elements found:', whaleElements.length);
-  
-  whaleElements.forEach(el => {
-    console.log('Element:', el.id, 'Content:', el.innerHTML);
-  });
-  
-  debugWhaleAPI();
-  updateWhaleIndicators();
-}
-
-function getTokenStatusDisplay(status) { 
-  if (!status) return '<span class="token-status status-unknown">Unknown</span>'; 
-  const statusLower = String(status || '').toLowerCase().trim();
-  const statusMap = { 
-    'active': '<span class="token-status status-active">Active</span>', 
-    'inactive': '<span class="token-status status-inactive">Inactive</span>', 
-    'no_dex_data': '<span class="token-status status-no_dex_data">No Dex</span>', 
-    'archived': '<span class="token-status status-archived">Archived</span>', 
-    'blacklisted': '<span class="token-status status-blacklisted">Blacklisted</span>' 
-  }; 
-  return statusMap[statusLower] || `<span class="token-status status-unknown">${status}</span>`; 
-}
-
 function updateAnalysis() {
   const metricsContainer = document.getElementById('analysisMetrics');
   
@@ -1497,7 +478,6 @@ function updateAnalysis() {
   const avgScore = filteredData.reduce((sum, token) => sum + (token.invest_score || 0), 0) / totalTokens;
   const avgLiquidity = filteredData.reduce((sum, token) => sum + (token.liquidity_usd || 0), 0) / totalTokens;
   const avgVolume = filteredData.reduce((sum, token) => sum + (token.volume_24h || 0), 0) / totalTokens;
-  const avgHolders = filteredData.reduce((sum, token) => sum + (token.holders || 0), 0) / totalTokens;
   
   const highScoreTokens = filteredData.filter(token => (token.invest_score || 0) >= 80).length;
   const activeTokens = filteredData.filter(token => token.bonding_curve_status === 'active').length;
@@ -1505,9 +485,6 @@ function updateAnalysis() {
   
   const tokensWithDexData = filteredData.filter(token => (token.dexscreener_price_usd || 0) > 0).length;
   const totalDexVolume = filteredData.reduce((sum, token) => sum + (token.dexscreener_volume_24h || 0), 0);
-  const avgDexPrice = tokensWithDexData > 0 ? 
-    filteredData.filter(token => (token.dexscreener_price_usd || 0) > 0)
-      .reduce((sum, token) => sum + (token.dexscreener_price_usd || 0), 0) / tokensWithDexData : 0;
   
   const avgDexMarketCap = tokensWithDexData > 0 ?
     filteredData.filter(token => (token.dexscreener_market_cap || 0) > 0)
@@ -1556,12 +533,6 @@ function updateAnalysis() {
     </div>
     
     <div class="metric-card">
-      <div class="metric-title">💰 Prix Moyen DexScreener</div>
-      <div class="metric-value">${avgDexPrice.toFixed(6)}</div>
-      <div class="metric-subtitle">Prix moyen USD</div>
-    </div>
-    
-    <div class="metric-card">
       <div class="metric-title">🎯 Market Cap Moyen</div>
       <div class="metric-value">${(avgDexMarketCap/1000000).toFixed(2)}M</div>
       <div class="metric-subtitle">Market cap moyen DexScreener</div>
@@ -1600,7 +571,10 @@ function updatePagination() {
   document.getElementById("nextBtn").disabled = currentPage === Math.ceil(filteredData.length / perPage);
 }
 
-// === FONCTIONS DE PAGINATION ===
+// =============================================================================
+// FONCTIONS DE PAGINATION
+// =============================================================================
+
 function changePerPage() {
   perPage = +document.getElementById("perPage").value;
   currentPage = 1;
@@ -1621,7 +595,10 @@ function nextPage() {
   }
 }
 
-// === FONCTIONS DE CONTRÔLE ===
+// =============================================================================
+// FONCTIONS DE CONTRÔLE
+// =============================================================================
+
 function reloadData() {
   fetchData();
   document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
@@ -1641,68 +618,114 @@ function resetFilters() {
   document.getElementById('dexFilterHasData').value = '';
   document.getElementById('dexFilterStatus').value = '';
   document.querySelectorAll('.strategy-btn').forEach(btn => btn.classList.remove('active'));
-  currentStrategy = null;
   document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
   window.dexTimeValue = null;
   window.dexTimeUnit = null;
-  currentAgeMin = null;
-  currentAgeMax = null;
-  currentWhaleFilter = '';
-  currentWhaleAmountMin = null;
-  currentWhalePeriod = null;
   filteredData = [...data];
   currentPage = 1;
   updateFiltersIndicator();
   renderPage();
 }
 
-function testStrategy(strategyName) {
-  console.log(`🧪 Test de la stratégie: ${strategyName}`);
-  const strategy = strategies[strategyName];
-  console.log('Filtres à appliquer:', strategy.filters);
+// =============================================================================
+// FONCTIONS D'EXPORT
+// =============================================================================
+
+function exportData(format) {
+  if (filteredData.length === 0) {
+    alert('Aucune donnée à exporter avec les filtres actuels');
+    return;
+  }
   
-  // Test d'application
-  applyStrategy(strategyName, document.querySelector(`.strategy-${strategyName}`));
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+  const filename = `tokens_export_${timestamp}`;
   
-  setTimeout(() => {
-    console.log(`Résultats: ${filteredData.length} tokens trouvés`);
-  }, 500);
+  if (format === 'csv') {
+    exportToCSV(filteredData, filename);
+  } else if (format === 'json') {
+    exportToJSON(filteredData, filename);
+  }
 }
 
-// Vérifier l'historique de manière asynchrone
-function checkTokenHistory(address) {
-  fetch(`/api/token-has-history/${address}`)
-    .then(response => response.json())
-    .then(data => {
-      const element = document.getElementById(`history-${address}`);
-      if (element) {
-        if (data.has_history && data.data_points > 0) {
-          element.innerHTML = `
-            <a href="/dashboard/history?address=${address}" target="_blank" style="color: #00d4ff;">
-              📊 Historique (${data.data_points} pts)
-            </a>
-          `;
-        } else {
-          element.innerHTML = '<span style="color: #666;">📊 Pas d\'historique</span>';
-        }
+function exportToCSV(data, filename) {
+  const columns = [
+    'symbol', 'address', 'price_usdc', 'invest_score', 'liquidity_usd', 'volume_24h',
+    'holders', 'age_hours', 'rug_score', 'bonding_curve_status', 'bonding_curve_progress',
+    'dexscreener_price_usd', 'dexscreener_market_cap', 'dexscreener_volume_24h',
+    'dexscreener_txns_24h', 'status', 'first_discovered_at', 'updated_at'
+  ];
+  
+  const headers = [
+    'Symbol', 'Address', 'Price USD', 'Score', 'Liquidity USD', 'Volume 24h',
+    'Holders', 'Age Hours', 'Rug Score', 'Bonding Status', 'Progress %',
+    'Dex Price USD', 'Dex Market Cap', 'Dex Volume 24h',
+    'Dex Txns 24h', 'Status', 'Discovered At', 'Updated At'
+  ];
+  
+  let csvContent = headers.join(',') + '\n';
+  
+  data.forEach(row => {
+    const values = columns.map(col => {
+      let value = row[col] || '';
+      if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+        value = '"' + value.replace(/"/g, '""') + '"';
       }
-    })
-    .catch(() => {
-      const element = document.getElementById(`history-${address}`);
-      if (element) {
-        element.innerHTML = '<span style="color: #666;">📊 Pas d\'historique</span>';
-      }
+      return value;
     });
+    csvContent += values.join(',') + '\n';
+  });
+  
+  downloadFile(csvContent, `${filename}.csv`, 'text/csv');
 }
 
-async function toggleFav(address) {
-  await fetch(`/api/favorites/${address}`, { method: 'POST' });
-  alert('Ajouté aux favoris !');
+function exportToJSON(data, filename) {
+  const jsonContent = JSON.stringify(data, null, 2);
+  downloadFile(jsonContent, `${filename}.json`, 'application/json');
 }
 
+function downloadFile(content, filename, contentType) {
+  const blob = new Blob([content], { type: contentType });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
 
+// =============================================================================
+// FONCTIONS DE THÈME
+// =============================================================================
 
-// === FONCTIONS WHALE ACTIVITY ===
+function toggleTheme() {
+  const currentTheme = document.documentElement.getAttribute('data-theme');
+  const newTheme = currentTheme === 'light' ? null : 'light';
+  
+  document.documentElement.setAttribute('data-theme', newTheme || 'dark');
+  
+  const themeButton = document.getElementById('themeToggle');
+  if (newTheme === 'light') {
+    themeButton.textContent = '🌙 Mode Sombre';
+    localStorage.setItem('theme', 'light');
+  } else {
+    themeButton.textContent = '☀️ Mode Clair';
+    localStorage.setItem('theme', 'dark');
+  }
+}
+
+function loadSavedTheme() {
+  const savedTheme = localStorage.getItem('theme');
+  if (savedTheme === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.getElementById('themeToggle').textContent = '🌙 Mode Sombre';
+  }
+}
+
+// =============================================================================
+// FONCTIONS WHALE ACTIVITY
+// =============================================================================
 
 async function updateWhaleActivity() {
   try {
@@ -1723,7 +746,7 @@ async function fetchWhaleSummary() {
     const summary = await response.json();
     
     document.getElementById('whaleTransactions1h').textContent = summary.total_transactions || 0;
-    document.getElementById('whaleVolume1h').textContent = `$${(summary.total_volume_usd || 0).toLocaleString()}`;
+    document.getElementById('whaleVolume1h').textContent = `${(summary.total_volume_usd || 0).toLocaleString()}`;
     document.getElementById('whaleUniqueTokens').textContent = summary.unique_tokens || 0;
     document.getElementById('whaleUniqueWallets').textContent = summary.unique_wallets || 0;
     
@@ -1762,7 +785,6 @@ function renderWhaleFeed(feedItems) {
     const itemClass = item.is_critical ? 'whale-feed-critical' : 
                      item.is_in_database ? '' : 'whale-feed-new';
     
-    // Préparer les liens
     const links = [];
     if (item.dexscreener_url) {
       links.push(`<a href="${item.dexscreener_url}" target="_blank" class="whale-feed-link whale-feed-link-dex" title="Voir sur DexScreener">📊 DEX</a>`);
@@ -1774,7 +796,7 @@ function renderWhaleFeed(feedItems) {
       links.push(`<a href="${item.solscan_url}" target="_blank" class="whale-feed-link whale-feed-link-solscan" title="Voir transaction">🔍 TX</a>`);
     }
 
-   return `
+    return `
       <div class="whale-feed-item ${itemClass}">
         <div class="whale-feed-time-full" title="${item.timestamp_full}">
           ${item.timestamp_formatted}
@@ -1824,7 +846,6 @@ function renderWhaleFeed(feedItems) {
 
 function copyToClipboard(text) {
   navigator.clipboard.writeText(text).then(() => {
-    // Feedback visuel rapide
     const notification = document.createElement('div');
     notification.textContent = 'Copié!';
     notification.style.cssText = `
@@ -1905,10 +926,8 @@ async function updateWhaleIndicators() {
     const data = await response.json();
     const whaleByToken = {};
     
-    // Essayer différentes structures de données
     const transactions = data.whale_transactions || data.transactions || data.data || [];
     
-    // Indexer par token_address (sans logs)
     transactions.forEach(tx => {
       const tokenAddr = tx.token_address || tx.address;
       if (tokenAddr) {
@@ -1919,7 +938,6 @@ async function updateWhaleIndicators() {
       }
     });
     
-    // Mettre à jour les indicateurs (sans logs individuels)
     let updatedCount = 0;
     let foundCount = 0;
     
@@ -1935,13 +953,11 @@ async function updateWhaleIndicators() {
       }
     });
     
-    // Log résumé seulement
     console.log(`Whale indicators updated: ${updatedCount} elements, ${foundCount} with activity, ${transactions.length} total transactions`);
     
   } catch (error) {
     console.error('Error updating whale indicators:', error);
     
-    // En cas d'erreur, remplacer les sabliers par "Erreur" (sans logs)
     filteredData.forEach(token => {
       const element = document.getElementById(`whale-activity-${token.address}`);
       if (element && element.innerHTML.includes('⏳')) {
@@ -1951,30 +967,8 @@ async function updateWhaleIndicators() {
   }
 }
 
-
 function changeWhalePeriod() {
   updateWhaleIndicators();
-}
-
-async function debugWhaleAPI() {
-  try {
-    console.log('=== TESTING DIFFERENT WHALE PERIODS ===');
-    
-    // Tester 1h, 6h, 24h
-    for (const hours of [1, 6, 24]) {
-      const response = await fetch(`/api/whale-activity?hours=${hours}&limit=100`);
-      const data = await response.json();
-      console.log(`Period ${hours}h: ${data.whale_transactions?.length || 0} transactions`);
-      
-      if (data.whale_transactions?.length > 0) {
-        console.log(`  Latest: ${data.whale_transactions[0].timestamp} - $${data.whale_transactions[0].amount_usd}`);
-      }
-    }
-    
-    return data;
-  } catch (error) {
-    console.error('Whale API error:', error);
-  }
 }
 
 function generateWhaleIndicator(whaleActivity) {
@@ -1984,21 +978,21 @@ function generateWhaleIndicator(whaleActivity) {
   
   const amount = whaleActivity.amount_usd || 0;
   const type = whaleActivity.transaction_type;
-  const timeAgo = getTimeAgoExtended(whaleActivity.timestamp); // Nouvelle fonction
+  const timeAgo = getTimeAgoExtended(whaleActivity.timestamp);
   
   if (amount >= 100000) {
-    return `<span class="whale-indicator-critical">⚡ $${(amount/1000).toFixed(0)}K (${timeAgo})</span>`;
+    return `<span class="whale-indicator-critical">⚡ ${(amount/1000).toFixed(0)}K (${timeAgo})</span>`;
   } else if (amount >= 10000) {
     if (type === 'SELL' || type === 'sell') {
-      return `<span class="whale-indicator-sell">🔴 -$${(amount/1000).toFixed(0)}K (${timeAgo})</span>`;
+      return `<span class="whale-indicator-sell">🔴 -${(amount/1000).toFixed(0)}K (${timeAgo})</span>`;
     } else {
-      return `<span class="whale-indicator-buy">🟢 +$${(amount/1000).toFixed(0)}K (${timeAgo})</span>`;
+      return `<span class="whale-indicator-buy">🟢 +${(amount/1000).toFixed(0)}K (${timeAgo})</span>`;
     }
   } else if (amount >= 1000) {
     if (type === 'SELL' || type === 'sell') {
-      return `<span class="whale-indicator-medium">🟠 -$${(amount/1000).toFixed(1)}K (${timeAgo})</span>`;
+      return `<span class="whale-indicator-medium">🟠 -${(amount/1000).toFixed(1)}K (${timeAgo})</span>`;
     } else {
-      return `<span class="whale-indicator-medium">🟡 +$${(amount/1000).toFixed(1)}K (${timeAgo})</span>`;
+      return `<span class="whale-indicator-medium">🟡 +${(amount/1000).toFixed(1)}K (${timeAgo})</span>`;
     }
   } else {
     return '<span class="whale-indicator-none">💤 No activity</span>';
@@ -2019,351 +1013,64 @@ function getTimeAgoExtended(timestamp) {
   return `${Math.floor(diffDays/7)}w`;
 }
 
-function debugWhaleIndicators() {
-  console.log('Current tab:', currentTab);
-  console.log('Filtered data length:', filteredData.length);
-  
-  // Vérifier combien d'éléments whale-activity existent
-  const whaleElements = document.querySelectorAll('[id^="whale-activity-"]');
-  console.log('Found whale activity elements:', whaleElements.length);
-  
-  // Vérifier combien ont encore le sablier
-  const loadingElements = document.querySelectorAll('[id^="whale-activity-"] .whale-indicator-loading');
-  console.log('Elements still loading:', loadingElements.length);
-  
-  // Forcer la mise à jour immédiate
-  updateWhaleIndicators();
-}
+// =============================================================================
+// FONCTIONS UTILITAIRES
+// =============================================================================
 
-
-function getTimeAgoShort(timestamp) {
-  const now = new Date();
-  const time = new Date(timestamp);
-  const diffMinutes = Math.floor((now - time) / (1000 * 60));
+function updateFiltersIndicator() {
+  let count = 0;
   
-  if (diffMinutes < 1) return 'now';
-  if (diffMinutes < 60) return `${diffMinutes}m`;
-  return `${Math.floor(diffMinutes/60)}h`;
-}
-
-//--------------------FIN FONCTIONS WHALES-----------------------------
-
-function setWhaleActivityFilter_old(type, btn) {
-  document.getElementById('dexFilterWhaleActivity').value = type;
-  
-  // Retirer active de tous les boutons whale
-  document.querySelectorAll('.whale-preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  
-  applyDexFiltersWithWhaleUpdate();
-}
-
-function setWhaleActivityFilter(type, btn) {
-  // Stocker la valeur dans une variable au lieu d'un élément HTML
-  currentWhaleFilter = type;
-  
-  // Retirer active de tous les boutons whale
-  document.querySelectorAll('.whale-preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  
-  // Appliquer directement le filtre
-  applyDexFilters();
-}
-
-
-function debugWhaleFilters() {
-  console.log('=== DEBUG WHALE FILTERS ===');
-  
-  // Compter les tokens avec activité whale
-  let dbWhaleCount = 0;
-  let indicatorWhaleCount = 0;
-  
-  data.forEach(token => {
-    const whaleActivity1h = token.whale_activity_1h || 0;
-    const whaleMaxAmount1h = token.whale_max_amount_1h || 0;
-    
-    if (whaleActivity1h > 0 || whaleMaxAmount1h > 0) {
-      dbWhaleCount++;
-    }
-    
-    const whaleIndicatorElement = document.getElementById(`whale-activity-${token.address}`);
-    if (whaleIndicatorElement) {
-      const whaleText = whaleIndicatorElement.textContent || '';
-      if (!whaleText.includes('💤') && !whaleText.includes('⏳') && !whaleText.includes('❌')) {
-        indicatorWhaleCount++;
-      }
-    }
-  });
-  
-  console.log(`Tokens avec whale en DB: ${dbWhaleCount}`);
-  console.log(`Tokens avec whale dans indicateurs: ${indicatorWhaleCount}`);
-  console.log(`Total tokens: ${data.length}`);
-  console.log(`Filtered tokens: ${filteredData.length}`);
-  
-  // Tester le filtre "has_whale" sans logs détaillés
-  const currentFilter = document.getElementById('dexFilterWhaleActivity').value;
-  console.log(`Filtre whale actuel: "${currentFilter}"`);
-  
-  if (currentFilter === 'has_whale') {
-    console.log('Test du filtre "has_whale":');
-    let passedCount = 0;
-    
-    data.forEach(row => {
-      const whaleActivity1h = row.whale_activity_1h || 0;
-      const whaleActivity6h = row.whale_activity_6h || 0; 
-      const whaleActivity24h = row.whale_activity_24h || 0;
-      
-      const whaleIndicatorElement = document.getElementById(`whale-activity-${row.address}`);
-      let hasRealtimeWhaleActivity = false;
-      
-      if (whaleIndicatorElement) {
-        const whaleText = whaleIndicatorElement.textContent || '';
-        hasRealtimeWhaleActivity = whaleText.includes('🟢') || whaleText.includes('🔴') || 
-          whaleText.includes('🟡') || whaleText.includes('⚡') || whaleText.includes('K');
-      }
-      
-      const hasWhale = whaleActivity1h > 0 || whaleActivity6h > 0 || whaleActivity24h > 0 || hasRealtimeWhaleActivity;
-      if (hasWhale) passedCount++;
-    });
-    
-    console.log(`Tokens qui passent le filtre "has_whale": ${passedCount}`);
-  }
-}
-
-function quickWhaleTest() {
-  console.log('=== QUICK WHALE TEST ===');
-  
-  // Vérifier les éléments whale visibles actuellement
-  const whaleElements = document.querySelectorAll('[id^="whale-activity-"]');
-  console.log(`Éléments whale dans le DOM: ${whaleElements.length}`);
-  
-  let activeElements = 0;
-  let loadingElements = 0;
-  let errorElements = 0;
-  
-  whaleElements.forEach(el => {
-    const text = el.textContent || '';
-    if (text.includes('⏳')) loadingElements++;
-    else if (text.includes('❌')) errorElements++;
-    else if (!text.includes('💤')) activeElements++;
-  });
-  
-  console.log(`- En chargement: ${loadingElements}`);
-  console.log(`- Avec activité: ${activeElements}`);
-  console.log(`- En erreur: ${errorElements}`);
-  console.log(`- Sans activité: ${whaleElements.length - loadingElements - activeElements - errorElements}`);
-  
-  // Forcer une mise à jour
-  updateWhaleIndicators();
-}
-
-async function createTestWhaleDataAndTest() {
-  console.log('=== CRÉATION DONNÉES WHALE DE TEST ===');
-  
-  try {
-    // Créer des données de test
-    const response = await fetch('/api/test-whale-data');
-    const result = await response.json();
-    console.log('Données whale créées:', result);
-    
-    // Attendre un peu puis recharger les données
-    setTimeout(async () => {
-      console.log('Rechargement des données...');
-      await fetchData();
-      
-      setTimeout(() => {
-        console.log('Test des colonnes whale après rechargement:');
-        checkWhaleColumns();
-        
-        setTimeout(() => {
-          console.log('Test du filtre has_whale:');
-          testWhaleFilter('has_whale');
-        }, 1000);
-      }, 1000);
-    }, 2000);
-    
-  } catch (error) {
-    console.error('Erreur:', error);
-  }
-}
-
-async function debugWhaleEndpoint() {
-  try {
-    const response = await fetch('/api/debug-whale-data');
-    const data = await response.json();
-    console.log('=== DEBUG WHALE ENDPOINT ===');
-    console.log('Échantillon transactions whale:', data.whale_transactions_sample);
-    console.log('Tokens qui matchent:', data.matching_tokens);
-    console.log('Nombre de tokens avec whale activity:', data.tokens_with_whale_activity);
-  } catch (error) {
-    console.error('Erreur debug endpoint:', error);
-  }
-}
-
-
-function testWhaleFilter(filterType) {
-  console.log(`=== TEST FILTRE WHALE: ${filterType} ===`);
-  
-  // Simuler la sélection du filtre
-  document.getElementById('dexFilterWhaleActivity').value = filterType;
-  
-  // Compter combien de tokens passeraient le filtre
-  let passedCount = 0;
-  
-  data.forEach(row => {
-    const whaleActivity1h = row.whale_activity_1h || 0;
-    const whaleActivity6h = row.whale_activity_6h || 0;
-    const whaleActivity24h = row.whale_activity_24h || 0;
-    const whaleMaxAmount1h = row.whale_max_amount_1h || 0;
-    const whaleMaxAmount6h = row.whale_max_amount_6h || 0;
-    const whaleMaxAmount24h = row.whale_max_amount_24h || 0;
-    
-    const whaleIndicatorElement = document.getElementById(`whale-activity-${row.address}`);
-    let hasRealtimeWhaleActivity = false;
-    let realtimeWhaleAmount = 0;
-    
-    if (whaleIndicatorElement) {
-      const whaleText = whaleIndicatorElement.textContent || '';
-      const amountMatch = whaleText.match(/\$(\d+(?:\.\d+)?)K/);
-      if (amountMatch) {
-        realtimeWhaleAmount = parseFloat(amountMatch[1]) * 1000;
-        hasRealtimeWhaleActivity = realtimeWhaleAmount > 0;
-      }
-      hasRealtimeWhaleActivity = hasRealtimeWhaleActivity || 
-        whaleText.includes('🟢') || whaleText.includes('🔴') || 
-        whaleText.includes('🟡') || whaleText.includes('⚡');
-    }
-    
-    let passed = false;
-    switch (filterType) {
-      case 'has_whale':
-        passed = whaleActivity1h > 0 || whaleActivity6h > 0 || whaleActivity24h > 0 || hasRealtimeWhaleActivity;
-        break;
-      case 'critical_whale':
-        passed = whaleMaxAmount1h >= 50000 || whaleMaxAmount6h >= 50000 || whaleMaxAmount24h >= 50000 || realtimeWhaleAmount >= 50000;
-        break;
-      case 'recent_whale':
-        passed = whaleActivity1h > 0 || hasRealtimeWhaleActivity;
-        break;
-    }
-    
-    if (passed) {
-      passedCount++;
-      if (passedCount <= 3) { // Afficher seulement les 3 premiers
-        console.log(`✓ ${row.symbol}: DB(1h:${whaleActivity1h}, max:${whaleMaxAmount1h}) RT(${realtimeWhaleAmount})`);
-      }
-    }
-  });
-  
-  console.log(`Total tokens qui passent le filtre "${filterType}": ${passedCount}`);
-  
-  // Remettre le filtre à vide
-  document.getElementById('dexFilterWhaleActivity').value = '';
-}
-
-// === FONCTION POUR VÉRIFIER LES COLONNES WHALE DISPONIBLES ===
-function checkWhaleColumns() {
-  if (data.length === 0) {
-    console.log('Aucune donnée disponible');
-    return;
-  }
-  
-  const firstToken = data[0];
-  const whaleColumns = Object.keys(firstToken).filter(key => key.includes('whale'));
-  console.log('=== COLONNES WHALE DISPONIBLES ===');
-  console.log(whaleColumns);
-  
-  // Afficher seulement les tokens avec des données whale
-  const tokensWithWhale = data.filter(token => 
-    whaleColumns.some(col => token[col] && token[col] > 0)
-  ).slice(0, 5); // Limiter à 5 tokens max
-  
-  console.log('\n=== ÉCHANTILLON TOKENS AVEC ACTIVITÉ WHALE ===');
-  tokensWithWhale.forEach(token => {
-    const whaleData = whaleColumns.reduce((obj, col) => {
-      if (token[col] && token[col] > 0) obj[col] = token[col];
-      return obj;
-    }, {});
-    if (Object.keys(whaleData).length > 0) {
-      console.log(`${token.symbol}:`, whaleData);
-    }
-  });
-}
-
-async function applyDexFiltersWithWhaleUpdate() {
-  // S'assurer que les indicateurs whale sont à jour avant le filtrage
-  await updateWhaleIndicators();
-  
-  // Attendre un peu pour que les indicateurs se mettent à jour
-  setTimeout(() => {
-    applyDexFilters();
-  }, 1000);
-}
-
-function clearWhaleActivityFilter_old(btn) {
-  document.getElementById('dexFilterWhaleActivity').value = '';
-  document.getElementById('dexFilterWhaleAmountMin').value = '';
-  document.getElementById('dexFilterWhalePeriod').value = '';
-  
-  document.querySelectorAll('.whale-preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  
-  applyDexFilters();
-}
-
-function clearWhaleActivityFilter(btn) {
-  // Réinitialiser toutes les variables whale
-  currentWhaleFilter = '';
-  currentWhaleAmountMin = null;
-  currentWhalePeriod = null;
-  
-  document.querySelectorAll('.whale-preset-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  
-  applyDexFilters();
-}
-
-function setupDexFiltersEventListeners() {
-  // Event listeners pour tous les filtres DexScreener incluant holders
-  const allDexFilterSelectors = [
-    '#dexscreener-content .filter-panel input',
-    '#dexscreener-content .filter-panel select'
+  const baseInputs = [
+    'filterSymbol', 'filterBondingStatus', 'filterProgressMin', 'filterProgressMax',
+    'filterPriceMin', 'filterPriceMax', 'filterScoreMin', 'filterScoreMax',
+    'filterLiquidityMin', 'filterLiquidityMax', 'filterVolumeMin', 'filterVolumeMax',
+    'filterHoldersMin', 'filterHoldersMax', 'filterAgeMin', 'filterAgeMax',
+    'filterRiskMin', 'filterRiskMax', 'filterDiscoveredAt', 'filterTimeValue'
   ];
   
-  allDexFilterSelectors.forEach(selector => {
-    document.querySelectorAll(selector).forEach(input => { 
-      // Supprimer les anciens listeners pour éviter les doublons
-      input.removeEventListener('input', dexFilterHandler);
-      // Ajouter le nouveau listener
-      input.addEventListener('input', dexFilterHandler);
-    }); 
+  baseInputs.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value.trim() !== '') count++;
   });
-}
+  
+  const dexInputs = [
+    'dexFilterSymbol', 'dexFilterStatus', 'dexFilterPriceMin', 'dexFilterPriceMax',
+    'dexFilterMarketCapMin', 'dexFilterMarketCapMax', 'dexFilterVolume1hMin',
+    'dexFilterVolume6hMin', 'dexFilterVolume24hMin', 'dexFilterTxns24hMin',
+    'dexFilterBuys24hMin', 'dexFilterSells24hMax', 'dexFilterLiquidityQuoteMin', 'dexFilterHasData',
+    'dexFilterBuySellRatio1h', 'dexFilterBuySellRatio24h', 'dexFilterRugScoreMin', 'dexFilterRugScoreMax'
+  ];
 
-function dexFilterHandler() {
-  clearTimeout(debounceTimeout); 
-  debounceTimeout = setTimeout(() => { 
-    applyDexFilters();
-  }, 300);
-}
+  dexInputs.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value.trim() !== '') count++;
+  });
 
-function baseFilterHandler() {
-  clearTimeout(debounceTimeout);
-  debounceTimeout = setTimeout(() => {
-    applyFilters();
-  }, 300);
+  activeFiltersCount = count;
+  
+  const indicator = document.getElementById('filtersIndicator');
+  if (indicator) {
+    const filterCount = indicator.querySelector('.filter-count');
+    if (filterCount) {
+      if (count === 0) {
+        filterCount.textContent = 'Aucun filtre actif';
+        indicator.style.opacity = '0.6';
+      } else {
+        filterCount.textContent = `${count} filtre${count > 1 ? 's' : ''} actif${count > 1 ? 's' : ''}`;
+        indicator.style.opacity = '1';
+      }
+    }
+  }
 }
 
 function highlightActiveFilters() {
-  // Base filters
   const baseInputs = [
     'filterSymbol', 'filterBondingStatus', 'filterProgressMin', 'filterProgressMax',
     'filterPriceMin', 'filterPriceMax', 'filterScoreMin', 'filterScoreMax',
     'filterLiquidityMin', 'filterLiquidityMax', 'filterVolumeMin', 'filterVolumeMax',
     'filterHoldersMin', 'filterHoldersMax', 'filterAgeMin', 'filterAgeMax',
     'filterRiskMin', 'filterRiskMax', 'filterDiscoveredAt', 'filterTimeValue', 
-    'filterTimeUnit', 'dexFilterRugScoreMin', 'dexFilterRugScoreMax',
-    //'dexFilterWhaleActivity', 'dexFilterWhaleAmountMin', 'dexFilterWhalePeriod'
+    'filterTimeUnit', 'dexFilterRugScoreMin', 'dexFilterRugScoreMax'
   ];
 
   baseInputs.forEach(id => {
@@ -2375,13 +1082,11 @@ function highlightActiveFilters() {
     }
   });
 
-  // Dex filters
   const dexInputs = [
     'dexFilterSymbol', 'dexFilterStatus', 'dexFilterPriceMin', 'dexFilterPriceMax',
     'dexFilterMarketCapMin', 'dexFilterMarketCapMax', 'dexFilterVolume1hMin',
     'dexFilterVolume6hMin', 'dexFilterVolume24hMin', 'dexFilterTxns24hMin',
     'dexFilterBuys24hMin', 'dexFilterSells24hMax', 'dexFilterLiquidityQuoteMin', 'dexFilterHasData',
-    //'dexFilterPriceChange1hMin', 'dexFilterPriceChange6hMin', 'dexFilterPriceChange24hMin'
     'dexFilterHoldersMin', 'dexFilterHoldersMax', 'dexFilterHoldersGrowth', 'dexFilterHoldersDistribution'
   ];
 
@@ -2394,7 +1099,6 @@ function highlightActiveFilters() {
     }
   });
 
-  // Highlight preset buttons
   document.querySelectorAll('.preset-btn').forEach(btn => {
     if (btn.classList.contains('active')) {
       btn.classList.add('filter-active');
@@ -2404,35 +1108,62 @@ function highlightActiveFilters() {
   });
 }
 
-// === ÉVÉNEMENTS ===
-let debounceTimeout;
+function checkTokenHistory(address) {
+  fetch(`/api/token-has-history/${address}`)
+    .then(response => response.json())
+    .then(data => {
+      const element = document.getElementById(`history-${address}`);
+      if (element) {
+        if (data.has_history && data.data_points > 0) {
+          element.innerHTML = `
+            <a href="/dashboard/history?address=${address}" target="_blank" style="color: #00d4ff;">
+              📊 Historique (${data.data_points} pts)
+            </a>
+          `;
+        } else {
+          element.innerHTML = '<span style="color: #666;">📊 Pas d\'historique</span>';
+        }
+      }
+    })
+    .catch(() => {
+      const element = document.getElementById(`history-${address}`);
+      if (element) {
+        element.innerHTML = '<span style="color: #666;">📊 Pas d\'historique</span>';
+      }
+    });
+}
 
-// Filtres onglet base
+async function toggleFav(address) {
+  await fetch(`/api/favorites/${address}`, { method: 'POST' });
+  alert('Ajouté aux favoris !');
+}
+
+// =============================================================================
+// INITIALISATION
+// =============================================================================
+
 document.addEventListener('DOMContentLoaded', function() {
   console.log('🚀 Initialisation du dashboard...');
-  /*document.querySelectorAll('#base-content .filter-panel input, #base-content .filter-panel select').forEach(input => {
+  
+  // Filtres onglet base
+  document.querySelectorAll('#base-content .filter-panel input, #base-content .filter-panel select').forEach(input => {
     input.addEventListener('input', () => {
       clearTimeout(debounceTimeout);
       debounceTimeout = setTimeout(() => {
         applyFilters();
       }, 300);
     });
-  });*/
-
-  // Filtres onglet DexScreener
-  document.querySelectorAll('#dexscreener-content .filter-panel input, #dexscreener-content .filter-panel select').forEach(input => { 
-    input.addEventListener('input', () => { 
-      clearTimeout(debounceTimeout); 
-      debounceTimeout = setTimeout(() => { 
-        applyDexFilters();
-      }, 300);
-    }); 
   });
 
-  // Setup des listeners DexScreener
-  setupDexFiltersEventListeners();
+  // Setup des listeners DexScreener et PumpFun
+  if (typeof setupDexFiltersEventListeners === 'function') {
+    setupDexFiltersEventListeners();
+  }
+  if (typeof setupPumpFiltersEventListeners === 'function') {
+    setupPumpFiltersEventListeners();
+  }
 
-  // === INITIALISATION ===
+  // Initialisation
   loadSavedTheme();
   fetchData();
   startAutoRefresh();
@@ -2440,15 +1171,9 @@ document.addEventListener('DOMContentLoaded', function() {
   updateFiltersIndicator();
   startWhaleAutoRefresh();
 
-   setTimeout(() => {
+  setTimeout(() => {
     updateWhaleIndicators();
   }, 2000);
 
-  // Ajouter les fonctions de debug au window pour accès console
-  window.debugFilters = debugFilters;
-  window.forceResetAllFilters = forceResetAllFilters;
-  
   console.log('✅ Dashboard initialisé');
-  console.log('💡 Fonctions de debug disponibles: debugFilters(), forceResetAllFilters()');
-
 });

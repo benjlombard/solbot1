@@ -84,6 +84,7 @@
       <button class="tab" onclick="switchTab('dexscreener', this)">📈 DexScreener</button>
       <button class="tab" onclick="switchTab('analysis', this)">🔬 Analyse</button>
       <button class="tab" onclick="switchTab('whale', this)">🐋 Whale Activity</button>
+      <button class="tab" onclick="switchTab('pumpfun', this)">🚀 Pump.fun</button>
     </div>
   </div>
 
@@ -445,6 +446,234 @@
   </div>
 </div>
 
+
+<div id="pumpfun-content" class="tab-content">
+  <!-- Légende des statuts Pump.fun -->
+  <div class="status-legend">
+    <div class="legend-item">
+      <span class="pump-status pump-active">🟢 Active</span>
+      <span>Token actif sur Pump.fun</span>
+    </div>
+    <div class="legend-item">
+      <span class="pump-status pump-complete">🔵 Complete</span>
+      <span>Bonding curve terminée</span>
+    </div>
+    <div class="legend-item">
+      <span class="pump-status pump-migrated">🟣 Migrated</span>
+      <span>Migré vers Raydium</span>
+    </div>
+    <div class="legend-item">
+      <span class="pump-status pump-nsfw">🔞 NSFW</span>
+      <span>Contenu explicite</span>
+    </div>
+    <div class="legend-item">
+      <span class="pump-status pump-not-found">⚫ Not Found</span>
+      <span>Pas sur Pump.fun</span>
+    </div>
+  </div>
+
+
+  <div class="filter-panel">
+    <div class="filter-section">
+      <div class="filter-section-title">🎯 Filtres de Base</div>
+      <div class="filter-group">
+        <div class="input-group">
+          <label>Symbol:</label>
+          <input type="text" id="pumpFilterSymbol" placeholder="Symbol">
+        </div>
+        
+        <div class="input-group">
+          <label>🏷️ Status Pump:</label>
+          <select id="pumpFilterStatus">
+            <option value="">Tous les status</option>
+            <option value="exists">Existe sur Pump.fun</option>
+            <option value="not_exists">Pas sur Pump.fun</option>
+            <option value="complete">Bonding curve terminée</option>
+            <option value="active">Bonding curve active</option>
+            <option value="migrated">Migré vers Raydium</option>
+          </select>
+        </div>
+        
+        <div class="input-group">
+          <label>🔞 Contenu:</label>
+          <select id="pumpFilterNSFW">
+            <option value="">Tout contenu</option>
+            <option value="false">Safe uniquement</option>
+            <option value="true">NSFW uniquement</option>
+          </select>
+        </div>
+        
+        <div class="input-group">
+          <label>📺 Nom affiché:</label>
+          <select id="pumpFilterShowName">
+            <option value="">Tous</option>
+            <option value="true">Nom affiché</option>
+            <option value="false">Nom masqué</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-section-title">💰 Métriques Financières</div>
+      <div class="filter-group">
+        <div class="input-group">
+          <label>Market Cap USD Min:</label>
+          <input type="number" id="pumpFilterMarketCapMin" placeholder="1000" step="100">
+        </div>
+        
+        <div class="input-group">
+          <label>Market Cap USD Max:</label>
+          <input type="number" id="pumpFilterMarketCapMax" placeholder="1000000" step="100">
+        </div>
+        
+        <div class="input-group">
+          <label>Market Cap SOL Min:</label>
+          <input type="number" id="pumpFilterMarketCapSolMin" placeholder="10" step="1">
+        </div>
+        
+        <div class="input-group">
+          <label>Market Cap SOL Max:</label>
+          <input type="number" id="pumpFilterMarketCapSolMax" placeholder="1000" step="1">
+        </div>
+        
+        <div class="input-group">
+          <label>Total Supply Min:</label>
+          <input type="number" id="pumpFilterTotalSupplyMin" placeholder="1000000" step="1000">
+        </div>
+        
+        <div class="input-group">
+          <label>Total Supply Max:</label>
+          <input type="number" id="pumpFilterTotalSupplyMax" placeholder="1000000000" step="1000">
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-section-title">⏰ Filtres Temporels</div>
+      <div class="filter-group">
+        <label>🕐 Âge sur Pump.fun:</label>
+        <div class="preset-buttons pump-age-presets">
+          <button class="preset-btn" onclick="setPumpAgeFilter(0, 1, this)">Très récent (0-1h)</button>
+          <button class="preset-btn" onclick="setPumpAgeFilter(1, 6, this)">Nouveau (1-6h)</button>
+          <button class="preset-btn" onclick="setPumpAgeFilter(6, 24, this)">Récent (6-24h)</button>
+          <button class="preset-btn" onclick="setPumpAgeFilter(24, 168, this)">Établi (1-7j)</button>
+          <button class="preset-btn" onclick="setPumpAgeFilter(168, null, this)">Ancien (>7j)</button>
+          <button class="preset-btn" onclick="clearPumpAgeFilter(this)">Tous âges</button>
+        </div>
+        
+        <div style="margin-top: 0.5rem;">
+          <label>Dernière MAJ Pump.fun:</label>
+          <div class="preset-buttons">
+            <button class="preset-btn" onclick="setPumpTimeFilter(30, 'minutes', this)">30min</button>
+            <button class="preset-btn" onclick="setPumpTimeFilter(1, 'hours', this)">1h</button>
+            <button class="preset-btn" onclick="setPumpTimeFilter(6, 'hours', this)">6h</button>
+            <button class="preset-btn" onclick="setPumpTimeFilter(24, 'hours', this)">24h</button>
+            <button class="preset-btn" onclick="clearPumpTimeFilter(this)">Tout</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-section-title">📊 Réserves et Liquidité</div>
+      <div class="filter-group">
+        <div class="input-group">
+          <label>Réserves SOL Virtuelles Min:</label>
+          <input type="number" id="pumpFilterVirtualSolMin" placeholder="0" step="1">
+        </div>
+        
+        <div class="input-group">
+          <label>Réserves SOL Virtuelles Max:</label>
+          <input type="number" id="pumpFilterVirtualSolMax" placeholder="1000" step="1">
+        </div>
+        
+        <div class="input-group">
+          <label>Réserves Token Virtuelles Min:</label>
+          <input type="number" id="pumpFilterVirtualTokenMin" placeholder="1000000" step="1000">
+        </div>
+        
+        <div class="input-group">
+          <label>Réserves Token Virtuelles Max:</label>
+          <input type="number" id="pumpFilterVirtualTokenMax" placeholder="1000000000" step="1000">
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-section-title">👤 Créateur et Social</div>
+      <div class="filter-group">
+        <div class="input-group">
+          <label>Créateur:</label>
+          <input type="text" id="pumpFilterCreator" placeholder="Adresse créateur" style="width: 200px;">
+        </div>
+        
+        <div class="input-group">
+          <label>Nom d'utilisateur:</label>
+          <input type="text" id="pumpFilterUsername" placeholder="Username">
+        </div>
+        
+        <div class="input-group">
+          <label>💬 Réponses Min:</label>
+          <input type="number" id="pumpFilterReplyCountMin" placeholder="0" step="1">
+        </div>
+        
+        <div class="input-group">
+          <label>🔗 Réseaux sociaux:</label>
+          <select id="pumpFilterSocial">
+            <option value="">Tous</option>
+            <option value="has_twitter">Avec Twitter</option>
+            <option value="has_telegram">Avec Telegram</option>
+            <option value="has_website">Avec Website</option>
+            <option value="has_any_social">Au moins un réseau</option>
+            <option value="no_social">Aucun réseau</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-section-title">🎯 Filtres Rapides</div>
+      <div class="filter-group">
+        <div class="preset-buttons pump-quick-filters">
+          <button class="preset-btn" onclick="applyPumpQuickFilter('new_gems', this)">💎 Nouveaux Gems</button>
+          <button class="preset-btn" onclick="applyPumpQuickFilter('completed_ready', this)">🚀 Prêts Migration</button>
+          <button class="preset-btn" onclick="applyPumpQuickFilter('high_activity', this)">🔥 Forte Activité</button>
+          <button class="preset-btn" onclick="applyPumpQuickFilter('early_stage', this)">🌱 Phase Précoce</button>
+          <button class="preset-btn" onclick="applyPumpQuickFilter('social_verified', this)">✅ Réseaux Vérifiés</button>
+          <button class="preset-btn" onclick="clearPumpFilters(this)">🧹 Tout Effacer</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tableau Pump.fun -->
+  <table id="pumpfunTable">
+    <thead>
+      <tr>
+        <th>⭐</th>
+        <th>Symbol / Info</th>
+        <th>🎯 Status Pump</th>
+        <th>🖼️ Image</th>
+        <th>💰 Market Cap USD</th>
+        <th>💰 Market Cap SOL</th>
+        <th>📊 Total Supply</th>
+        <th>🔄 Progress</th>
+        <th>💧 Réserves SOL</th>
+        <th>🪙 Réserves Token</th>
+        <th>👤 Créateur</th>
+        <th>💬 Réponses</th>
+        <th>🔗 Réseaux</th>
+        <th>🕐 Créé sur Pump</th>
+        <th>🔗 URL Pump.fun</th>
+        <th>⏰ MAJ Pump</th>
+      </tr>
+    </thead>
+    <tbody id="pumpfunTbody"></tbody>
+  </table>
+</div>
+
+
   <!-- Pagination -->
   <div class="pagination">
     <button id="prevBtn" onclick="prevPage()">Précédent</button>
@@ -452,6 +681,9 @@
     <button id="nextBtn" onclick="nextPage()">Suivant</button>
   </div>
 
+  <script src="{{ url_for('static', filename='js/dexscreener_module.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/pump_fun_module.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard_detail.js') }}"></script>
+
 </body>
 </html>

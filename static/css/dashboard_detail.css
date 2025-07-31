@@ -1371,5 +1371,376 @@ th {
 }
 
 
+/* === STYLES POUR L'ONGLET PUMP.FUN === */
+
+/* Statuts Pump.fun */
+.pump-status {
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  display: inline-block;
+  min-width: 70px;
+  text-align: center;
+}
+
+.pump-active {
+  background: linear-gradient(45deg, #4CAF50, #8BC34A);
+  color: #fff;
+}
+
+.pump-complete {
+  background: linear-gradient(45deg, #2196F3, #03A9F4);
+  color: #fff;
+}
+
+.pump-migrated {
+  background: linear-gradient(45deg, #9C27B0, #E91E63);
+  color: #fff;
+}
+
+.pump-nsfw {
+  background: linear-gradient(45deg, #FF5722, #F44336);
+  color: #fff;
+}
+
+.pump-not-found {
+  background: linear-gradient(45deg, #424242, #616161);
+  color: #fff;
+}
+
+/* Image préview Pump.fun */
+.pump-image-preview {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.pump-image-preview:hover {
+  transform: scale(1.1);
+}
+
+.pump-image-placeholder {
+  width: 40px;
+  height: 40px;
+  border: 1px dashed var(--border-light);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+/* Info token Pump.fun */
+.pump-token-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.pump-token-symbol {
+  color: var(--text-accent);
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.pump-token-name {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pump-token-description {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+}
+
+/* Créateur info */
+.pump-creator-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.pump-creator-username {
+  color: var(--text-accent);
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+
+.pump-creator-address {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-family: monospace;
+  cursor: pointer;
+  transition: color 0.3s ease;
+}
+
+.pump-creator-address:hover {
+  color: var(--text-accent);
+}
+
+.pump-creator-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border-light);
+}
+
+/* Réseaux sociaux */
+.pump-social-links {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.pump-social-link {
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  text-decoration: none;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.3s ease;
+  border: 1px solid transparent;
+}
+
+.pump-social-twitter {
+  background: linear-gradient(45deg, #1DA1F2, #0d8bd9);
+  color: white;
+}
+
+.pump-social-telegram {
+  background: linear-gradient(45deg, #0088cc, #006bb3);
+  color: white;
+}
+
+.pump-social-website {
+  background: linear-gradient(45deg, #FF6B35, #FF9800);
+  color: white;
+}
+
+.pump-social-link:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* Réserves display */
+.pump-reserves-display {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.pump-reserves-sol {
+  color: var(--text-accent);
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+
+.pump-reserves-token {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+/* Market cap display */
+.pump-market-cap-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.pump-market-cap-usd {
+  color: var(--text-accent);
+  font-weight: bold;
+  font-size: 0.85rem;
+}
+
+.pump-market-cap-sol {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+/* Progress bar pour Pump.fun */
+.pump-progress-container {
+  width: 80px;
+  height: 16px;
+  background: #2a2a4a;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid #444;
+}
+
+.pump-progress-bar {
+  height: 100%;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #FF6B35, #00ff9d);
+  transition: width 0.3s ease;
+}
+
+.pump-progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.65rem;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  z-index: 2;
+}
+
+/* Timestamp display */
+.pump-timestamp-display {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.pump-timestamp-main {
+  font-size: 0.75rem;
+  color: var(--text-primary);
+}
+
+.pump-timestamp-ago {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+}
+
+/* URL Pump.fun */
+.pump-url-link {
+  display: inline-block;
+  padding: 0.3rem 0.6rem;
+  background: linear-gradient(45deg, #FF6B35, #FF9800);
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+  transition: all 0.3s ease;
+}
+
+.pump-url-link:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(255, 107, 53, 0.4);
+}
+
+/* Filtres spécifiques Pump.fun */
+.pump-age-presets .preset-btn {
+  background: linear-gradient(45deg, #FF6B35, #FF9800);
+  color: white;
+  border: 1px solid #FF6B35;
+}
+
+.pump-age-presets .preset-btn:hover,
+.pump-age-presets .preset-btn.active {
+  background: linear-gradient(45deg, #FF5722, #F44336);
+  transform: scale(1.05);
+  box-shadow: 0 0 8px rgba(255, 107, 53, 0.6);
+}
+
+.pump-quick-filters .preset-btn {
+  background: linear-gradient(45deg, #FF6B35, #FF9800);
+  color: white;
+  border: 1px solid #FF6B35;
+  margin-bottom: 0.3rem;
+}
+
+.pump-quick-filters .preset-btn:hover,
+.pump-quick-filters .preset-btn.active {
+  background: linear-gradient(45deg, #FF3D00, #FF6B35);
+  transform: scale(1.05);
+  box-shadow: 0 0 8px rgba(255, 107, 53, 0.6);
+}
+
+/* Reply count badge */
+.pump-reply-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.2rem 0.4rem;
+  background: rgba(255, 107, 53, 0.2);
+  border: 1px solid #FF6B35;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  color: var(--text-accent);
+}
+
+.pump-reply-badge.high-activity {
+  background: rgba(255, 107, 53, 0.4);
+  animation: pulse-pump 2s infinite;
+}
+
+@keyframes pulse-pump {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}
+
+/* Responsive pour mobile */
+@media (max-width: 768px) {
+  .pump-token-info,
+  .pump-creator-info,
+  .pump-market-cap-display,
+  .pump-reserves-display {
+    font-size: 0.8rem;
+  }
+  
+  .pump-image-preview {
+    width: 30px;
+    height: 30px;
+  }
+  
+  .pump-progress-container {
+    width: 60px;
+    height: 14px;
+  }
+}
+
+/* Indicateurs spéciaux */
+.pump-new-token {
+  background: rgba(76, 175, 80, 0.1);
+  border-left: 3px solid #4CAF50;
+}
+
+.pump-completed-token {
+  background: rgba(33, 150, 243, 0.1);
+  border-left: 3px solid #2196F3;
+}
+
+.pump-migrated-token {
+  background: rgba(156, 39, 176, 0.1);
+  border-left: 3px solid #9C27B0;
+}
+
+.pump-high-activity {
+  background: rgba(255, 107, 53, 0.1);
+  border-left: 3px solid #FF6B35;
+  animation: pump-glow 3s ease-in-out infinite alternate;
+}
+
+@keyframes pump-glow {
+  from { box-shadow: 0 0 5px rgba(255, 107, 53, 0.3); }
+  to { box-shadow: 0 0 15px rgba(255, 107, 53, 0.6); }
+}
+
 
 
