@@ -112,6 +112,7 @@ regexes = [
     '''config\.get\(''',
     '''settings\.''',
     '''environ\.get\(''',
+    '''.*tokenSymbol.*''',
 ]
 
 [[rules]]

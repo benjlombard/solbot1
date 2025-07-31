@@ -517,18 +517,19 @@ def get_token_trends(address):
 # Mise à jour de l'endpoint tokens-detail pour inclure DexScreener
 @app.route('/api/tokens-detail')
 def get_tokens_detail():
-    """Endpoint pour récupérer tous les tokens avec détails DexScreener ET whale"""
+    """Endpoint pour récupérer tous les tokens avec détails DexScreener, Whale ET Pump.fun"""
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     try:
-        # ✅ REQUÊTE CORRIGÉE avec whale data
+        # ✅ REQUÊTE CORRIGÉE avec toutes les colonnes (DexScreener + Whale + Pump.fun)
         cursor.execute('''
             SELECT address, symbol, name, price_usdc, invest_score, liquidity_usd,
                    volume_24h, holders, age_hours, rug_score, is_tradeable,
                    updated_at, first_discovered_at, bonding_curve_status, bonding_curve_progress,
                    status,
+                   
                    -- Colonnes DexScreener
                    dexscreener_pair_created_at,
                    dexscreener_price_usd,
@@ -550,7 +551,39 @@ def get_tokens_detail():
                    dexscreener_sells_24h,
                    COALESCE(updated_at, first_discovered_at) as last_update,
                    
-                   -- === COLONNES WHALE CORRIGÉES ===
+                   -- === COLONNES PUMP.FUN (AJOUTÉES) ===
+                   exists_on_pump,
+                   pump_fun_name,
+                   pump_fun_symbol,
+                   pump_fun_description,
+                   pump_fun_image_uri,
+                   pump_fun_metadata_uri,
+                   pump_fun_twitter,
+                   pump_fun_telegram,
+                   pump_fun_website,
+                   pump_fun_show_name,
+                   pump_fun_created_timestamp,
+                   pump_fun_usd_market_cap,
+                   pump_fun_reply_count,
+                   pump_fun_raydium_pool,
+                   pump_fun_complete,
+                   pump_fun_total_supply,
+                   pump_fun_creator,
+                   pump_fun_nsfw,
+                   pump_fun_market_cap,
+                   pump_fun_virtual_sol_reserves,
+                   pump_fun_virtual_token_reserves,
+                   pump_fun_bonding_curve,
+                   pump_fun_associated_bonding_curve,
+                   pump_fun_king_of_hill_timestamp,
+                   pump_fun_market_id,
+                   pump_fun_inverted,
+                   pump_fun_is_currently_live,
+                   pump_fun_username,
+                   pump_fun_profile_image,
+                   pump_fun_last_pump_update,
+                   
+                   -- === COLONNES WHALE ===
                    -- Activité whale 1h
                    (SELECT COUNT(*) FROM whale_transactions_live w 
                     WHERE w.token_address = tokens.address 
@@ -606,7 +639,7 @@ def get_tokens_detail():
             
             rows.append(row_dict)
         
-        logger.info(f"📊 Returned {len(rows)} tokens with DexScreener and whale data")
+        logger.info(f"📊 Returned {len(rows)} tokens with DexScreener, Whale AND Pump.fun data")
         return jsonify(rows)
         
     except Exception as e:

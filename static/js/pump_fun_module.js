@@ -1,6 +1,7 @@
 /**
  * 🚀 PUMP.FUN MODULE - JavaScript functions for Pump.fun tab
  * Fichier: static/js/pump_fun_module.js
+ * VERSION CORRIGÉE
  */
 
 // === VARIABLES GLOBALES PUMP.FUN ===
@@ -148,6 +149,7 @@ function resetPumpFilters() {
   });
 }
 
+// ✅ FONCTION PRINCIPALE DE FILTRAGE CORRIGÉE
 function applyPumpFilters() {
   const pumpFilters = {
     symbol: document.getElementById('pumpFilterSymbol').value.toLowerCase().trim(),
@@ -170,15 +172,33 @@ function applyPumpFilters() {
     social: document.getElementById('pumpFilterSocial').value.toLowerCase().trim()
   };
 
-  // Utiliser la variable globale filteredData
+  console.log('🔍 Pump filters applied:', pumpFilters);
+  console.log('📊 Total data before filtering:', data.length);
+
+  // ✅ FILTRAGE CORRIGÉ avec logs de debug
   filteredData = data.filter(row => {
+    // Debug pour le premier token
+    if (row === data[0]) {
+      console.log('🐛 DEBUG Premier token:', {
+        address: row.address,
+        symbol: row.symbol,
+        pump_fun_symbol: row.pump_fun_symbol,
+        exists_on_pump: row.exists_on_pump,
+        pump_fun_usd_market_cap: row.pump_fun_usd_market_cap,
+        pump_fun_complete: row.pump_fun_complete
+      });
+    }
+
     // Vérifier si le token existe sur Pump.fun
     const existsOnPump = row.exists_on_pump === 1 || row.exists_on_pump === true;
     const lastPumpUpdate = row.pump_fun_last_pump_update;
     
-    // Filtres de base
-    if (pumpFilters.symbol && !row.pump_fun_symbol?.toLowerCase().includes(pumpFilters.symbol)) {
-      return false;
+    // ✅ CORRECTION: Filtre symbole - chercher dans pump_fun_symbol ET symbol
+    if (pumpFilters.symbol) {
+      const symbol = (row.pump_fun_symbol || row.symbol || '').toLowerCase();
+      if (!symbol.includes(pumpFilters.symbol)) {
+        return false;
+      }
     }
     
     // Filtre status
@@ -216,7 +236,7 @@ function applyPumpFilters() {
       if (pumpFilters.showName === 'false' && showName) return false;
     }
     
-    // Filtres financiers
+    // ✅ CORRECTION: Filtres financiers avec valeurs correctes
     if (pumpFilters.marketCapMin !== null && (row.pump_fun_usd_market_cap || 0) < pumpFilters.marketCapMin) return false;
     if (pumpFilters.marketCapMax !== null && (row.pump_fun_usd_market_cap || 0) > pumpFilters.marketCapMax) return false;
     if (pumpFilters.marketCapSolMin !== null && (row.pump_fun_market_cap || 0) < pumpFilters.marketCapSolMin) return false;
@@ -231,8 +251,8 @@ function applyPumpFilters() {
     if (pumpFilters.virtualTokenMax !== null && (row.pump_fun_virtual_token_reserves || 0) > pumpFilters.virtualTokenMax) return false;
     
     // Filtres créateur
-    if (pumpFilters.creator && !row.pump_fun_creator?.toLowerCase().includes(pumpFilters.creator)) return false;
-    if (pumpFilters.username && !row.pump_fun_username?.toLowerCase().includes(pumpFilters.username)) return false;
+    if (pumpFilters.creator && !(row.pump_fun_creator || '').toLowerCase().includes(pumpFilters.creator)) return false;
+    if (pumpFilters.username && !(row.pump_fun_username || '').toLowerCase().includes(pumpFilters.username)) return false;
     if (pumpFilters.replyCountMin !== null && (row.pump_fun_reply_count || 0) < pumpFilters.replyCountMin) return false;
     
     // Filtre réseaux sociaux
@@ -264,13 +284,65 @@ function applyPumpFilters() {
     if (currentPumpAgeMin !== null || currentPumpAgeMax !== null) {
       if (row.pump_fun_created_timestamp) {
         const now = new Date();
-        const creationTime = new Date(row.pump_fun_created_timestamp * 1000);
-        const ageHours = (now - creationTime) / (1000 * 60 * 60);
+        let createdDate;
+        const timestamp = row.pump_fun_created_timestamp;
         
-        if (currentPumpAgeMin !== null && ageHours < currentPumpAgeMin) return false;
-        if (currentPumpAgeMax !== null && ageHours > currentPumpAgeMax) return false;
+        // Détecter le format du timestamp (même logique que dans getPumpCreatedDisplay)
+        try {
+          if (timestamp > 1e12) {
+            // Si > 1e12, c'est probablement en millisecondes
+            createdDate = new Date(timestamp);
+          } else {
+            // Si < 1e12, c'est probablement en secondes, multiplier par 1000
+            createdDate = new Date(timestamp * 1000);
+          }
+          
+          // Vérifier si la date est valide et raisonnable (entre 2020 et 2030)
+          const year = createdDate.getFullYear();
+          if (year < 2020 || year > 2030) {
+            // Essayer l'autre format
+            if (timestamp > 1e12) {
+              createdDate = new Date(timestamp / 1000);
+            } else {
+              createdDate = new Date(timestamp);
+            }
+          }
+          
+          // Vérification finale de la validité
+          if (isNaN(createdDate.getTime()) || createdDate.getFullYear() < 2020 || createdDate.getFullYear() > 2030) {
+            return false; // Date invalide, exclure du filtre
+          }
+          
+          // Calculer l'âge en heures
+          const ageHours = (now - createdDate) / (1000 * 60 * 60);
+          
+          // Debug pour les premiers tokens
+          if (row === data[0]) {
+            console.log('🐛 DEBUG Age Filter:', {
+              address: row.address,
+              timestamp: timestamp,
+              createdDate: createdDate.toISOString(),
+              ageHours: ageHours.toFixed(2),
+              currentPumpAgeMin,
+              currentPumpAgeMax
+            });
+          }
+          
+          // Appliquer les filtres d'âge
+          if (currentPumpAgeMin !== null && ageHours < currentPumpAgeMin) {
+            return false;
+          }
+          if (currentPumpAgeMax !== null && ageHours > currentPumpAgeMax) {
+            return false;
+          }
+          
+        } catch (error) {
+          console.error(`Error parsing date for age filter on token ${row.address}:`, error);
+          return false; // En cas d'erreur, exclure du filtre
+        }
       } else {
-        return false; // Pas de date de création
+        // Pas de timestamp de création, exclure du filtre d'âge
+        return false;
       }
     }
     
@@ -282,6 +354,13 @@ function applyPumpFilters() {
     return true;
   });
 
+  console.log('📊 Filtered data result:', filteredData.length);
+  console.log('✅ Sample filtered tokens:', filteredData.slice(0, 3).map(t => ({
+    symbol: t.pump_fun_symbol || t.symbol,
+    exists_on_pump: t.exists_on_pump,
+    market_cap: t.pump_fun_usd_market_cap
+  })));
+
   // Appeler les fonctions du fichier principal
   highlightActiveFilters();
   updateFiltersIndicator();
@@ -291,6 +370,7 @@ function applyPumpFilters() {
 
 // === FONCTIONS D'AFFICHAGE PUMP.FUN ===
 
+// ✅ FONCTION DE RENDU CORRIGÉE
 function renderPumpFunTable(rows) {
   const tbody = document.getElementById('pumpfunTbody');
   
@@ -301,11 +381,16 @@ function renderPumpFunTable(rows) {
   
   tbody.innerHTML = rows.map(r => {
     const existsOnPump = r.exists_on_pump === 1 || r.exists_on_pump === true;
+    
+    // ✅ CORRECTION: Utiliser les vrais champs Pump.fun
+    const symbol = r.pump_fun_symbol || r.symbol || 'UNKNOWN';
+    const name = r.pump_fun_name || r.name || 'No name';
+    const description = r.pump_fun_description || '';
+    
     const pumpStatus = getPumpStatusDisplay(r);
     const imageDisplay = getPumpImageDisplay(r);
     const marketCapDisplay = getPumpMarketCapDisplay(r);
     const progressDisplay = getPumpProgressDisplay(r);
-    const reservesDisplay = getPumpReservesDisplay(r);
     const creatorDisplay = getPumpCreatorDisplay(r);
     const socialLinks = getPumpSocialLinks(r);
     const createdDisplay = getPumpCreatedDisplay(r);
@@ -326,19 +411,19 @@ function renderPumpFunTable(rows) {
         <td><span class="fav" onclick="toggleFav('${r.address}')">⭐</span></td>
         <td>
           <div class="pump-token-info">
-            <div class="pump-token-symbol">${r.pump_fun_symbol || r.symbol || 'UNKNOWN'}</div>
-            <div class="pump-token-name" title="${r.pump_fun_name || r.name || ''}">${r.pump_fun_name || r.name || 'No name'}</div>
-            ${r.pump_fun_description ? `<div class="pump-token-description" title="${r.pump_fun_description}">${r.pump_fun_description}</div>` : ''}
+            <div class="pump-token-symbol">${symbol}</div>
+            <div class="pump-token-name" title="${name}">${name}</div>
+            ${description ? `<div class="pump-token-description" title="${description}">${description.substring(0, 50)}${description.length > 50 ? '...' : ''}</div>` : ''}
           </div>
         </td>
         <td>${pumpStatus}</td>
         <td>${imageDisplay}</td>
         <td>${marketCapDisplay}</td>
         <td class="price">${(r.pump_fun_market_cap || 0).toFixed(2)} SOL</td>
-        <td>${(r.pump_fun_total_supply || 0).toLocaleString()}</td>
+        <td>${Math.round(r.pump_fun_total_supply || 0).toLocaleString()}</td>
         <td>${progressDisplay}</td>
         <td>${(r.pump_fun_virtual_sol_reserves || 0).toFixed(2)}</td>
-        <td>${(r.pump_fun_virtual_token_reserves || 0).toLocaleString()}</td>
+        <td>${Math.round(r.pump_fun_virtual_token_reserves || 0).toLocaleString()}</td>
         <td>${creatorDisplay}</td>
         <td>${replyDisplay}</td>
         <td>${socialLinks}</td>
@@ -381,29 +466,31 @@ function getPumpImageDisplay(token) {
   return '<div class="pump-image-placeholder">No Image</div>';
 }
 
+// ✅ FONCTION CORRIGÉE
 function getPumpMarketCapDisplay(token) {
   const usdCap = token.pump_fun_usd_market_cap || 0;
   const solCap = token.pump_fun_market_cap || 0;
   
   return `
     <div class="pump-market-cap-display">
-      <div class="pump-market-cap-usd">$${usdCap.toLocaleString()}</div>
+      <div class="pump-market-cap-usd">${Math.round(usdCap).toLocaleString()}</div>
       <div class="pump-market-cap-sol">${solCap.toFixed(2)} SOL</div>
     </div>
   `;
 }
 
+// ✅ FONCTION CORRIGÉE
 function getPumpProgressDisplay(token) {
-  if (!token.bonding_curve_progress) {
-    return '<div class="no-progress">N/A</div>';
-  }
-  
   const progress = parseFloat(token.bonding_curve_progress) || 0;
+  
+  if (progress <= 0) {
+    return '<div class="no-progress">0%</div>';
+  }
   
   return `
     <div class="pump-progress-container">
       <div class="pump-progress-bar" style="width: ${Math.min(progress, 100)}%"></div>
-      <div class="pump-progress-text">${progress}%</div>
+      <div class="pump-progress-text">${progress.toFixed(1)}%</div>
     </div>
   `;
 }
@@ -465,16 +552,57 @@ function getPumpCreatedDisplay(token) {
     return '<div style="color: #666;">Unknown</div>';
   }
   
-  const createdDate = new Date(token.pump_fun_created_timestamp * 1000);
-  const timeAgo = getTimeAgo(createdDate.toISOString());
-  const formattedDate = formatLocalDateTime(createdDate.toISOString());
+  // ✅ CORRECTION: Le timestamp est probablement en millisecondes, pas en secondes
+  let createdDate;
+  const timestamp = token.pump_fun_created_timestamp;
   
-  return `
-    <div class="pump-timestamp-display">
-      <div class="pump-timestamp-main">${formattedDate}</div>
-      <div class="pump-timestamp-ago ${timeAgo.className}">${timeAgo.text}</div>
-    </div>
-  `;
+  try {
+    // Détecter si le timestamp est en secondes ou millisecondes
+    if (timestamp > 1e12) {
+      // Si > 1e12, c'est probablement en millisecondes
+      createdDate = new Date(timestamp);
+    } else {
+      // Si < 1e12, c'est probablement en secondes, multiplier par 1000
+      createdDate = new Date(timestamp * 1000);
+    }
+    
+    // Vérifier si la date est valide et raisonnable (entre 2020 et 2030)
+    const year = createdDate.getFullYear();
+    if (year < 2020 || year > 2030) {
+      // Essayer l'autre format
+      if (timestamp > 1e12) {
+        createdDate = new Date(timestamp / 1000);
+      } else {
+        createdDate = new Date(timestamp);
+      }
+    }
+    
+    // Double vérification
+    if (isNaN(createdDate.getTime()) || createdDate.getFullYear() < 2020 || createdDate.getFullYear() > 2030) {
+      console.warn(`Invalid date for token ${token.address}: timestamp=${timestamp}, parsed=${createdDate}`);
+      return '<div style="color: #666;">Invalid date</div>';
+    }
+    
+    const timeAgo = getTimeAgo(createdDate.toISOString());
+    const formattedDate = createdDate.toLocaleString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    
+    return `
+      <div class="pump-timestamp-display">
+        <div class="pump-timestamp-main">${formattedDate}</div>
+        <div class="pump-timestamp-ago ${timeAgo.className}">${timeAgo.text}</div>
+      </div>
+    `;
+    
+  } catch (error) {
+    console.error(`Error parsing date for token ${token.address}:`, error, 'timestamp:', timestamp);
+    return '<div style="color: #666;">Date error</div>';
+  }
 }
 
 function getPumpUrlDisplay(token) {
@@ -527,6 +655,50 @@ function isNewPumpToken(token) {
   return ageHours < 24; // Moins de 24h = nouveau
 }
 
+// === FONCTIONS DE DEBUG ===
+
+function debugPumpFunData() {
+  console.log('=== DEBUG PUMP.FUN DATA ===');
+  
+  const pumpTokens = data.filter(t => t.exists_on_pump === 1);
+  console.log(`🎯 Tokens existant sur Pump.fun: ${pumpTokens.length}/${data.length}`);
+  
+  const tokensWithUSDCap = data.filter(t => (t.pump_fun_usd_market_cap || 0) > 0);
+  console.log(`💰 Tokens avec USD market cap: ${tokensWithUSDCap.length}`);
+  
+  const tokensWithSymbol = data.filter(t => t.pump_fun_symbol);
+  console.log(`🏷️ Tokens avec symbole Pump.fun: ${tokensWithSymbol.length}`);
+  
+  // Afficher quelques exemples
+  console.log('📊 Exemples de tokens Pump.fun:');
+  pumpTokens.slice(0, 5).forEach((token, i) => {
+    console.log(`  ${i+1}. ${token.pump_fun_symbol || token.symbol} - ${token.pump_fun_usd_market_cap || 0} - ${token.pump_fun_name || 'No name'}`);
+  });
+  
+  console.log('=== END DEBUG ===');
+}
+
+function testPumpFilters() {
+  console.log('🧪 Test des filtres Pump.fun');
+  
+  // Test filtre symbole
+  document.getElementById('pumpFilterSymbol').value = 'PEPE';
+  applyPumpFilters();
+  console.log(`Résultat filtre PEPE: ${filteredData.length} tokens`);
+  
+  // Reset
+  document.getElementById('pumpFilterSymbol').value = '';
+  
+  // Test filtre status
+  document.getElementById('pumpFilterStatus').value = 'exists';
+  applyPumpFilters();
+  console.log(`Résultat filtre exists: ${filteredData.length} tokens`);
+  
+  // Reset
+  document.getElementById('pumpFilterStatus').value = '';
+  applyPumpFilters();
+}
+
 // === FONCTION D'INITIALISATION ===
 
 function setupPumpFiltersEventListeners() {
@@ -551,3 +723,5 @@ window.resetPumpFilters = resetPumpFilters;
 window.applyPumpFilters = applyPumpFilters;
 window.renderPumpFunTable = renderPumpFunTable;
 window.setupPumpFiltersEventListeners = setupPumpFiltersEventListeners;
+window.debugPumpFunData = debugPumpFunData;
+window.testPumpFilters = testPumpFilters;
