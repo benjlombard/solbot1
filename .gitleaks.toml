@@ -45,13 +45,38 @@ paths = [
 ]
 
 
+[allowlist]
+# Regex qui excluent dossiers et fichiers lourds
+paths = [
+    '''(?i)\.git[\\/]''',
+    '''(?i)\.venv[\\/]''',
+    '''(?i)venv[\\/]''',
+    '''(?i)env[\\/]''',
+    '''(?i)mon_env[\\/]''',
+    '''(?i)__pycache__[\\/]''',
+    '''(?i)\.pytest_cache[\\/]''',
+    '''(?i)\.mypy_cache[\\/]''',
+    '''(?i)data[\\/]''',
+    '''(?i).*\.db$''',
+    '''(?i).*\.db-wal$''',
+    '''(?i).*\.db-shm$''',
+    '''(?i).*\.sqlite.*$''',
+    '''(?i)\.env(\..*)?$''',
+    '''(?i).*\.pyc$''',
+    '''(?i).*\.pyo$''',
+    '''(?i).*\.pyd$''',
+]
+
 # Règles personnalisées restrictives
 [[rules]]
 id = "password-detection"
 description = "Detect passwords"
 regex = '''(?i)password\s*[:=]\s*["']([^"']{3,})["']'''
 [rules.allowlist]
-paths = ['''^\.env$''', '''^\.env\..*$''','''mon_env/.*''','''^mon_env/''']
+paths = [
+    '''(?i)\.env(\..*)?$''',
+    '''(?i)mon_env[\\/]''',
+]
 regexes = [
     '''(?i).*your.*''',
     '''(?i).*example.*''',
@@ -71,7 +96,10 @@ id = "secret-detection"
 description = "Detect secrets and keys"
 regex = '''(?i)(secret|private|token|api_key)\s*[:=]\s*["']([^"']{6,})["']'''
 [rules.allowlist]
-paths = ['''^\.env$''', '''^\.env\..*$''','''mon_env/.*''','''^mon_env/''']
+paths = [
+    '''(?i)\.env(\..*)?$''',
+    '''(?i)mon_env[\\/]''',
+]
 regexes = [
     '''(?i).*your.*''',
     '''(?i).*example.*''',
@@ -91,7 +119,10 @@ id = "private-key-detection"
 description = "Detect private keys"
 regex = '''-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----'''
 [rules.allowlist]
-paths = ['''^\.env$''', '''^\.env\..*$''','''mon_env/.*''','''^mon_env/''']
+paths = [
+    '''(?i)\.env(\..*)?$''',
+    '''(?i)mon_env[\\/]''',
+]
 regexes = [
     '''(?i).*your.*''',
     '''(?i).*example.*''',
@@ -112,7 +143,10 @@ id = "env-private-keys"
 description = "Detect environment private keys"
 regex = '''(?i)[A-Z_]*PRIVATE[A-Z_]*\s*[:=]\s*["']([^"']{8,})["']'''
 [rules.allowlist]
-paths = ['''^\.env$''', '''^\.env\..*$''','''mon_env/.*''','''^mon_env/''']
+paths = [
+    '''(?i)\.env(\..*)?$''',
+    '''(?i)mon_env[\\/]''',
+]
 regexes = [
     '''(?i).*your.*''',
     '''(?i).*example.*''',
@@ -133,7 +167,10 @@ id = "solana-keys"
 description = "Detect Solana keys"
 regex = '''(?i)SOLANA[A-Z_]*KEY\s*[:=]\s*["']?([^"'\s]{8,})["']?'''
 [rules.allowlist]
-paths = ['''^\.env$''', '''^\.env\..*$''','''mon_env/.*''','''^mon_env/''']
+paths = [
+    '''(?i)\.env(\..*)?$''',
+    '''(?i)mon_env[\\/]''',
+]
 regexes = [
     '''(?i).*your.*''',
     '''(?i).*example.*''',
@@ -154,4 +191,7 @@ id = "sensitive-env-vars"
 description = "Detect sensitive environment variables"
 regex = '''(?i)^[^#]*(?:export\s+)?([A-Z_]*(?:KEY|SECRET|PASSWORD)[A-Z_]*)\s*[:=]\s*["']?([^"'\s()]{8,})["']?\s*(?:#.*)?$'''
 [rules.allowlist]
-paths = ['''^\.env$''', '''^\.env\..*$''','''mon_env/.*''','''^mon_env/''']
+paths = [
+    '''(?i)\.env(\..*)?$''',
+    '''(?i)mon_env[\\/]''',
+]

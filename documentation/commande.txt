@@ -1,4 +1,4 @@
-#3 scripts à lancer
+#5 scripts à lancer
 python optimized_launcher.py --batch-size 25 --max-concurrent 25 --enable-auto-scaling --enable-performance-profiling --whale-threshold 500
 python dexscreener_enricher.py --interval 1 --batch-size 250 --strategy recent --min-hours 0 --verbose
 #mode nuit (lent mais sûr) :
@@ -8,14 +8,55 @@ python rugcheck_update_script.py --limit 500 --batch-size 5 --delay 2.5 --reques
 #complete update : 
 python rugcheck_update_script.py --batch-size 5 --delay 2.0 --requests-per-minute 30 --only-missing
 
+python pump_fun_checker.py --single-cycle --batch-size 200 --log-level DEBUG --status 'no_dex_data';
 
+python system_health_monitor.py --continuous
+
+
+Le token n'existe que sur la plateforme Pump.fun, où tous les achats/ventes se font contre une bonding curve système How to Create Memecoins on Pump.fun and Buy the PUMP Token | CoinGecko
+DexScreener liste automatiquement les tokens dès qu'ils sont ajoutés à une pool de liquidité et ont au moins une transaction
+Tant que le token est sur la bonding curve, il n'y a pas de pool de liquidité = pas de listing DexScreener
 
 #git 
-gitleaks detect --source . --config .gitleaks.toml --verbose --no-git
+gitleaks detect --source . --config .gitleaks.toml --verbose --no-git --log-level debug --log-opts '-p'
 git add . && git commit -m "add files" && git push origin main
 
 
+#system_health_monitor : 
+# Vérification unique
+python system_health_monitor.py
+# Monitoring continu (met à jour toutes les 60s)
+python system_health_monitor.py --continuous
+# Monitoring rapide (toutes les 30s)
+python system_health_monitor.py --continuous --interval 30
+# Afficher aussi les meilleurs tokens
+python system_health_monitor.py --show-tokens
+# Mode alertes uniquement (n'affiche que si problème)
+python system_health_monitor.py --continuous --alerts-only
+# Exporter les métriques en JSON
+python system_health_monitor.py --export-json health_metrics.json
 
+
+# Analyse simple de tous les tokens non-tradeable
+python non_tradeable_analyzer.py
+
+# Analyser seulement les 50 premiers
+python non_tradeable_analyzer.py --limit 50
+
+# Analyser seulement les tokens découverts dans les 24 dernières heures
+python non_tradeable_analyzer.py --age-hours 24
+
+# Mode dry-run : voir ce qui serait mis à jour sans modifier la DB
+python non_tradeable_analyzer.py --dry-run
+
+# Mettre à jour automatiquement les tokens qui devraient être tradeable
+python non_tradeable_analyzer.py --update
+
+# Exporter l'analyse en JSON
+python non_tradeable_analyzer.py --export-json analysis.json
+
+# Analyse rapide avec traitement par batch plus grand
+python non_tradeable_analyzer.py --batch-size 10 --limit 100
 
 
 

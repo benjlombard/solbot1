@@ -56,8 +56,8 @@ logger = logging.getLogger('solana_monitoring')
 PUMP_FUN_PROGRAM = Pubkey.from_string("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P")
 SPL_TOKEN_PROGRAM = Pubkey.from_string("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")
 RAYDIUM_AMM_PROGRAM = Pubkey.from_string("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8")
-HELIUS_WS_URL = f"wss://rpc.helius.xyz/?api-key={config('HELIUS_API_KEY', default='872ddf73-4cfd-4263-a418-521bbde27eb8')}"
-SOLANA_RPC_URL = f"https://rpc.helius.xyz/?api-key={config('HELIUS_API_KEY', default='872ddf73-4cfd-4263-a418-521bbde27eb8')}"
+HELIUS_WS_URL = f"wss://rpc.helius.xyz/?api-key={config('HELIUS_API_KEY', default='667de534-0a8d-4f63-bcb6-3ac2c9413504')}"
+SOLANA_RPC_URL = f"https://rpc.helius.xyz/?api-key={config('HELIUS_API_KEY', default='667de534-0a8d-4f63-bcb6-3ac2c9413504')}"
 DATABASE_PATH = "tokens.db"
 
 parsing_stats = {
@@ -479,7 +479,7 @@ async def monitor_pump_fun():
             while True:
                 try:
                     logger.debug(f"Attempting WebSocket connection to {HELIUS_WS_URL} for program {program_id}")
-                    async with websockets.connect(HELIUS_WS_URL, ping_interval=60, ping_timeout=30) as ws:
+                    async with websockets.connect(HELIUS_WS_URL, ping_interval=180, ping_timeout=60) as ws:
                         if program_id == PUMP_FUN_PROGRAM:
                             logger.info(f"🎯 Connected to Pump.fun monitoring")
                         elif program_id == SPL_TOKEN_PROGRAM:

@@ -2,7 +2,6 @@
 """
 🛡️ Script de mise à jour des scores RugCheck
 Met à jour tous les tokens existants avec le bon score RugCheck (score_normalised)
-Supporte maintenant la mise à jour depuis un fichier d'adresses
 """
 
 import asyncio
@@ -15,7 +14,6 @@ from typing import List, Dict, Optional, Tuple
 from aiohttp import ClientSession, TCPConnector
 import random
 import argparse
-import os
 
 # Configuration du logging
 logging.basicConfig(
@@ -51,152 +49,8 @@ class RugCheckUpdater:
             'scores_changed': 0,
             'scores_unchanged': 0,
             'rate_limit_hits': 0,
-            'total_wait_time': 0,
-            'not_found_in_db': 0,  # Nouveaux tokens pas encore en DB
-            'created_tokens': 0     # Tokens créés automatiquement
+            'total_wait_time': 0
         }
-    
-    def load_addresses_from_file(self, file_path: str) -> List[str]:
-        """
-        Charger les adresses depuis un fichier texte
-        
-        Args:
-            file_path: Chemin vers le fichier contenant les adresses
-            
-        Returns:
-            Liste des adresses valides
-        """
-        if not os.path.exists(file_path):
-            logger.error(f"❌ Fichier non trouvé: {file_path}")
-            return []
-        
-        addresses = []
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    
-                    # Ignorer les lignes vides et les commentaires
-                    if not line or line.startswith('#'):
-                        continue
-                    
-                    # Validation basique de l'adresse (format Solana)
-                    if len(line) >= 32 and len(line) <= 44:
-                        addresses.append(line)
-                    else:
-                        logger.warning(f"⚠️ Adresse invalide ligne {line_num}: {line}")
-            
-            logger.info(f"📁 {len(addresses)} adresses chargées depuis {file_path}")
-            return addresses
-            
-        except Exception as e:
-            logger.error(f"❌ Erreur lecture fichier {file_path}: {e}")
-            return []
-    
-    def get_token_info_by_address(self, address: str) -> Optional[Tuple[str, str, Optional[int]]]:
-        """
-        Récupérer les infos d'un token depuis son adresse
-        
-        Returns:
-            Tuple (address, symbol, current_rug_score) ou None si pas trouvé
-        """
-        conn = sqlite3.connect(self.database_path)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute('''
-                SELECT address, symbol, rug_score 
-                FROM tokens 
-                WHERE address = ?
-            ''', (address,))
-            
-            result = cursor.fetchone()
-            return result if result else None
-            
-        except sqlite3.Error as e:
-            logger.error(f"Erreur base de données pour {address}: {e}")
-            return None
-        finally:
-            conn.close()
-    
-    def create_token_from_address(self, address: str, symbol: str = None, rug_score: int = None) -> bool:
-        """
-        Créer un nouveau token dans la base avec les infos minimales
-        
-        Args:
-            address: Adresse du token
-            symbol: Symbole du token (optionnel)
-            rug_score: Score RugCheck (optionnel)
-            
-        Returns:
-            True si créé avec succès
-        """
-        conn = sqlite3.connect(self.database_path)
-        cursor = conn.cursor()
-        
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        try:
-            cursor.execute('''
-                INSERT INTO tokens (
-                    address, symbol, name, rug_score, 
-                    first_discovered_at, last_seen_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                address,
-                symbol or 'UNKNOWN',
-                f"Token {address[:8]}..." if not symbol else symbol,
-                rug_score,
-                now, now, now
-            ))
-            
-            conn.commit()
-            logger.info(f"✨ Token créé: {address} ({symbol or 'UNKNOWN'})")
-            self.stats['created_tokens'] += 1
-            return True
-            
-        except sqlite3.IntegrityError:
-            # Token déjà existant
-            logger.debug(f"Token {address} déjà existant")
-            return True
-        except sqlite3.Error as e:
-            logger.error(f"Erreur création token {address}: {e}")
-            return False
-        finally:
-            conn.close()
-    
-    def get_tokens_from_addresses(self, addresses: List[str]) -> List[Tuple[str, str, Optional[int]]]:
-        """
-        Récupérer les infos des tokens depuis une liste d'adresses
-        Crée automatiquement les tokens manquants
-        
-        Args:
-            addresses: Liste des adresses à traiter
-            
-        Returns:
-            Liste de tuples (address, symbol, current_rug_score)
-        """
-        tokens_data = []
-        
-        for address in addresses:
-            token_info = self.get_token_info_by_address(address)
-            
-            if token_info:
-                tokens_data.append(token_info)
-            else:
-                # Token pas en base, on le crée avec des infos minimales
-                logger.info(f"🆕 Token {address} non trouvé en base, création...")
-                
-                if self.create_token_from_address(address):
-                    # Récupérer les infos après création
-                    token_info = self.get_token_info_by_address(address)
-                    if token_info:
-                        tokens_data.append(token_info)
-                else:
-                    logger.error(f"❌ Impossible de créer le token {address}")
-                    self.stats['not_found_in_db'] += 1
-        
-        return tokens_data
     
     async def wait_for_rate_limit(self):
         """Gestion intelligente du rate limiting"""
@@ -254,6 +108,23 @@ class RugCheckUpdater:
             self.rate_limiter['consecutive_429s'] = 0
     
     async def start(self):
+        """Démarrer la session HTTP"""
+        connector = TCPConnector(
+            limit=20,
+            limit_per_host=10,
+            ttl_dns_cache=300,
+            use_dns_cache=True
+        )
+        
+        self.session = ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=10),
+            headers={
+                'User-Agent': 'RugCheck-Updater/1.0',
+                'Accept': 'application/json'
+            }
+        )
+        logger.info("🚀 Session HTTP démarrée")
         """Démarrer la session HTTP"""
         connector = TCPConnector(
             limit=20,
@@ -543,7 +414,7 @@ class RugCheckUpdater:
         
         return batch_stats
     
-    async def run_update(self, limit: int = None, only_missing: bool = False, update_history: bool = True, addresses_file: str = None):
+    async def run_update(self, limit: int = None, only_missing: bool = False, update_history: bool = True):
         """
         Lancer la mise à jour des scores RugCheck
         
@@ -551,7 +422,6 @@ class RugCheckUpdater:
             limit: Nombre maximum de tokens à traiter
             only_missing: Si True, ne traite que les tokens sans rug_score
             update_history: Si True, met aussi à jour tokens_hist
-            addresses_file: Chemin vers un fichier contenant les adresses à traiter
         """
         await self.start()
         
@@ -560,16 +430,7 @@ class RugCheckUpdater:
             logger.info(f"📋 Paramètres: limit={limit}, only_missing={only_missing}, update_history={update_history}")
             
             # Récupérer les tokens à traiter
-            if addresses_file:
-                logger.info(f"📁 Mode fichier d'adresses: {addresses_file}")
-                addresses = self.load_addresses_from_file(addresses_file)
-                if not addresses:
-                    logger.error("❌ Aucune adresse valide trouvée dans le fichier")
-                    return
-                
-                tokens_to_update = self.get_tokens_from_addresses(addresses)
-            else:
-                tokens_to_update = self.get_tokens_to_update(limit, only_missing)
+            tokens_to_update = self.get_tokens_to_update(limit, only_missing)
             
             if not tokens_to_update:
                 logger.info("✅ Aucun token à mettre à jour")
@@ -607,12 +468,6 @@ class RugCheckUpdater:
             logger.info(f"🔄 Scores modifiés: {self.stats['scores_changed']}")
             logger.info(f"⚪ Scores inchangés: {self.stats['scores_unchanged']}")
             logger.info(f"📚 Enregistrements historiques mis à jour: {total_hist_updated}")
-            
-            if addresses_file:
-                logger.info(f"✨ Nouveaux tokens créés: {self.stats['created_tokens']}")
-                if self.stats['not_found_in_db'] > 0:
-                    logger.info(f"⚠️ Tokens non trouvés/créés: {self.stats['not_found_in_db']}")
-            
             logger.info(f"❌ Erreurs API: {self.stats['api_errors']}")
             logger.info(f"🚫 Tokens sans données: {self.stats['no_data_found']}")
             logger.info(f"🚨 Rate limits rencontrés: {self.stats['rate_limit_hits']}")
@@ -640,7 +495,6 @@ def main():
     parser.add_argument("--requests-per-minute", type=int, default=30, help="Limite de requêtes par minute (défaut: 30)")
     parser.add_argument("--only-missing", action="store_true", help="Ne traiter que les tokens sans rug_score")
     parser.add_argument("--no-history", action="store_true", help="Ne pas mettre à jour tokens_hist")
-    parser.add_argument("--addresses-file", type=str, help="Fichier texte contenant la liste des adresses à traiter")
     parser.add_argument("--dry-run", action="store_true", help="Simulation sans mise à jour")
     
     args = parser.parse_args()
@@ -649,13 +503,8 @@ def main():
         logger.info("🧪 MODE SIMULATION - Aucune mise à jour ne sera effectuée")
         return
     
-    # Validation du fichier d'adresses
-    if args.addresses_file and not os.path.exists(args.addresses_file):
-        logger.error(f"❌ Fichier d'adresses non trouvé: {args.addresses_file}")
-        return
-    
-    # Confirmation pour mise à jour complète (sauf si fichier d'adresses)
-    if not args.addresses_file and not args.only_missing and not args.limit:
+    # Confirmation pour mise à jour complète
+    if not args.only_missing and not args.limit:
         response = input("⚠️ Vous allez mettre à jour TOUS les tokens. Continuer? (y/N): ")
         if response.lower() != 'y':
             logger.info("❌ Annulé par l'utilisateur")
@@ -674,8 +523,7 @@ def main():
         asyncio.run(updater.run_update(
             limit=args.limit,
             only_missing=args.only_missing,
-            update_history=not args.no_history,
-            addresses_file=args.addresses_file
+            update_history=not args.no_history
         ))
     except KeyboardInterrupt:
         logger.info("\n🛑 Arrêt demandé par l'utilisateur")
