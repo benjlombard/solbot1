@@ -1,5 +1,5 @@
 // =============================================================================
-// DASHBOARD DETAIL - Fichier principal allégé
+// DASHBOARD DETAIL - Fichier principal corrigé
 // =============================================================================
 
 // Variables globales principales
@@ -9,6 +9,7 @@ let refreshTimer = null;
 let isAutoRefreshEnabled = true;
 let currentTab = 'base';
 let activeFiltersCount = 0;
+let isDataLoaded = false; // ✅ AJOUT: Flag pour savoir si les données sont chargées
 
 // Variables whale
 let whaleData = [];
@@ -166,11 +167,129 @@ function getBondingCurveDisplay(status) {
          `<span class="bonding-status bonding-unknown">${status}</span>`;
 }
 
+
+function setupModuleEventListeners() {
+  console.log('🔧 Setting up module event listeners...');
+  
+  // Setup du module DexScreener si disponible
+  if (typeof setupDexFiltersEventListeners === 'function') {
+    try {
+      setupDexFiltersEventListeners();
+      console.log('✅ DexScreener module event listeners setup');
+    } catch (error) {
+      console.warn('⚠️ Failed to setup DexScreener event listeners:', error);
+    }
+  } else {
+    console.warn('⚠️ DexScreener module not available');
+  }
+  
+  // Setup du module Pump.fun si disponible
+  if (typeof setupPumpFiltersEventListeners === 'function') {
+    try {
+      setupPumpFiltersEventListeners();
+      console.log('✅ Pump.fun module event listeners setup');
+    } catch (error) {
+      console.warn('⚠️ Failed to setup Pump.fun event listeners:', error);
+    }
+  } else {
+    console.warn('⚠️ Pump.fun module not available');
+  }
+  
+  // Setup des sections repliables Pump.fun si disponible
+  if (typeof initializePumpFilterSections === 'function') {
+    try {
+      initializePumpFilterSections();
+      console.log('✅ Pump.fun collapsible sections initialized');
+    } catch (error) {
+      console.warn('⚠️ Failed to initialize Pump.fun sections:', error);
+    }
+  }
+}
+
+function initializeDashboard() {
+  console.log('🚀 Initializing dashboard...');
+  
+  try {
+    // 1. Setup des event listeners pour les filtres de base
+    setupBaseFiltersEventListeners();
+    
+    // 2. Setup des listeners pour les modules externes (s'ils existent)
+    setupModuleEventListeners();
+    
+    // 3. Chargement du thème sauvegardé
+    loadSavedTheme();
+    
+    // 4. Initialisation de l'auto-refresh
+    startAutoRefresh();
+    updateRefreshStatus();
+    startWhaleAutoRefresh();
+    
+    // 5. Mise à jour des indicateurs
+    updateFiltersIndicator();
+    
+    setTimeout(() => {
+    initializeGlobalFilterPanel();
+    }, 200);
+
+    // 6. Chargement initial des données
+    console.log('📡 Starting initial data fetch...');
+    fetchData()
+      .then(() => {
+        console.log('✅ Initial data fetch completed');
+        
+        // 7. Mise à jour des indicateurs whale après un délai
+        setTimeout(() => {
+          updateWhaleIndicators();
+        }, 2000);
+      })
+      .catch(error => {
+        console.error('❌ Initial data fetch failed:', error);
+      });
+    
+    console.log('✅ Dashboard initialization completed');
+    
+  } catch (error) {
+    console.error('❌ Dashboard initialization failed:', error);
+    showErrorNotification('Erreur d\'initialisation du dashboard');
+  }
+}
+
+// ✅ NOUVELLE FONCTION: Setup des event listeners pour les filtres de base
+function setupBaseFiltersEventListeners() {
+  console.log('🔧 Setting up base filters event listeners...');
+  
+  const baseFilterSelectors = [
+    '#base-content .filter-panel input',
+    '#base-content .filter-panel select'
+  ];
+  
+  baseFilterSelectors.forEach(selector => {
+    document.querySelectorAll(selector).forEach(input => {
+      // Supprimer les anciens listeners pour éviter les doublons
+      input.removeEventListener('input', baseFilterHandler);
+      input.addEventListener('input', baseFilterHandler);
+    });
+  });
+}
+
+// ✅ NOUVELLE FONCTION: Handler pour les filtres de base
+function baseFilterHandler() {
+  clearTimeout(debounceTimeout);
+  debounceTimeout = setTimeout(() => {
+    if (currentTab === 'base') {
+      applyFilters();
+    }
+  }, 300);
+}
+
 // =============================================================================
 // GESTION DES ONGLETS
 // =============================================================================
 
 function switchTab(tabName, button) {
+  console.log(`🔄 Switching to tab: ${tabName}`);
+  
+  // Mettre à jour l'UI des onglets
   document.querySelectorAll('.tab-content').forEach(content => {
     content.classList.remove('active');
   });
@@ -183,17 +302,64 @@ function switchTab(tabName, button) {
   button.classList.add('active');
   
   currentTab = tabName;
-  renderPage();
+  setTimeout(() => {
+    initializeCurrentTabFilterPanel();
+    }, 100);
+  // ✅ CORRECTION: Vérifier si les données sont chargées avant d'appliquer les filtres
+  if (!isDataLoaded) {
+    console.log('⚠️ Data not loaded yet, fetching...');
+    fetchData().then(() => {
+      applyTabFilters();
+    });
+  } else {
+    applyTabFilters();
+  }
   
+  // Gestion spéciale pour l'onglet whale
   if (currentTab === 'whale') {
-    updateWhaleActivity();
     setTimeout(() => {
-      updateWhaleIndicators();
-    }, 1000);
+      updateWhaleActivity();
+      setTimeout(() => {
+        updateWhaleIndicators();
+      }, 1000);
+    }, 100);
   } else if (currentTab === 'dexscreener' || currentTab === 'pumpfun') {
     setTimeout(() => {
       updateWhaleIndicators();
     }, 1000);
+  }
+}
+
+// ✅ NOUVELLE FONCTION: Centraliser l'application des filtres par onglet
+function applyTabFilters() {
+  console.log(`📊 Applying filters for tab: ${currentTab}`);
+  
+  switch (currentTab) {
+    case 'dexscreener':
+      if (typeof applyDexFilters === 'function') {
+        applyDexFilters();
+      } else {
+        console.warn('⚠️ applyDexFilters function not available');
+        renderPage();
+      }
+      break;
+    case 'pumpfun':
+      if (typeof applyPumpFilters === 'function') {
+        applyPumpFilters();
+      } else {
+        console.warn('⚠️ applyPumpFilters function not available');
+        renderPage();
+      }
+      break;
+    case 'analysis':
+      updateAnalysis();
+      break;
+    case 'whale':
+      // Whale activity sera gérée séparément
+      break;
+    default:
+      applyFilters(); // Onglet base
+      break;
   }
 }
 
@@ -292,38 +458,103 @@ function showRefreshIndicator(active) {
 // FONCTIONS DE DONNÉES
 // =============================================================================
 
+// ✅ FONCTION CORRIGÉE: Meilleure gestion des erreurs et du loading
 async function fetchData() {
+  console.log('🔄 Fetching data...');
   showRefreshIndicator(true);
+  
   try {
     const response = await fetch('/api/tokens-detail');
-    if (!response.ok) throw new Error('Réponse API invalide');
-    data = await response.json();
-    filteredData = [...data];
-    currentPage = 1;
-    renderPage();
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
     
+    const newData = await response.json();
+    
+    // ✅ VALIDATION: Vérifier que les données sont valides
+    if (!Array.isArray(newData)) {
+      throw new Error('Invalid data format: expected array');
+    }
+    
+    console.log(`✅ Data loaded: ${newData.length} tokens`);
+    
+    data = newData;
+    filteredData = [...data];
+    isDataLoaded = true; // ✅ IMPORTANT: Marquer les données comme chargées
+    currentPage = 1;
+    
+    // Appliquer les filtres selon l'onglet actuel
+    applyTabFilters();
+    
+    // Mettre à jour les analyses si nécessaire
     if (currentTab === 'analysis') {
       updateAnalysis();
     }
     if (currentTab === 'whale') {
-      updateWhaleActivity();
+      setTimeout(() => {
+        updateWhaleActivity();
+      }, 500);
     }
+    
+    // Mettre à jour les indicateurs whale après un délai
     setTimeout(() => {
       updateWhaleIndicators();
-      setTimeout(() => {
-        updateWhaleIndicators();
-      }, 2000);
-    }, 1000);
+    }, 1500);
 
   } catch (error) {
-    console.error('Erreur lors du chargement des données:', error);
-    const tbody = document.getElementById('baseTbody');
+    console.error('❌ Error loading data:', error);
+    isDataLoaded = false;
+    
+    // Afficher l'erreur dans tous les tableaux visibles
+    const errorMessage = `<tr><td colspan="20" class="error-message">❌ Erreur: ${error.message}<br><button onclick="fetchData()" style="margin-top: 10px;">🔄 Réessayer</button></td></tr>`;
+    
+    const tbody = document.getElementById(`${currentTab}Tbody`) || document.getElementById('baseTbody');
     if (tbody) {
-      tbody.innerHTML = '<tr><td colspan="13">Erreur lors du chargement des données</td></tr>';
+      tbody.innerHTML = errorMessage;
     }
+    
+    // Afficher une notification d'erreur
+    showErrorNotification(`Erreur de chargement: ${error.message}`);
+    
   } finally {
     showRefreshIndicator(false);
   }
+}
+
+// ✅ NOUVELLE FONCTION: Affichage des notifications d'erreur
+function showErrorNotification(message) {
+  const notification = document.createElement('div');
+  notification.className = 'error-notification';
+  notification.innerHTML = `
+    <div class="error-content">
+      <span class="error-icon">⚠️</span>
+      <span class="error-text">${message}</span>
+      <button class="error-close" onclick="this.parentElement.parentElement.remove()">✕</button>
+    </div>
+  `;
+  
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #ff4444;
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    z-index: 10000;
+    max-width: 400px;
+    animation: slideIn 0.3s ease;
+  `;
+  
+  document.body.appendChild(notification);
+  
+  // Auto-remove après 10 secondes
+  setTimeout(() => {
+    if (notification.parentElement) {
+      notification.remove();
+    }
+  }, 10000);
 }
 
 // =============================================================================
@@ -349,6 +580,11 @@ function clearTimeFilter(btn) {
 }
 
 function applyFilters() {
+  if (!isDataLoaded) {
+    console.log('⚠️ Data not loaded, skipping filter application');
+    return;
+  }
+  
   const filters = {
     symbol: document.getElementById('filterSymbol').value.toLowerCase().trim(),
     bondingStatus: document.getElementById('filterBondingStatus').value.toLowerCase().trim(),
@@ -415,20 +651,63 @@ function applyFilters() {
 // =============================================================================
 
 function renderPage() {
+  if (!isDataLoaded) {
+    console.log('⚠️ Data not loaded, showing loading message');
+    showLoadingMessage();
+    return;
+  }
+  
   const start = (currentPage - 1) * perPage;
   const rows = filteredData.slice(start, start + perPage);
   
-  if (currentTab === 'base') {
-    renderBaseTable(rows);
-  } else if (currentTab === 'dexscreener') {
-    renderDexScreenerTable(rows);
-  } else if (currentTab === 'pumpfun') {
-    renderPumpFunTable(rows);
-  } else if (currentTab === 'analysis') {
-    updateAnalysis();
+  switch (currentTab) {
+    case 'base':
+      renderBaseTable(rows);
+      break;
+    case 'dexscreener':
+      if (typeof renderDexScreenerTable === 'function') {
+        renderDexScreenerTable(rows);
+      } else {
+        console.warn('⚠️ renderDexScreenerTable function not available');
+        renderBaseTable(rows);
+      }
+      break;
+    case 'pumpfun':
+      if (typeof renderPumpFunTable === 'function') {
+        renderPumpFunTable(rows);
+      } else {
+        console.warn('⚠️ renderPumpFunTable function not available');
+        renderBaseTable(rows);
+      }
+      break;
+    case 'analysis':
+      updateAnalysis();
+      return; // Analysis doesn't use pagination
+    default:
+      renderBaseTable(rows);
+      break;
   }
   
   updatePagination();
+}
+
+// ✅ NOUVELLE FONCTION: Affichage du message de chargement
+function showLoadingMessage() {
+  const currentTbodyId = currentTab === 'base' ? 'baseTbody' : 
+                        currentTab === 'dexscreener' ? 'dexscreenerTbody' :
+                        currentTab === 'pumpfun' ? 'pumpfunTbody' : 'baseTbody';
+  
+  const tbody = document.getElementById(currentTbodyId);
+  if (tbody) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="20" class="loading-message">
+          <div class="loading-spinner"></div>
+          <div>🔄 Chargement des données...</div>
+        </td>
+      </tr>
+    `;
+  }
 }
 
 function renderBaseTable(rows) {
@@ -467,6 +746,16 @@ function renderBaseTable(rows) {
 }
 
 function updateAnalysis() {
+  if (!isDataLoaded) {
+    document.getElementById('analysisMetrics').innerHTML = `
+      <div class="metric-card">
+        <div class="metric-title">🔄 Chargement...</div>
+        <div class="metric-value">Données en cours de chargement</div>
+      </div>
+    `;
+    return;
+  }
+  
   const metricsContainer = document.getElementById('analysisMetrics');
   
   if (filteredData.length === 0) {
@@ -565,10 +854,11 @@ function updateAnalysis() {
 }
 
 function updatePagination() {
+  const totalPages = Math.ceil(filteredData.length / perPage);
   document.getElementById("pageInfo").textContent = 
-    `Page ${currentPage} / ${Math.ceil(filteredData.length / perPage)} (${filteredData.length} tokens)`;
+    `Page ${currentPage} / ${totalPages} (${filteredData.length} tokens)`;
   document.getElementById("prevBtn").disabled = currentPage === 1;
-  document.getElementById("nextBtn").disabled = currentPage === Math.ceil(filteredData.length / perPage);
+  document.getElementById("nextBtn").disabled = currentPage === totalPages;
 }
 
 // =============================================================================
@@ -599,32 +889,66 @@ function nextPage() {
 // FONCTIONS DE CONTRÔLE
 // =============================================================================
 
+// ✅ FONCTION CORRIGÉE: Meilleure gestion du reload
 function reloadData() {
+  console.log('🔄 Manual reload requested');
+  
+  // Réinitialiser les filtres
+  resetAllFilters();
+  
+  // Recharger les données
   fetchData();
-  document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
-  document.getElementById('filterTimeUnit').value = '';
-  document.getElementById('filterBondingStatus').value = '';
-  document.getElementById('dexFilterHasData').value = '';
-  document.getElementById('dexFilterStatus').value = '';
-  document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-  applyFilters();
+}
+
+// ✅ NOUVELLE FONCTION: Réinitialisation complète des filtres
+function resetAllFilters() {
+  console.log('🧹 Resetting all filters');
+  
+  // Réinitialiser les filtres de base
+  document.querySelectorAll('.filter-panel input').forEach(input => {
+    input.value = '';
+    input.classList.remove('filter-active');
+  });
+  
+  // Réinitialiser les selects
+  document.querySelectorAll('.filter-panel select').forEach(select => {
+    select.selectedIndex = 0;
+    select.classList.remove('filter-active');
+  });
+  
+  // Réinitialiser les boutons présets
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.classList.remove('active', 'filter-active');
+  });
+  
+  // Réinitialiser les boutons de stratégie
+  document.querySelectorAll('.strategy-btn').forEach(btn => {
+    btn.classList.remove('active', 'filter-active');
+  });
+  
+  // Réinitialiser les variables spécifiques aux modules
+  if (typeof resetDexFilters === 'function') {
+    resetDexFilters();
+  }
+  if (typeof resetPumpFilters === 'function') {
+    resetPumpFilters();
+  }
+  
+  // Réinitialiser les variables globales de filtrage temporel
+  window.dexTimeValue = null;
+  window.dexTimeUnit = null;
+  
+  currentPage = 1;
+  updateFiltersIndicator();
 }
 
 function resetFilters() {
-  document.querySelectorAll('.filter-panel input').forEach(input => input.value = '');
-  document.getElementById('filterTimeUnit').value = '';
-  document.getElementById('filterBondingStatus').value = '';
-  document.getElementById('filterDiscoveredAt').value = '';
-  document.getElementById('dexFilterHasData').value = '';
-  document.getElementById('dexFilterStatus').value = '';
-  document.querySelectorAll('.strategy-btn').forEach(btn => btn.classList.remove('active'));
-  document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-  window.dexTimeValue = null;
-  window.dexTimeUnit = null;
-  filteredData = [...data];
-  currentPage = 1;
-  updateFiltersIndicator();
-  renderPage();
+  resetAllFilters();
+  
+  if (isDataLoaded) {
+    filteredData = [...data];
+    renderPage();
+  }
 }
 
 // =============================================================================
@@ -632,6 +956,11 @@ function resetFilters() {
 // =============================================================================
 
 function exportData(format) {
+  if (!isDataLoaded) {
+    alert('⚠️ Données non chargées. Veuillez attendre le chargement complet.');
+    return;
+  }
+  
   if (filteredData.length === 0) {
     alert('Aucune donnée à exporter avec les filtres actuels');
     return;
@@ -640,10 +969,15 @@ function exportData(format) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
   const filename = `tokens_export_${timestamp}`;
   
-  if (format === 'csv') {
-    exportToCSV(filteredData, filename);
-  } else if (format === 'json') {
-    exportToJSON(filteredData, filename);
+  try {
+    if (format === 'csv') {
+      exportToCSV(filteredData, filename);
+    } else if (format === 'json') {
+      exportToJSON(filteredData, filename);
+    }
+  } catch (error) {
+    console.error('❌ Export error:', error);
+    alert(`Erreur lors de l'export: ${error.message}`);
   }
 }
 
@@ -719,7 +1053,10 @@ function loadSavedTheme() {
   const savedTheme = localStorage.getItem('theme');
   if (savedTheme === 'light') {
     document.documentElement.setAttribute('data-theme', 'light');
-    document.getElementById('themeToggle').textContent = '🌙 Mode Sombre';
+    const themeButton = document.getElementById('themeToggle');
+    if (themeButton) {
+      themeButton.textContent = '🌙 Mode Sombre';
+    }
   }
 }
 
@@ -728,13 +1065,18 @@ function loadSavedTheme() {
 // =============================================================================
 
 async function updateWhaleActivity() {
+  if (!isDataLoaded) {
+    console.log('⚠️ Data not loaded, skipping whale activity update');
+    return;
+  }
+  
   try {
     await Promise.all([
       fetchWhaleSummary(),
       fetchWhaleFeed()
     ]);
   } catch (error) {
-    console.error('Error updating whale activity:', error);
+    console.error('❌ Error updating whale activity:', error);
   }
 }
 
@@ -745,18 +1087,37 @@ async function fetchWhaleSummary() {
     
     const summary = await response.json();
     
-    document.getElementById('whaleTransactions1h').textContent = summary.total_transactions || 0;
-    document.getElementById('whaleVolume1h').textContent = `${(summary.total_volume_usd || 0).toLocaleString()}`;
-    document.getElementById('whaleUniqueTokens').textContent = summary.unique_tokens || 0;
-    document.getElementById('whaleUniqueWallets').textContent = summary.unique_wallets || 0;
+    // ✅ VÉRIFICATION: S'assurer que les éléments existent
+    const elements = {
+      whaleTransactions1h: summary.total_transactions || 0,
+      whaleVolume1h: `${(summary.total_volume_usd || 0).toLocaleString()}`,
+      whaleUniqueTokens: summary.unique_tokens || 0,
+      whaleUniqueWallets: summary.unique_wallets || 0
+    };
+    
+    Object.keys(elements).forEach(id => {
+      const element = document.getElementById(id);
+      if (element) {
+        element.textContent = elements[id];
+      }
+    });
     
   } catch (error) {
-    console.error('Error fetching whale summary:', error);
+    console.error('❌ Error fetching whale summary:', error);
+    
+    // Afficher l'erreur dans les éléments si ils existent
+    ['whaleTransactions1h', 'whaleVolume1h', 'whaleUniqueTokens', 'whaleUniqueWallets'].forEach(id => {
+      const element = document.getElementById(id);
+      if (element) {
+        element.textContent = 'Erreur';
+      }
+    });
   }
 }
 
 async function fetchWhaleFeed() {
-  const period = document.getElementById('whaleFeedPeriod').value;
+  const periodSelect = document.getElementById('whaleFeedPeriod');
+  const period = periodSelect ? periodSelect.value : 24;
   
   try {
     const response = await fetch(`/api/whale-feed?hours=${period}&limit=20`);
@@ -766,14 +1127,17 @@ async function fetchWhaleFeed() {
     renderWhaleFeed(data.feed_items || []);
     
   } catch (error) {
-    console.error('Error fetching whale feed:', error);
-    document.getElementById('whaleFeedContent').innerHTML = 
-      '<div class="error">Erreur lors du chargement du feed whale</div>';
+    console.error('❌ Error fetching whale feed:', error);
+    const container = document.getElementById('whaleFeedContent');
+    if (container) {
+      container.innerHTML = '<div class="error">❌ Erreur lors du chargement du feed whale</div>';
+    }
   }
 }
 
 function renderWhaleFeed(feedItems) {
   const container = document.getElementById('whaleFeedContent');
+  if (!container) return;
   
   if (feedItems.length === 0) {
     container.innerHTML = '<div class="no-data">🐋 Aucune activité whale récente</div>';
@@ -798,38 +1162,38 @@ function renderWhaleFeed(feedItems) {
 
     return `
       <div class="whale-feed-item ${itemClass}">
-        <div class="whale-feed-time-full" title="${item.timestamp_full}">
-          ${item.timestamp_formatted}
+        <div class="whale-feed-time-full" title="${item.timestamp_full || ''}">
+          ${item.timestamp_formatted || ''}
         </div>
         
         <div class="whale-feed-emoji">${emoji}</div>
         
-        <div class="whale-feed-type">${item.type}</div>
+        <div class="whale-feed-type">${item.type || ''}</div>
         
         <div class="whale-feed-amount-detailed">
-          <div class="whale-feed-amount-main">${item.amount_formatted}</div>
-          <div class="whale-feed-amount-precise" title="Montant exact">${item.amount_detailed}</div>
+          <div class="whale-feed-amount-main">${item.amount_formatted || ''}</div>
+          <div class="whale-feed-amount-precise" title="Montant exact">${item.amount_detailed || ''}</div>
         </div>
         
         <div class="whale-feed-token-info">
           <div style="display: flex; align-items: center; gap: 0.3rem;">
-            <span class="whale-feed-token-symbol">${item.token_symbol}</span>
-            <span class="whale-token-status whale-token-status-${item.token_status}">${item.token_status}</span>
+            <span class="whale-feed-token-symbol">${item.token_symbol || ''}</span>
+            <span class="whale-token-status whale-token-status-${item.token_status || 'unknown'}">${item.token_status || 'unknown'}</span>
           </div>
-          <div class="whale-feed-token-name" title="${item.token_name}">${item.token_name}</div>
+          <div class="whale-feed-token-name" title="${item.token_name || ''}">${item.token_name || ''}</div>
           <div class="whale-feed-token-address" 
-               title="${item.token_full}" 
-               onclick="copyToClipboard('${item.token_full}')">
-            ${item.token_short}
+               title="${item.token_full || ''}" 
+               onclick="copyToClipboard('${item.token_full || ''}')">
+            ${item.token_short || ''}
           </div>
         </div>
         
         <div class="whale-feed-wallet-info">
-          <div class="whale-feed-wallet-label">${item.wallet_label}</div>
+          <div class="whale-feed-wallet-label">${item.wallet_label || ''}</div>
           <div class="whale-feed-wallet-address" 
-               title="${item.wallet_address}"
-               onclick="copyToClipboard('${item.wallet_address}')">
-            ${item.wallet_short}
+               title="${item.wallet_address || ''}"
+               onclick="copyToClipboard('${item.wallet_address || ''}')">
+            ${item.wallet_short || ''}
           </div>
         </div>
         
@@ -845,29 +1209,68 @@ function renderWhaleFeed(feedItems) {
 }
 
 function copyToClipboard(text) {
+  if (!text) return;
+  
   navigator.clipboard.writeText(text).then(() => {
-    const notification = document.createElement('div');
-    notification.textContent = 'Copié!';
-    notification.style.cssText = `
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: var(--text-accent);
-      color: var(--bg-primary);
-      padding: 0.5rem 1rem;
-      border-radius: 4px;
-      z-index: 10000;
-      font-weight: bold;
-    `;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-      document.body.removeChild(notification);
-    }, 1000);
+    showCopyNotification('Copié!');
   }).catch(err => {
-    console.error('Erreur copie:', err);
+    console.error('❌ Erreur copie:', err);
+    // Fallback pour les navigateurs plus anciens
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      showCopyNotification('Copié!');
+    } catch (fallbackErr) {
+      console.error('❌ Erreur copie fallback:', fallbackErr);
+    }
   });
+}
+
+// ✅ FONCTION AMÉLIORÉE: Notification de copie
+function showCopyNotification(text) {
+  const notification = document.createElement('div');
+  notification.textContent = text;
+  notification.className = 'copy-notification';
+  notification.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--text-accent, #00d4ff);
+    color: var(--bg-primary, #1a1a1a);
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    z-index: 10000;
+    font-weight: bold;
+    animation: fadeInOut 1s ease;
+    pointer-events: none;
+  `;
+  
+  // Ajouter l'animation CSS si elle n'existe pas
+  if (!document.querySelector('#copy-notification-styles')) {
+    const style = document.createElement('style');
+    style.id = 'copy-notification-styles';
+    style.textContent = `
+      @keyframes fadeInOut {
+        0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+        50% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  document.body.appendChild(notification);
+  
+  setTimeout(() => {
+    if (notification.parentElement) {
+      document.body.removeChild(notification);
+    }
+  }, 1000);
 }
 
 function getWhaleEmoji(type, amount) {
@@ -883,6 +1286,8 @@ function refreshWhaleFeed() {
 
 function toggleWhaleAutoRefresh() {
   const checkbox = document.getElementById('whaleAutoRefresh');
+  if (!checkbox) return;
+  
   isWhaleAutoRefreshEnabled = checkbox.checked;
   
   if (isWhaleAutoRefreshEnabled) {
@@ -912,14 +1317,17 @@ function stopWhaleAutoRefresh() {
   }
 }
 
+// ✅ FONCTION AMÉLIORÉE: Meilleure gestion des erreurs
 async function updateWhaleIndicators() {
   if (currentTab !== 'dexscreener' && currentTab !== 'whale') return;
+  if (!isDataLoaded) return;
   
   try {
     const selectedPeriod = document.getElementById('whalePeriodSelector')?.value || 24;
     const response = await fetch(`/api/whale-activity?hours=${selectedPeriod}&limit=100`);
+    
     if (!response.ok) {
-      console.error('Whale API response not OK:', response.status);
+      console.error('❌ Whale API response not OK:', response.status);
       return;
     }
     
@@ -953,11 +1361,12 @@ async function updateWhaleIndicators() {
       }
     });
     
-    console.log(`Whale indicators updated: ${updatedCount} elements, ${foundCount} with activity, ${transactions.length} total transactions`);
+    console.log(`🐋 Whale indicators updated: ${updatedCount} elements, ${foundCount} with activity, ${transactions.length} total transactions`);
     
   } catch (error) {
-    console.error('Error updating whale indicators:', error);
+    console.error('❌ Error updating whale indicators:', error);
     
+    // Afficher l'erreur dans les indicateurs qui sont en loading
     filteredData.forEach(token => {
       const element = document.getElementById(`whale-activity-${token.address}`);
       if (element && element.innerHTML.includes('⏳')) {
@@ -1000,6 +1409,8 @@ function generateWhaleIndicator(whaleActivity) {
 }
 
 function getTimeAgoExtended(timestamp) {
+  if (!timestamp) return 'unknown';
+  
   const now = new Date();
   const time = new Date(timestamp);
   const diffMinutes = Math.floor((now - time) / (1000 * 60));
@@ -1048,6 +1459,11 @@ function updateFiltersIndicator() {
 
   activeFiltersCount = count;
   
+  const activeTabContent = document.querySelector('.tab-content.active');
+  if (activeTabContent) {
+    updateFilterPanelBadge(activeTabContent.id, count);
+  }
+
   const indicator = document.getElementById('filtersIndicator');
   if (indicator) {
     const filterCount = indicator.querySelector('.filter-count');
@@ -1077,7 +1493,7 @@ function highlightActiveFilters() {
     const el = document.getElementById(id);
     if (el && el.value.trim() !== '') {
       el.classList.add('filter-active');
-    } else {
+    } else if (el) {
       el.classList.remove('filter-active');
     }
   });
@@ -1094,7 +1510,7 @@ function highlightActiveFilters() {
     const el = document.getElementById(id);
     if (el && el.value.trim() !== '') {
       el.classList.add('filter-active');
-    } else {
+    } else if (el) {
       el.classList.remove('filter-active');
     }
   });
@@ -1108,72 +1524,407 @@ function highlightActiveFilters() {
   });
 }
 
+// ✅ FONCTION AMÉLIORÉE: Vérification de l'historique avec timeout
+// ✅ FONCTION AMÉLIORÉE: Vérification de l'historique avec timeout
 function checkTokenHistory(address) {
-  fetch(`/api/token-has-history/${address}`)
-    .then(response => response.json())
-    .then(data => {
-      const element = document.getElementById(`history-${address}`);
-      if (element) {
-        if (data.has_history && data.data_points > 0) {
-          element.innerHTML = `
-            <a href="/dashboard/history?address=${address}" target="_blank" style="color: #00d4ff;">
-              📊 Historique (${data.data_points} pts)
-            </a>
-          `;
-        } else {
-          element.innerHTML = '<span style="color: #666;">📊 Pas d\'historique</span>';
-        }
-      }
-    })
-    .catch(() => {
-      const element = document.getElementById(`history-${address}`);
-      if (element) {
-        element.innerHTML = '<span style="color: #666;">📊 Pas d\'historique</span>';
-      }
-    });
+ if (!address) return;
+ 
+ const timeoutDuration = 10000; // 10 secondes
+ const controller = new AbortController();
+ 
+ // Timeout
+ const timeoutId = setTimeout(() => {
+   controller.abort();
+ }, timeoutDuration);
+ 
+ fetch(`/api/token-has-history/${address}`, {
+   signal: controller.signal
+ })
+   .then(response => {
+     clearTimeout(timeoutId);
+     if (!response.ok) throw new Error(`HTTP ${response.status}`);
+     return response.json();
+   })
+   .then(data => {
+     const element = document.getElementById(`history-${address}`);
+     if (element) {
+       if (data.has_history && data.data_points > 0) {
+         element.innerHTML = `
+           <a href="/dashboard/history?address=${address}" target="_blank" style="color: #00d4ff;">
+             📊 Historique (${data.data_points} pts)
+           </a>
+         `;
+       } else {
+         element.innerHTML = '<span style="color: #666;">📊 Pas d\'historique</span>';
+       }
+     }
+   })
+   .catch(error => {
+     clearTimeout(timeoutId);
+     const element = document.getElementById(`history-${address}`);
+     if (element) {
+       if (error.name === 'AbortError') {
+         element.innerHTML = '<span style="color: #888;">📊 Timeout</span>';
+       } else {
+         console.warn(`⚠️ History check failed for ${address}:`, error);
+         element.innerHTML = '<span style="color: #666;">📊 Pas d\'historique</span>';
+       }
+     }
+   });
 }
+
+
 
 async function toggleFav(address) {
-  await fetch(`/api/favorites/${address}`, { method: 'POST' });
-  alert('Ajouté aux favoris !');
+  if (!address) return;
+  
+  try {
+    const response = await fetch(`/api/favorites/${address}`, { method: 'POST' });
+    if (response.ok) {
+      showCopyNotification('⭐ Ajouté aux favoris !');
+    } else {
+      throw new Error(`HTTP ${response.status}`);
+    }
+  } catch (error) {
+    console.error('❌ Error toggling favorite:', error);
+    showCopyNotification('❌ Erreur lors de l\'ajout');
+  }
 }
 
 // =============================================================================
-// INITIALISATION
+// FONCTIONS DE RETRY ET GESTION D'ERREURS
 // =============================================================================
 
-document.addEventListener('DOMContentLoaded', function() {
-  console.log('🚀 Initialisation du dashboard...');
+// ✅ NOUVELLE FONCTION: Retry automatique en cas d'échec
+function setupRetryMechanism() {
+  let retryCount = 0;
+  const maxRetries = 3;
+  const retryDelay = 5000; // 5 secondes
   
-  // Filtres onglet base
-  document.querySelectorAll('#base-content .filter-panel input, #base-content .filter-panel select').forEach(input => {
-    input.addEventListener('input', () => {
-      clearTimeout(debounceTimeout);
-      debounceTimeout = setTimeout(() => {
-        applyFilters();
-      }, 300);
-    });
+  const originalFetchData = fetchData;
+  
+  window.fetchData = async function() {
+    try {
+      await originalFetchData();
+      retryCount = 0; // Reset retry count on success
+    } catch (error) {
+      console.error(`❌ Fetch data failed (attempt ${retryCount + 1}/${maxRetries}):`, error);
+      
+      if (retryCount < maxRetries) {
+        retryCount++;
+        console.log(`🔄 Retrying in ${retryDelay/1000} seconds...`);
+        
+        setTimeout(() => {
+          fetchData();
+        }, retryDelay);
+      } else {
+        console.error('❌ Max retries reached, giving up');
+        showErrorNotification('Impossible de charger les données après plusieurs tentatives');
+        retryCount = 0; // Reset for future attempts
+      }
+    }
+  };
+}
+
+// ✅ AMÉLIORATION: Vérification de l'état de la page
+function checkPageHealth() {
+  const healthChecks = {
+    dataLoaded: isDataLoaded,
+    hasData: data && data.length > 0,
+    currentTab: currentTab,
+    autoRefreshEnabled: isAutoRefreshEnabled,
+    whaleAutoRefreshEnabled: isWhaleAutoRefreshEnabled
+  };
+  
+  console.log('🏥 Page health check:', healthChecks);
+  
+  // Si les données ne sont pas chargées après 30 secondes, afficher un avertissement
+  if (!isDataLoaded && performance.now() > 30000) {
+    console.warn('⚠️ Data not loaded after 30 seconds');
+    showErrorNotification('Le chargement des données prend plus de temps que prévu...');
+  }
+  
+  return healthChecks;
+}
+
+// ✅ FONCTION DE DEBUG POUR LE DÉVELOPPEMENT
+function debugDashboard() {
+  console.log('🐛 DASHBOARD DEBUG INFO:');
+  console.log('- Data loaded:', isDataLoaded);
+  console.log('- Data length:', data.length);
+  console.log('- Filtered data length:', filteredData.length);
+  console.log('- Current tab:', currentTab);
+  console.log('- Current page:', currentPage);
+  console.log('- Per page:', perPage);
+  console.log('- Auto refresh enabled:', isAutoRefreshEnabled);
+  console.log('- Whale auto refresh enabled:', isWhaleAutoRefreshEnabled);
+  console.log('- Active filters count:', activeFiltersCount);
+  
+  // Vérifier la disponibilité des modules
+  console.log('- DexScreener module available:', typeof applyDexFilters === 'function');
+  console.log('- Pump.fun module available:', typeof applyPumpFilters === 'function');
+  
+  // Vérifier l'état des éléments DOM critiques
+  const criticalElements = [
+    'baseTbody', 'dexscreenerTbody', 'pumpfunTbody',
+    'refreshIndicator', 'filtersIndicator', 'pageInfo'
+  ];
+  
+  console.log('- DOM elements status:');
+  criticalElements.forEach(id => {
+    const element = document.getElementById(id);
+    console.log(`  ${id}:`, element ? '✅ Found' : '❌ Missing');
   });
+  
+  return {
+    dataLoaded: isDataLoaded,
+    dataLength: data.length,
+    filteredDataLength: filteredData.length,
+    currentTab,
+    currentPage,
+    perPage,
+    autoRefreshEnabled: isAutoRefreshEnabled,
+    whaleAutoRefreshEnabled: isWhaleAutoRefreshEnabled,
+    activeFiltersCount
+  };
+}
 
-  // Setup des listeners DexScreener et PumpFun
-  if (typeof setupDexFiltersEventListeners === 'function') {
-    setupDexFiltersEventListeners();
-  }
-  if (typeof setupPumpFiltersEventListeners === 'function') {
-    setupPumpFiltersEventListeners();
-  }
-
-  // Initialisation
-  loadSavedTheme();
-  fetchData();
-  startAutoRefresh();
-  updateRefreshStatus();
-  updateFiltersIndicator();
-  startWhaleAutoRefresh();
-
+// ✅ FONCTION POUR FORCER UNE RÉINITIALISATION COMPLÈTE
+function forceReset() {
+  console.log('🔄 Force reset initiated...');
+  
+  // Arrêter tous les timers
+  stopAutoRefresh();
+  stopWhaleAutoRefresh();
+  
+  // Réinitialiser les variables
+  data = [];
+  filteredData = [];
+  isDataLoaded = false;
+  currentPage = 1;
+  
+  // Réinitialiser les filtres
+  resetAllFilters();
+  
+  // Redémarrer
   setTimeout(() => {
-    updateWhaleIndicators();
-  }, 2000);
+    initializeDashboard();
+  }, 1000);
+}
 
-  console.log('✅ Dashboard initialisé');
+
+// =============================================================================
+// GESTION DU PANNEAU DE FILTRES GLOBAL PLIABLE
+// =============================================================================
+
+function initializeGlobalFilterPanel() {
+  // Initialiser tous les panneaux de filtres avec header
+  document.querySelectorAll('.filter-panel:not(.initialized)').forEach(panel => {
+    setupGlobalFilterPanel(panel);
+  });
+}
+
+function setupGlobalFilterPanel(panel) {
+  // Éviter la double initialisation
+  if (panel.classList.contains('initialized')) return;
+  
+  // Déterminer le titre selon l'onglet
+  const tabContent = panel.closest('.tab-content');
+  let panelTitle = '🔍 Filtres';
+  
+  if (tabContent) {
+    if (tabContent.id === 'base-content') {
+      panelTitle = '🔍 Filtres - Données de Base';
+    } else if (tabContent.id === 'dexscreener-content') {
+      panelTitle = '📈 Filtres - DexScreener';
+    } else if (tabContent.id === 'pumpfun-content') {
+      panelTitle = '🚀 Filtres - Pump.fun';
+    }
+  }
+  
+  // Créer le header
+  const header = document.createElement('div');
+  header.className = 'filter-panel-header';
+  header.innerHTML = `
+    <div class="filter-panel-title">
+      <span>${panelTitle}</span>
+      <span class="filter-panel-badge zero" id="filter-badge-${tabContent?.id || 'default'}">0</span>
+    </div>
+    <div class="filter-panel-toggle">▼</div>
+  `;
+  
+  // Wrapper pour le contenu existant
+  const content = document.createElement('div');
+  content.className = 'filter-panel-content';
+  
+  // Déplacer tout le contenu existant dans le wrapper
+  while (panel.firstChild) {
+    content.appendChild(panel.firstChild);
+  }
+  
+  // Ajouter le header et le contenu
+  panel.appendChild(header);
+  panel.appendChild(content);
+  
+  // Restaurer l'état sauvegardé
+  const savedState = localStorage.getItem(`filter-panel-${tabContent?.id || 'default'}`);
+  if (savedState === 'collapsed') {
+    panel.classList.add('collapsed');
+  }
+  
+  // Ajouter l'event listener pour le toggle
+  header.addEventListener('click', () => {
+    toggleGlobalFilterPanel(panel, tabContent?.id || 'default');
+  });
+  
+  // Marquer comme initialisé
+  panel.classList.add('initialized');
+  
+  console.log(`✅ Global filter panel initialized for: ${panelTitle}`);
+}
+
+function toggleGlobalFilterPanel(panel, tabId) {
+  panel.classList.toggle('collapsed');
+  
+  const isCollapsed = panel.classList.contains('collapsed');
+  
+  // Sauvegarder l'état
+  localStorage.setItem(`filter-panel-${tabId}`, isCollapsed ? 'collapsed' : 'expanded');
+  
+  // Animation smooth
+  const content = panel.querySelector('.filter-panel-content');
+  if (content) {
+    if (isCollapsed) {
+      content.style.maxHeight = content.scrollHeight + 'px';
+      setTimeout(() => {
+        content.style.maxHeight = '0px';
+      }, 10);
+    } else {
+      content.style.maxHeight = content.scrollHeight + 'px';
+      setTimeout(() => {
+        content.style.maxHeight = 'none';
+      }, 300);
+    }
+  }
+  
+  console.log(`🔄 Filter panel ${isCollapsed ? 'collapsed' : 'expanded'} for: ${tabId}`);
+}
+
+function updateFilterPanelBadge(tabId, count) {
+  const badge = document.getElementById(`filter-badge-${tabId}`);
+  if (badge) {
+    badge.textContent = count || 0;
+    if (count > 0) {
+      badge.classList.remove('zero');
+    } else {
+      badge.classList.add('zero');
+    }
+  }
+}
+
+// Fonction pour initialiser les panneaux selon l'onglet actif
+function initializeCurrentTabFilterPanel() {
+  const activeTabContent = document.querySelector('.tab-content.active');
+  if (activeTabContent) {
+    const filterPanel = activeTabContent.querySelector('.filter-panel');
+    if (filterPanel) {
+      setupGlobalFilterPanel(filterPanel);
+    }
+  }
+}
+
+
+// =============================================================================
+// EVENT LISTENERS ET INITIALISATION FINALE
+// =============================================================================
+
+// ✅ FONCTION AMÉLIORÉE: Gestion globale des erreurs
+window.addEventListener('error', function(event) {
+  console.error('🚨 Global error caught:', event.error);
+  
+  // Ne pas afficher de notification pour les erreurs de réseau communes
+  if (event.error && event.error.message && 
+      (event.error.message.includes('fetch') || 
+       event.error.message.includes('NetworkError'))) {
+    return;
+  }
+  
+  // Afficher une notification pour les autres erreurs
+  showErrorNotification('Une erreur inattendue s\'est produite');
 });
+
+// ✅ FONCTION AMÉLIORÉE: Gestion des erreurs de promesses non catchées
+window.addEventListener('unhandledrejection', function(event) {
+  console.error('🚨 Unhandled promise rejection:', event.reason);
+  
+  // Empêcher l'affichage de l'erreur dans la console
+  event.preventDefault();
+  
+  // Afficher une notification d'erreur
+  if (event.reason && event.reason.message) {
+    showErrorNotification(`Erreur: ${event.reason.message}`);
+  } else {
+    showErrorNotification('Une erreur de connexion s\'est produite');
+  }
+});
+
+// ✅ INITIALISATION AMÉLIORÉE AU CHARGEMENT DE LA PAGE
+document.addEventListener('DOMContentLoaded', function() {
+  console.log('📄 DOM Content Loaded');
+  
+  // Attendre un petit délai pour s'assurer que tout est prêt
+  setTimeout(() => {
+    // Setup du mécanisme de retry
+    setupRetryMechanism();
+    
+    // Initialisation principale
+    initializeDashboard();
+    
+    // Vérification de santé périodique
+    setInterval(checkPageHealth, 60000); // Toutes les minutes
+    
+  }, 100);
+});
+
+// ✅ GESTION DU RECHARGEMENT DE LA PAGE
+window.addEventListener('beforeunload', function() {
+  console.log('🔄 Page unloading, cleaning up...');
+  
+  // Nettoyer les timers
+  stopAutoRefresh();
+  stopWhaleAutoRefresh();
+  
+  // Nettoyer les timeouts
+  if (debounceTimeout) {
+    clearTimeout(debounceTimeout);
+  }
+});
+
+// ✅ GESTION DE LA VISIBILITÉ DE LA PAGE
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) {
+    console.log('👁️ Page hidden, pausing updates');
+    // Optionnel: suspendre les mises à jour automatiques
+  } else {
+    console.log('👁️ Page visible, resuming updates');
+    // Reprendre les mises à jour si nécessaire
+    if (isDataLoaded && isAutoRefreshEnabled) {
+      // Actualiser les données si la page a été cachée longtemps
+      const lastUpdate = data.length > 0 ? new Date(data[0].updated_at || Date.now()) : new Date(0);
+      const now = new Date();
+      const timeDiff = now - lastUpdate;
+      
+      // Si plus de 2 minutes se sont écoulées, actualiser
+      if (timeDiff > 120000) {
+        console.log('🔄 Refreshing data after page was hidden');
+        fetchData();
+      }
+    }
+  }
+});
+
+// Exposer les fonctions de debug globalement pour le développement
+window.debugDashboard = debugDashboard;
+window.forceReset = forceReset;
+
+console.log('📋 Dashboard Detail JavaScript loaded and ready');

@@ -370,9 +370,20 @@ function applyDexFilters() {
     whalePeriod: currentWhalePeriod,
   };
 
+  if (!window.data || !Array.isArray(window.data)) {
+    console.warn('⚠️ No data available in DexScreener module');
+    window.filteredData = [];
+    window.highlightActiveFilters();
+    window.updateFiltersIndicator(); 
+    window.currentPage = 1;
+    window.renderPage();
+    return;
+  }
+
   // Utiliser la variable globale `data` et `filteredData` du fichier principal
   window.filteredData = window.data.filter(row => {
     const hasDexData = (row.dexscreener_price_usd || 0) > 0;
+    if (!hasDexData) return false;
     const lastDexUpdate = row.last_dexscreener_update || row.updated_at;
     
     // Vérification du filtre d'âge des boutons présets
@@ -488,7 +499,7 @@ function renderDexScreenerTable(rows) {
   const tbody = document.getElementById('dexscreenerTbody');
   
   if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="24" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="27" class="no-data">Aucune donnée ne correspond aux filtres</td></tr>'; // ✅ Changé de 24 à 27
   } else {
     tbody.innerHTML = rows.map(r => {
       const dexUrl = r.dexscreener_url || `https://dexscreener.com/solana/${r.address}`;
@@ -550,6 +561,8 @@ function renderDexScreenerTable(rows) {
           <td>${r.dexscreener_txns_6h || 0}</td>
           <td>${r.dexscreener_txns_24h || 0}</td>
           <td style="color: #00ff88">${r.dexscreener_buys_1h || 0}</td>
+          <td style="color: #ff6b6b">${r.dexscreener_sells_1h || 0}</td>
+          <td style="color: #00ff88">${r.dexscreener_buys_24h || 0}</td>
           <td style="color: #ff6b6b">${r.dexscreener_sells_24h || 0}</td>
           <td>${progressDisplay}</td>
           <td id="whale-activity-${r.address}">

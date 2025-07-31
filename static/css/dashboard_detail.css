@@ -1742,5 +1742,217 @@ th {
   to { box-shadow: 0 0 15px rgba(255, 107, 53, 0.6); }
 }
 
+/* =============================================================================
+   PUMP.FUN - COMPACT FILTERS LAYOUT
+   ============================================================================= */
 
+#pumpfun-content .filter-panel {
+  max-height: 400px; /* Limiter la hauteur totale */
+  overflow-y: auto; /* Scroll si nécessaire */
+}
+
+#pumpfun-content .filter-section {
+  margin-bottom: 1rem; /* Réduire l'espacement entre sections */
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  padding: 0.75rem; /* Réduire le padding */
+}
+
+#pumpfun-content .filter-section-title {
+  font-size: 0.9rem; /* Plus petit */
+  font-weight: 600;
+  margin-bottom: 0.5rem; /* Moins d'espace */
+  color: var(--text-accent, #00d4ff);
+  cursor: pointer; /* Indiquer que c'est cliquable */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#pumpfun-content .filter-section-title::after {
+  content: "▼";
+  font-size: 0.7rem;
+  transition: transform 0.2s;
+}
+
+#pumpfun-content .filter-section.collapsed .filter-section-title::after {
+  transform: rotate(-90deg);
+}
+
+#pumpfun-content .filter-section.collapsed .filter-group {
+  display: none; /* Masquer le contenu quand replié */
+}
+
+#pumpfun-content .filter-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.5rem; /* Réduire l'espacement */
+  align-items: center;
+}
+
+#pumpfun-content .input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem; /* Très petit espacement */
+}
+
+#pumpfun-content .input-group label {
+  font-size: 0.8rem; /* Plus petit */
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#pumpfun-content .input-group input,
+#pumpfun-content .input-group select {
+  padding: 0.4rem 0.6rem; /* Plus compact */
+  font-size: 0.85rem;
+  height: auto;
+  min-height: 32px; /* Hauteur minimale */
+}
+
+/* Boutons présets plus compacts */
+#pumpfun-content .preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem; /* Petit espacement */
+  margin-top: 0.5rem;
+}
+
+#pumpfun-content .preset-btn {
+  padding: 0.3rem 0.6rem; /* Plus petit */
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* Section des filtres rapides mise en évidence */
+#pumpfun-content .filter-section:last-child {
+  background: rgba(0, 212, 255, 0.05);
+  border-color: var(--text-accent, #00d4ff);
+}
+
+#pumpfun-content .pump-quick-filters .preset-btn {
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+}
+
+#pumpfun-content .pump-quick-filters .preset-btn:hover {
+  background: rgba(0, 212, 255, 0.2);
+}
+
+/* Responsive pour petits écrans */
+@media (max-width: 1200px) {
+  #pumpfun-content .filter-group {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  #pumpfun-content .filter-panel {
+    max-height: 300px;
+  }
+  
+  #pumpfun-content .filter-group {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* =============================================================================
+   PANNEAU DE FILTRES GLOBAL PLIABLE
+   ============================================================================= */
+
+.filter-panel {
+  position: relative;
+  border: 2px solid var(--border-color, #333);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  transition: all 0.3s ease;
+}
+
+.filter-panel-header {
+  background: var(--bg-secondary, #2a2a2a);
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-color, #333);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  font-weight: 600;
+  color: var(--text-accent, #00d4ff);
+  transition: all 0.2s ease;
+}
+
+.filter-panel-header:hover {
+  background: var(--bg-hover, #3a3a3a);
+}
+
+.filter-panel-header .filter-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+}
+
+.filter-panel-header .filter-panel-toggle {
+  font-size: 0.8rem;
+  transition: transform 0.2s ease;
+  color: var(--text-accent, #00d4ff);
+}
+
+.filter-panel.collapsed .filter-panel-header .filter-panel-toggle {
+  transform: rotate(-90deg);
+}
+
+.filter-panel-content {
+  padding: 1rem;
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.filter-panel.collapsed .filter-panel-content {
+  display: none;
+  opacity: 0;
+  max-height: 0;
+  padding: 0 1rem;
+}
+
+/* Badge indiquant le nombre de filtres actifs */
+.filter-panel-badge {
+  background: var(--text-accent, #00d4ff);
+  color: var(--bg-primary, #1a1a1a);
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  min-width: 20px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.filter-panel-badge.zero {
+  background: var(--text-muted, #666);
+  opacity: 0.6;
+}
+
+/* Animation pour l'état collapsé */
+.filter-panel.collapsed {
+  border-color: var(--border-color-muted, #444);
+}
+
+.filter-panel.collapsed .filter-panel-header {
+  border-bottom: none;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .filter-panel-header {
+    padding: 0.5rem 0.75rem;
+  }
+  
+  .filter-panel-content {
+    padding: 0.75rem;
+  }
+}
 

@@ -121,12 +121,14 @@ function clearPumpFilters(btn) {
 }
 
 function resetPumpFilters() {
+  // Réinitialiser tous les INPUT
   const pumpFilterIds = [
-    'pumpFilterSymbol', 'pumpFilterStatus', 'pumpFilterNSFW', 'pumpFilterShowName',
-    'pumpFilterMarketCapMin', 'pumpFilterMarketCapMax', 'pumpFilterMarketCapSolMin', 'pumpFilterMarketCapSolMax',
-    'pumpFilterTotalSupplyMin', 'pumpFilterTotalSupplyMax', 'pumpFilterVirtualSolMin', 'pumpFilterVirtualSolMax',
-    'pumpFilterVirtualTokenMin', 'pumpFilterVirtualTokenMax', 'pumpFilterCreator', 'pumpFilterUsername',
-    'pumpFilterReplyCountMin', 'pumpFilterSocial'
+    'pumpFilterSymbol', 'pumpFilterMarketCapMin', 'pumpFilterMarketCapMax', 
+    'pumpFilterMarketCapSolMin', 'pumpFilterMarketCapSolMax',
+    'pumpFilterTotalSupplyMin', 'pumpFilterTotalSupplyMax', 
+    'pumpFilterVirtualSolMin', 'pumpFilterVirtualSolMax',
+    'pumpFilterVirtualTokenMin', 'pumpFilterVirtualTokenMax', 
+    'pumpFilterCreator', 'pumpFilterUsername', 'pumpFilterReplyCountMin'
   ];
   
   pumpFilterIds.forEach(id => {
@@ -136,6 +138,38 @@ function resetPumpFilters() {
       element.classList.remove('filter-active');
     }
   });
+
+  // ✅ CORRECTION: Réinitialiser spécifiquement les SELECT PumpFun
+  const pumpSelectIds = ['pumpFilterStatus', 'pumpFilterNSFW', 'pumpFilterShowName', 'pumpFilterSocial'];
+  pumpSelectIds.forEach(id => {
+    const element = document.getElementById(id);
+    if (element && element.options && element.options.length > 0) {
+      // Méthode 1: Forcer selectedIndex à 0
+      element.selectedIndex = 0;
+      
+      // Méthode 2: S'assurer que la première option est sélectionnée
+      element.options[0].selected = true;
+      
+      // Méthode 3: Définir la valeur à celle de la première option
+      element.value = element.options[0].value;
+      
+      // Retirer la classe filter-active
+      element.classList.remove('filter-active');
+      
+      // ✅ AJOUT: Forcer le rendu visuel
+      element.blur(); // Retire le focus
+      element.focus(); // Remet le focus
+      element.blur(); // Retire à nouveau pour forcer la mise à jour
+      
+      // Déclencher les événements
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      
+      console.log(`🔄 Reset ${id}: value="${element.value}", selectedIndex=${element.selectedIndex}, text="${element.options[element.selectedIndex]?.text}"`);
+    } else {
+      console.warn(`❌ Element ${id} non trouvé ou sans options`);
+    }
+  });
   
   // Réinitialiser les variables spéciales
   currentPumpAgeMin = null;
@@ -143,11 +177,51 @@ function resetPumpFilters() {
   pumpTimeValue = null;
   pumpTimeUnit = null;
   
-  // Désactiver tous les boutons présets
+  // Désactiver tous les boutons présets dans l'onglet pump.fun uniquement
   document.querySelectorAll('#pumpfun-content .preset-btn').forEach(btn => {
     btn.classList.remove('active');
   });
+  
+  // ✅ AJOUT: Log pour debug
+  console.log('🧹 Filtres Pump.fun réinitialisés');
 }
+
+// ✅ FONCTION POUR PLIER/DÉPLIER LES SECTIONS
+function toggleFilterSection(sectionElement) {
+  sectionElement.classList.toggle('collapsed');
+  
+  // Sauvegarder l'état dans localStorage
+  const sectionTitle = sectionElement.querySelector('.filter-section-title').textContent;
+  const isCollapsed = sectionElement.classList.contains('collapsed');
+  localStorage.setItem(`pump-section-${sectionTitle}`, isCollapsed);
+}
+
+// ✅ INITIALISER LES SECTIONS REPLIABLES
+function initializePumpFilterSections() {
+  document.querySelectorAll('#pumpfun-content .filter-section').forEach((section, index) => {
+    const title = section.querySelector('.filter-section-title');
+    if (title) {
+      // Replier par défaut toutes les sections sauf les filtres rapides
+      if (index > 0 && index < 5) { // Garder la première et dernière section ouvertes
+        section.classList.add('collapsed');
+      }
+      
+      // Ajouter l'event listener
+      title.addEventListener('click', () => toggleFilterSection(section));
+      
+      // Restaurer l'état sauvegardé
+      const sectionTitle = title.textContent;
+      const savedState = localStorage.getItem(`pump-section-${sectionTitle}`);
+      if (savedState === 'true') {
+        section.classList.add('collapsed');
+      }
+    }
+  });
+}
+
+// ✅ APPELER L'INITIALISATION
+window.initializePumpFilterSections = initializePumpFilterSections;
+
 
 // ✅ FONCTION PRINCIPALE DE FILTRAGE CORRIGÉE
 function applyPumpFilters() {
@@ -191,6 +265,7 @@ function applyPumpFilters() {
 
     // Vérifier si le token existe sur Pump.fun
     const existsOnPump = row.exists_on_pump === 1 || row.exists_on_pump === true;
+    if (!existsOnPump) return false;
     const lastPumpUpdate = row.pump_fun_last_pump_update;
     
     // ✅ CORRECTION: Filtre symbole - chercher dans pump_fun_symbol ET symbol
