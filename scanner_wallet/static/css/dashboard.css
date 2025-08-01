@@ -71,6 +71,36 @@ body {
     gap: 15px;
 }
 
+/* Wallet Selector */
+.wallet-selector {
+    margin-bottom: 20px;
+}
+
+.wallet-selector label {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.wallet-selector select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    background: white;
+    font-size: 16px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.wallet-selector select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(153, 69, 255, 0.1);
+}
+
 .wallet-info {
     display: flex;
     justify-content: space-between;
@@ -118,6 +148,47 @@ body {
     gap: 8px;
     color: var(--text-secondary);
     font-size: 14px;
+}
+
+/* Wallet Tabs */
+.wallet-tabs-section {
+    margin-bottom: 20px;
+}
+
+.wallet-tabs {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.wallet-tab {
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid #e9ecef;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 12px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wallet-tab.active {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.wallet-tab:hover:not(.active) {
+    background: rgba(153, 69, 255, 0.1);
+    border-color: var(--primary-color);
+}
+
+.wallet-tab-address {
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
 }
 
 /* Stats Grid */
@@ -245,6 +316,14 @@ body {
     flex-wrap: wrap;
 }
 
+.filter-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    align-items: end;
+    width: 100%;
+}
+
 .filter-group {
     display: flex;
     flex-direction: column;
@@ -324,7 +403,7 @@ body {
     padding: 25px;
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
     display: flex;
-    justify-content: between;
+    justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
     gap: 15px;
@@ -341,6 +420,7 @@ body {
 .transaction-stats {
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
 }
 
 .stat-pill {
@@ -351,9 +431,12 @@ body {
     color: white;
 }
 
+.stat-pill.buy { background: var(--success-color); }
+.stat-pill.sell { background: var(--error-color); }
+.stat-pill.transfer { background: #3498db; }
+.stat-pill.neutral { background: var(--text-secondary); }
 .stat-pill.positive { background: var(--success-color); }
 .stat-pill.negative { background: var(--error-color); }
-.stat-pill.neutral { background: var(--text-secondary); }
 
 .transactions-list {
     max-height: 600px;
@@ -378,6 +461,54 @@ body {
     border-bottom: none;
 }
 
+/* Token Info Styles */
+.token-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.token-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #f0f0f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: #666;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.token-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.token-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.token-symbol {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.token-name {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .transaction-type {
     width: 50px;
     height: 50px;
@@ -390,6 +521,10 @@ body {
     flex-shrink: 0;
 }
 
+.transaction-type.buy { background: var(--success-color); }
+.transaction-type.sell { background: var(--error-color); }
+.transaction-type.transfer { background: #3498db; }
+.transaction-type.sol_transfer { background: var(--primary-color); }
 .transaction-type.incoming { background: var(--success-color); }
 .transaction-type.outgoing { background: var(--error-color); }
 .transaction-type.neutral { background: var(--text-secondary); }
@@ -412,6 +547,43 @@ body {
     gap: 15px;
     align-items: center;
     flex-wrap: wrap;
+}
+
+.transaction-meta-extended {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 5px;
+}
+
+.transaction-type-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-right: 8px;
+}
+
+.transaction-type-badge.buy {
+    background: rgba(39, 174, 96, 0.1);
+    color: var(--success-color);
+}
+
+.transaction-type-badge.sell {
+    background: rgba(231, 76, 60, 0.1);
+    color: var(--error-color);
+}
+
+.transaction-type-badge.transfer {
+    background: rgba(52, 152, 219, 0.1);
+    color: #3498db;
+}
+
+.transaction-type-badge.sol_transfer {
+    background: rgba(153, 69, 255, 0.1);
+    color: var(--primary-color);
 }
 
 .transaction-time {
@@ -440,9 +612,56 @@ body {
     color: var(--error-color);
 }
 
+.large-transaction-indicator {
+    background: linear-gradient(45deg, #ffd700, #ffed4e);
+    color: #b8860b;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.transaction-links {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.transaction-links a {
+    padding: 4px 8px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 11px;
+    color: var(--text-secondary);
+    transition: all 0.3s ease;
+    border: 1px solid #e9ecef;
+}
+
+.transaction-links a:hover {
+    background: var(--primary-color);
+    color: white;
+    transform: translateY(-1px);
+}
+
 .transaction-amount {
     text-align: right;
     flex-shrink: 0;
+}
+
+.token-amount-display {
+    text-align: right;
+    margin-bottom: 4px;
+}
+
+.token-amount-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
 }
 
 .amount-value {
@@ -454,6 +673,11 @@ body {
 .amount-value.positive { color: var(--success-color); }
 .amount-value.negative { color: var(--error-color); }
 .amount-value.neutral { color: var(--text-secondary); }
+
+.price-per-token {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
 
 .fee-value {
     font-size: 11px;
@@ -508,7 +732,6 @@ body {
     color: var(--text-secondary);
 }
 
-/* Loading Overlay */
 .loading-overlay {
     position: fixed;
     top: 0;
@@ -627,6 +850,10 @@ body {
         font-size: 2rem;
     }
     
+    .wallet-tabs {
+        justify-content: center;
+    }
+    
     .wallet-info {
         flex-direction: column;
         align-items: flex-start;
@@ -639,6 +866,10 @@ body {
     }
     
     .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .filter-section {
         grid-template-columns: 1fr;
     }
     
@@ -671,6 +902,15 @@ body {
         text-align: left;
         width: 100%;
     }
+    
+    .transaction-links {
+        justify-content: center;
+    }
+    
+    .token-info {
+        flex-direction: row;
+        align-items: center;
+    }
 }
 
 @media (max-width: 480px) {
@@ -680,15 +920,18 @@ body {
     
     .stat-card {
         padding: 20px;
-    }
-    
-    .stat-card {
         flex-direction: column;
         text-align: center;
     }
     
     .transaction-item {
         padding: 15px;
+    }
+    
+    .wallet-tab {
+        flex-direction: column;
+        text-align: center;
+        gap: 4px;
     }
 }
 

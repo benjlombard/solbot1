@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Moniteur Wallet Solana</title>
+    <title>Moniteur Multi-Wallet Solana</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
@@ -12,11 +12,21 @@
         <!-- Header -->
         <header class="header">
             <div class="header-content">
-                <h1><i class="fab fa-solana"></i> Moniteur Wallet Solana</h1>
+                <h1><i class="fab fa-solana"></i> Moniteur Multi-Wallet Solana</h1>
+                
+                <!-- Wallet Selector -->
+                <div class="wallet-selector">
+                    <label for="walletSelect">Wallet à afficher:</label>
+                    <select id="walletSelect">
+                        <option value="all">Tous les wallets</option>
+                        <!-- Options générées dynamiquement -->
+                    </select>
+                </div>
+
                 <div class="wallet-info">
                     <div class="wallet-address">
                         <label>Adresse du Wallet:</label>
-                        <span id="walletAddress">2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK</span>
+                        <span id="walletAddress">Chargement...</span>
                         <button class="copy-btn" onclick="copyWalletAddress()">
                             <i class="fas fa-copy"></i>
                         </button>
@@ -29,6 +39,13 @@
                 </div>
             </div>
         </header>
+
+        <!-- Wallet Tabs -->
+        <section class="wallet-tabs-section">
+            <div class="wallet-tabs" id="walletTabs">
+                <!-- Tabs générés dynamiquement -->
+            </div>
+        </section>
 
         <!-- Stats Grid -->
         <section class="stats-section">
@@ -108,25 +125,37 @@
         <!-- Controls -->
         <section class="controls">
             <div class="filter-controls">
-                <div class="filter-group">
-                    <label for="minAmount">Montant minimum (SOL):</label>
-                    <input type="number" id="minAmount" step="0.01" value="0" min="0">
+                <div class="filter-section">
+                    <div class="filter-group">
+                        <label for="minAmount">Montant minimum (SOL):</label>
+                        <input type="number" id="minAmount" step="0.01" value="0" min="0">
+                    </div>
+                    <div class="filter-group">
+                        <label for="transactionLimit">Nombre de transactions:</label>
+                        <select id="transactionLimit">
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="200">200</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="transactionType">Type de transaction:</label>
+                        <select id="transactionType">
+                            <option value="all">Toutes</option>
+                            <option value="buy">Achats</option>
+                            <option value="sell">Ventes</option>
+                            <option value="transfer">Transferts</option>
+                            <option value="sol_transfer">Transferts SOL</option>
+                        </select>
+                    </div>
+                    <button class="filter-btn" onclick="applyFilters()">
+                        <i class="fas fa-filter"></i> Appliquer Filtres
+                    </button>
+                    <button class="refresh-btn" onclick="refreshData()">
+                        <i class="fas fa-sync-alt"></i> Actualiser
+                    </button>
                 </div>
-                <div class="filter-group">
-                    <label for="transactionLimit">Nombre de transactions:</label>
-                    <select id="transactionLimit">
-                        <option value="25">25</option>
-                        <option value="50" selected>50</option>
-                        <option value="100">100</option>
-                        <option value="200">200</option>
-                    </select>
-                </div>
-                <button class="filter-btn" onclick="applyFilters()">
-                    <i class="fas fa-filter"></i> Appliquer Filtres
-                </button>
-                <button class="refresh-btn" onclick="refreshData()">
-                    <i class="fas fa-sync-alt"></i> Actualiser
-                </button>
             </div>
         </section>
 
@@ -135,9 +164,10 @@
             <div class="transactions-header">
                 <h3><i class="fas fa-list"></i> Feed des Transactions</h3>
                 <div class="transaction-stats">
-                    <span class="stat-pill positive" id="positiveCount">+0</span>
-                    <span class="stat-pill negative" id="negativeCount">-0</span>
-                    <span class="stat-pill neutral" id="neutralCount">≈0</span>
+                    <span class="stat-pill buy" id="buyCount">📈 0</span>
+                    <span class="stat-pill sell" id="sellCount">📉 0</span>
+                    <span class="stat-pill transfer" id="transferCount">🔄 0</span>
+                    <span class="stat-pill neutral" id="otherCount">⚡ 0</span>
                 </div>
             </div>
             

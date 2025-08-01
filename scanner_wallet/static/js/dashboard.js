@@ -2,24 +2,29 @@
 
 class SolanaWalletDashboard {
     constructor() {
-        this.walletAddress = '2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK';
+        this.walletAddresses = [];
+        this.currentWallet = 'all';
         this.apiBaseUrl = '/api';
         this.refreshInterval = 30000; // 30 secondes
         this.autoRefreshEnabled = true;
         this.distributionChart = null;
         this.lastTransactionCount = 0;
         this.alertThreshold = 1; // SOL
+        this.tokenCache = new Map();
         
         this.init();
     }
 
     async init() {
-        console.log('🚀 Initialisation du dashboard Solana Wallet Monitor');
+        console.log('🚀 Initialisation du dashboard Multi-Wallet Solana');
         
         // Afficher l'overlay de chargement
         this.showLoading();
         
         try {
+            // Charger la liste des wallets
+            await this.loadWallets();
+            
             // Charger les données initiales
             await this.loadDashboardData();
             
@@ -32,7 +37,7 @@ class SolanaWalletDashboard {
             // Masquer l'overlay de chargement
             this.hideLoading();
             
-            console.log('✅ Dashboard initialisé avec succès');
+            console.log('✅ Dashboard multi-wallet initialisé avec succès');
         } catch (error) {
             console.error('❌ Erreur lors de l\'initialisation:', error);
             this.showAlert('error', 'Erreur d\'initialisation', 'Impossible de charger les données du dashboard');
@@ -40,7 +45,102 @@ class SolanaWalletDashboard {
         }
     }
 
+    async loadWallets() {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/wallets`);
+            if (response.ok) {
+                const data = await response.json();
+                this.walletAddresses = data.wallets || [];
+            } else {
+                // Fallback vers l'ancienne méthode si l'API n'existe pas encore
+                this.walletAddresses = ['2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK'];
+            }
+            
+            this.updateWalletSelector();
+            this.updateWalletTabs();
+            
+        } catch (error) {
+            console.error('Erreur lors du chargement des wallets:', error);
+            // Fallback
+            this.walletAddresses = ['2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK'];
+            this.updateWalletSelector();
+            this.updateWalletTabs();
+        }
+    }
+
+    updateWalletSelector() {
+        const selector = document.getElementById('walletSelect');
+        if (!selector) return;
+
+        selector.innerHTML = '<option value="all">Tous les wallets</option>';
+        
+        this.walletAddresses.forEach(address => {
+            const option = document.createElement('option');
+            option.value = address;
+            option.textContent = `${address.substring(0, 8)}...${address.substring(-8)}`;
+            selector.appendChild(option);
+        });
+    }
+
+    updateWalletTabs() {
+        const tabsContainer = document.getElementById('walletTabs');
+        if (!tabsContainer) return;
+
+        tabsContainer.innerHTML = '';
+
+        // Tab pour tous les wallets
+        const allTab = document.createElement('div');
+        allTab.className = `wallet-tab ${this.currentWallet === 'all' ? 'active' : ''}`;
+        allTab.innerHTML = `
+            <i class="fas fa-layer-group"></i>
+            <span>Tous</span>
+        `;
+        allTab.addEventListener('click', () => this.switchWallet('all'));
+        tabsContainer.appendChild(allTab);
+
+        // Tabs individuels
+        this.walletAddresses.forEach(address => {
+            const tab = document.createElement('div');
+            tab.className = `wallet-tab ${this.currentWallet === address ? 'active' : ''}`;
+            tab.innerHTML = `
+                <i class="fas fa-wallet"></i>
+                <div>
+                    <div>${address.substring(0, 6)}...</div>
+                    <div class="wallet-tab-address">${address.substring(-6)}</div>
+                </div>
+            `;
+            tab.addEventListener('click', () => this.switchWallet(address));
+            tabsContainer.appendChild(tab);
+        });
+    }
+
+    async switchWallet(walletAddress) {
+        this.currentWallet = walletAddress;
+        this.updateWalletTabs();
+        
+        // Mettre à jour l'affichage de l'adresse
+        const walletAddressElement = document.getElementById('walletAddress');
+        if (walletAddressElement) {
+            if (walletAddress === 'all') {
+                walletAddressElement.textContent = 'Tous les wallets';
+            } else {
+                walletAddressElement.textContent = walletAddress;
+            }
+        }
+
+        // Recharger les données
+        await this.loadDashboardData();
+    }
+
     setupEventListeners() {
+        // Sélecteur de wallet
+        const walletSelector = document.getElementById('walletSelect');
+        if (walletSelector) {
+            walletSelector.addEventListener('change', (e) => {
+                this.switchWallet(e.target.value);
+            });
+        }
+
         // Bouton de copie de l'adresse
         const copyBtn = document.querySelector('.copy-btn');
         if (copyBtn) {
@@ -50,6 +150,7 @@ class SolanaWalletDashboard {
         // Filtres
         const minAmountInput = document.getElementById('minAmount');
         const transactionLimitSelect = document.getElementById('transactionLimit');
+        const transactionTypeSelect = document.getElementById('transactionType');
         
         if (minAmountInput) {
             minAmountInput.addEventListener('change', () => this.applyFilters());
@@ -57,6 +158,10 @@ class SolanaWalletDashboard {
         
         if (transactionLimitSelect) {
             transactionLimitSelect.addEventListener('change', () => this.applyFilters());
+        }
+
+        if (transactionTypeSelect) {
+            transactionTypeSelect.addEventListener('change', () => this.applyFilters());
         }
 
         // Auto-refresh au focus de la fenêtre
@@ -87,8 +192,14 @@ class SolanaWalletDashboard {
 
     async loadDashboardData() {
         try {
+            // Construire l'URL avec le wallet sélectionné
+            let statsUrl = `${this.apiBaseUrl}/stats`;
+            if (this.currentWallet !== 'all') {
+                statsUrl += `/${this.currentWallet}`;
+            }
+
             // Charger les statistiques principales
-            const statsResponse = await fetch(`${this.apiBaseUrl}/stats`);
+            const statsResponse = await fetch(statsUrl);
             if (!statsResponse.ok) {
                 throw new Error(`Erreur HTTP: ${statsResponse.status}`);
             }
@@ -159,8 +270,19 @@ class SolanaWalletDashboard {
         try {
             const minAmount = document.getElementById('minAmount')?.value || 0;
             const limit = document.getElementById('transactionLimit')?.value || 50;
+            const transactionType = document.getElementById('transactionType')?.value || 'all';
             
-            const response = await fetch(`${this.apiBaseUrl}/transactions?min_amount=${minAmount}&limit=${limit}`);
+            let transactionsUrl = `${this.apiBaseUrl}/transactions?min_amount=${minAmount}&limit=${limit}`;
+            
+            if (this.currentWallet !== 'all') {
+                transactionsUrl += `&wallet=${this.currentWallet}`;
+            }
+            
+            if (transactionType !== 'all') {
+                transactionsUrl += `&type=${transactionType}`;
+            }
+            
+            const response = await fetch(transactionsUrl);
             if (!response.ok) {
                 throw new Error(`Erreur HTTP: ${response.status}`);
             }
@@ -194,46 +316,109 @@ class SolanaWalletDashboard {
             const amount = parseFloat(tx.amount);
             const fee = parseFloat(tx.fee);
             
-            // Déterminer le type de transaction
-            let transactionType = 'neutral';
-            let typeIcon = 'fas fa-exchange-alt';
+            // Informations du token
+            const tokenSymbol = tx.token_symbol || 'SOL';
+            const tokenName = tx.token_name || 'Solana';
+            const tokenAmount = tx.token_amount || Math.abs(amount);
+            const transactionType = tx.transaction_type || 'other';
+            const pricePerToken = tx.price_per_token || 0;
+            const tokenMint = tx.token_mint;
             
-            if (amount > 0) {
-                transactionType = 'incoming';
-                typeIcon = 'fas fa-arrow-down';
-            } else if (amount < 0) {
-                transactionType = 'outgoing';
-                typeIcon = 'fas fa-arrow-up';
+            // Déterminer l'icône du type
+            let typeIcon = 'fas fa-exchange-alt';
+            let typeClass = transactionType;
+            
+            switch (transactionType) {
+                case 'buy':
+                    typeIcon = 'fas fa-arrow-trend-up';
+                    break;
+                case 'sell':
+                    typeIcon = 'fas fa-arrow-trend-down';
+                    break;
+                case 'transfer':
+                    typeIcon = 'fas fa-arrow-right-arrow-left';
+                    break;
+                case 'sol_transfer':
+                    typeIcon = 'fas fa-coins';
+                    break;
+                default:
+                    if (amount > 0) {
+                        typeIcon = 'fas fa-arrow-down';
+                        typeClass = 'incoming';
+                    } else if (amount < 0) {
+                        typeIcon = 'fas fa-arrow-up';
+                        typeClass = 'outgoing';
+                    } else {
+                        typeClass = 'neutral';
+                    }
             }
 
             // Vérifier si c'est une grosse transaction
             const isLargeTransaction = Math.abs(amount) >= this.alertThreshold;
-            const largeTransactionClass = isLargeTransaction ? 'large-transaction' : '';
+
+            // Générer les liens
+            const links = this.generateTransactionLinks(tx.signature, tokenMint);
 
             return `
-                <div class="transaction-item ${largeTransactionClass}" data-signature="${tx.signature}">
-                    <div class="transaction-type ${transactionType}">
+                <div class="transaction-item" data-signature="${tx.signature}">
+                    <div class="transaction-type ${typeClass}">
                         <i class="${typeIcon}"></i>
                     </div>
                     <div class="transaction-details">
+                        ${tx.is_token_transaction && tokenMint ? `
+                            <div class="token-info">
+                                <div class="token-logo">
+                                    ${tokenSymbol.substring(0, 3)}
+                                </div>
+                                <div class="token-details">
+                                    <div class="token-symbol">${tokenSymbol}</div>
+                                    <div class="token-name">${tokenName}</div>
+                                </div>
+                            </div>
+                        ` : ''}
+                        
                         <div class="transaction-signature">
                             ${tx.signature}
                         </div>
-                        <div class="transaction-meta">
+                        
+                        <div class="transaction-meta-extended">
+                            <span class="transaction-type-badge ${transactionType}">
+                                ${this.getTransactionTypeLabel(transactionType)}
+                            </span>
+                            
                             <div class="transaction-time">
                                 <i class="fas fa-clock"></i>
                                 ${this.formatRelativeTime(date)}
                             </div>
+                            
                             <div class="transaction-status ${tx.status}">
                                 ${tx.status === 'success' ? 'Succès' : 'Échec'}
                             </div>
-                            ${isLargeTransaction ? '<span class="stat-pill warning">💰 Grosse transaction</span>' : ''}
+                            
+                            ${isLargeTransaction ? '<span class="large-transaction-indicator">💰 Grosse transaction</span>' : ''}
                         </div>
+                        
+                        ${links}
                     </div>
+                    
                     <div class="transaction-amount">
+                        ${tx.is_token_transaction && tokenAmount > 0 ? `
+                            <div class="token-amount-display">
+                                <div class="token-amount-value">
+                                    ${transactionType === 'sell' ? '-' : '+'}${this.formatNumber(tokenAmount, 4)} ${tokenSymbol}
+                                </div>
+                                ${pricePerToken > 0 ? `
+                                    <div class="price-per-token">
+                                        ${this.formatNumber(pricePerToken, 6)} SOL/token
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
+                        
                         <div class="amount-value ${amount >= 0 ? 'positive' : amount < 0 ? 'negative' : 'neutral'}">
                             ${amount >= 0 ? '+' : ''}${this.formatNumber(amount, 4)} SOL
                         </div>
+                        
                         <div class="fee-value">
                             Frais: ${this.formatNumber(fee, 6)} SOL
                         </div>
@@ -248,10 +433,51 @@ class SolanaWalletDashboard {
         this.addTransactionEventListeners();
     }
 
+    getTransactionTypeLabel(type) {
+        const labels = {
+            'buy': '📈 ACHAT',
+            'sell': '📉 VENTE',
+            'transfer': '🔄 TRANSFERT',
+            'sol_transfer': '⚡ SOL',
+            'other': '🔹 AUTRE'
+        };
+        return labels[type] || labels.other;
+    }
+
+    generateTransactionLinks(signature, tokenMint) {
+        let links = `
+            <div class="transaction-links">
+                <a href="https://solscan.io/tx/${signature}" target="_blank">
+                    <i class="fas fa-external-link-alt"></i> Solscan
+                </a>
+        `;
+
+        if (tokenMint && tokenMint !== 'SOL') {
+            links += `
+                <a href="https://pump.fun/${tokenMint}" target="_blank">
+                    <i class="fas fa-rocket"></i> Pump.fun
+                </a>
+                <a href="https://dexscreener.com/solana/${tokenMint}" target="_blank">
+                    <i class="fas fa-chart-line"></i> DexScreener
+                </a>
+                <a href="https://jup.ag/swap/SOL-${tokenMint}" target="_blank">
+                    <i class="fas fa-exchange-alt"></i> Jupiter
+                </a>
+            `;
+        }
+
+        links += '</div>';
+        return links;
+    }
+
     addTransactionEventListeners() {
         const transactionItems = document.querySelectorAll('.transaction-item');
         transactionItems.forEach(item => {
-            item.addEventListener('click', () => {
+            item.addEventListener('click', (e) => {
+                // Ne pas déclencher si on clique sur un lien
+                if (e.target.closest('.transaction-links a')) {
+                    return;
+                }
                 const signature = item.dataset.signature;
                 this.openTransactionDetails(signature);
             });
@@ -264,20 +490,31 @@ class SolanaWalletDashboard {
     }
 
     updateTransactionStats(transactions) {
-        let positiveCount = 0;
-        let negativeCount = 0;
-        let neutralCount = 0;
+        let buyCount = 0;
+        let sellCount = 0;
+        let transferCount = 0;
+        let otherCount = 0;
 
         transactions.forEach(tx => {
-            const amount = parseFloat(tx.amount);
-            if (amount > 0) positiveCount++;
-            else if (amount < 0) negativeCount++;
-            else neutralCount++;
+            switch (tx.transaction_type) {
+                case 'buy':
+                    buyCount++;
+                    break;
+                case 'sell':
+                    sellCount++;
+                    break;
+                case 'transfer':
+                    transferCount++;
+                    break;
+                default:
+                    otherCount++;
+            }
         });
 
-        this.updateElement('positiveCount', `+${positiveCount}`);
-        this.updateElement('negativeCount', `-${negativeCount}`);
-        this.updateElement('neutralCount', `≈${neutralCount}`);
+        this.updateElement('buyCount', `📈 ${buyCount}`);
+        this.updateElement('sellCount', `📉 ${sellCount}`);
+        this.updateElement('transferCount', `🔄 ${transferCount}`);
+        this.updateElement('otherCount', `⚡ ${otherCount}`);
     }
 
     createDistributionChart(distributionData) {
@@ -303,7 +540,8 @@ class SolanaWalletDashboard {
                         '#27ae60',
                         '#e74c3c',
                         '#3498db',
-                        '#f39c12'
+                        '#f39c12',
+                        '#9b59b6'
                     ],
                     borderWidth: 2,
                     borderColor: '#fff'
@@ -339,7 +577,12 @@ class SolanaWalletDashboard {
     }
 
     copyWalletAddress() {
-        const walletAddress = this.walletAddress;
+        const walletAddress = this.currentWallet === 'all' ? 'Tous les wallets' : this.currentWallet;
+        
+        if (this.currentWallet === 'all') {
+            this.showAlert('info', 'Info', 'Impossible de copier "Tous les wallets"');
+            return;
+        }
         
         if (navigator.clipboard) {
             navigator.clipboard.writeText(walletAddress).then(() => {
@@ -521,6 +764,12 @@ function refreshData() {
     }
 }
 
+function switchWallet(walletAddress) {
+    if (window.dashboard) {
+        window.dashboard.switchWallet(walletAddress);
+    }
+}
+
 // Initialisation quand le DOM est prêt
 document.addEventListener('DOMContentLoaded', () => {
     window.dashboard = new SolanaWalletDashboard();
@@ -540,11 +789,7 @@ if ('performance' in window) {
         setTimeout(() => {
             const perfData = performance.getEntriesByType('navigation')[0];
             const loadTime = perfData.loadEventEnd - perfData.loadEventStart;
-            console.log(`⚡ Dashboard chargé en ${loadTime}ms`);
+            console.log(`⚡ Dashboard multi-wallet chargé en ${loadTime}ms`);
         }, 0);
     });
 }
-
-
-
-
