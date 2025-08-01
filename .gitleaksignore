@@ -1,2 +1,5 @@
 static/js/pump_fun_module.js:secret-detection:182
 static/js/pump_fun_module.js:secret-detection:256
+bot_sniper_tg.py:secret-detection:215
+bot_sniper_tg.py:secret-detection:275
+social_media_alpha_scanner.py:secret-detection:404

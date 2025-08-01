@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moniteur Wallet Solana</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fab fa-solana"></i> Moniteur Wallet Solana</h1>
+                <div class="wallet-info">
+                    <div class="wallet-address">
+                        <label>Adresse du Wallet:</label>
+                        <span id="walletAddress">2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK</span>
+                        <button class="copy-btn" onclick="copyWalletAddress()">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                    <div class="last-update">
+                        <i class="fas fa-clock"></i>
+                        <span>Dernière mise à jour: </span>
+                        <span id="lastUpdate">--</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <section class="stats-section">
+            <div class="stats-grid">
+                <div class="stat-card balance">
+                    <div class="stat-icon">
+                        <i class="fas fa-wallet"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="balance">-- SOL</div>
+                        <div class="stat-label">Solde Actuel</div>
+                        <div class="currency-values">
+                            <span id="balanceUsd">--</span> • <span id="balanceEur">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card transactions">
+                    <div class="stat-icon">
+                        <i class="fas fa-exchange-alt"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="totalTransactions">--</div>
+                        <div class="stat-label">Total Transactions</div>
+                    </div>
+                </div>
+
+                <div class="stat-card volume">
+                    <div class="stat-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="totalVolume">-- SOL</div>
+                        <div class="stat-label">Volume Total</div>
+                        <div class="currency-values">
+                            <span id="totalVolumeUsd">--</span> • <span id="totalVolumeEur">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card pnl">
+                    <div class="stat-icon">
+                        <i class="fas fa-balance-scale"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="pnl">-- SOL</div>
+                        <div class="stat-label">P&L Net</div>
+                        <div class="currency-values">
+                            <span id="pnlUsd">--</span> • <span id="pnlEur">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card largest">
+                    <div class="stat-icon">
+                        <i class="fas fa-trophy"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="largestTransaction">-- SOL</div>
+                        <div class="stat-label">Plus Grosse Transaction</div>
+                        <div class="currency-values">
+                            <span id="largestUsd">--</span> • <span id="largestEur">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+            <div class="chart-container">
+                <h3><i class="fas fa-pie-chart"></i> Distribution des Transactions</h3>
+                <canvas id="distributionChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Controls -->
+        <section class="controls">
+            <div class="filter-controls">
+                <div class="filter-group">
+                    <label for="minAmount">Montant minimum (SOL):</label>
+                    <input type="number" id="minAmount" step="0.01" value="0" min="0">
+                </div>
+                <div class="filter-group">
+                    <label for="transactionLimit">Nombre de transactions:</label>
+                    <select id="transactionLimit">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                    </select>
+                </div>
+                <button class="filter-btn" onclick="applyFilters()">
+                    <i class="fas fa-filter"></i> Appliquer Filtres
+                </button>
+                <button class="refresh-btn" onclick="refreshData()">
+                    <i class="fas fa-sync-alt"></i> Actualiser
+                </button>
+            </div>
+        </section>
+
+        <!-- Transactions Feed -->
+        <section class="transactions-section">
+            <div class="transactions-header">
+                <h3><i class="fas fa-list"></i> Feed des Transactions</h3>
+                <div class="transaction-stats">
+                    <span class="stat-pill positive" id="positiveCount">+0</span>
+                    <span class="stat-pill negative" id="negativeCount">-0</span>
+                    <span class="stat-pill neutral" id="neutralCount">≈0</span>
+                </div>
+            </div>
+            
+            <div class="transactions-list" id="transactionsList">
+                <!-- Les transactions seront chargées ici -->
+            </div>
+        </section>
+
+        <!-- Alerts Section -->
+        <section class="alerts-section">
+            <div class="alert-container" id="alertContainer">
+                <!-- Les alertes seront affichées ici -->
+            </div>
+        </section>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <i class="fas fa-circle-notch fa-spin"></i>
+            <p>Chargement des données...</p>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

@@ -9,7 +9,8 @@ websocket-client
 python-decouple
 flask
 pytz
-
+tweepy
+telethon
 
 # Dépendances supplémentaires pour le whale tracking
 # À ajouter à votre requirements.txt existant
