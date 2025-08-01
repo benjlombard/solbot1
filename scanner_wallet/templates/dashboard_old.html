@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Multi-Wallet Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fab fa-solana"></i> Solana Multi-Wallet Monitor</h1>
+                
+                <!-- Wallet Selector -->
+                <div class="wallet-selector">
+                    <label for="walletSelect">Wallet to display:</label>
+                    <select id="walletSelect">
+                        <option value="all">All wallets</option>
+                        <!-- Options generated dynamically -->
+                    </select>
+                </div>
+
+                <div class="wallet-info">
+                    <div class="wallet-address">
+                        <label>Wallet Address:</label>
+                        <span id="walletAddress">Loading...</span>
+                        <button class="copy-btn" onclick="copyWalletAddress()">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                    <div class="last-update">
+                        <i class="fas fa-clock"></i>
+                        <span>Last update: </span>
+                        <span id="lastUpdate">--</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Wallet Tabs -->
+        <section class="wallet-tabs-section">
+            <div class="wallet-tabs" id="walletTabs">
+                <!-- Tabs generated dynamically -->
+            </div>
+        </section>
+
+        <!-- Stats Grid -->
+        <section class="stats-section">
+            <div class="stats-grid">
+                <div class="stat-card balance">
+                    <div class="stat-icon">
+                        <i class="fas fa-wallet"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="balance">-- SOL</div>
+                        <div class="stat-label">Current Balance</div>
+                        <div class="currency-values">
+                            <span id="balanceUsd">--</span> • <span id="balanceEur">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card transactions">
+                    <div class="stat-icon">
+                        <i class="fas fa-exchange-alt"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="totalTransactions">--</div>
+                        <div class="stat-label">Total Transactions</div>
+                    </div>
+                </div>
+
+                <div class="stat-card volume">
+                    <div class="stat-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="totalVolume">-- SOL</div>
+                        <div class="stat-label">Total Volume</div>
+                        <div class="currency-values">
+                            <span id="totalVolumeUsd">--</span> • <span id="totalVolumeEur">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card pnl">
+                    <div class="stat-icon">
+                        <i class="fas fa-balance-scale"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="pnl">-- SOL</div>
+                        <div class="stat-label">Net P&L</div>
+                        <div class="currency-values">
+                            <span id="pnlUsd">--</span> • <span id="pnlEur">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stat-card largest">
+                    <div class="stat-icon">
+                        <i class="fas fa-trophy"></i>
+                    </div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="largestTransaction">-- SOL</div>
+                        <div class="stat-label">Largest Transaction</div>
+                        <div class="currency-values">
+                            <span id="largestUsd">--</span> • <span id="largestEur">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-section">
+            <div class="chart-container">
+                <h3><i class="fas fa-pie-chart"></i> Transaction Distribution</h3>
+                <canvas id="distributionChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Controls -->
+        <section class="controls">
+            <div class="filter-controls">
+                <div class="filter-section">
+                    <div class="filter-group">
+                        <label for="minAmount">Minimum amount (SOL):</label>
+                        <input type="number" id="minAmount" step="0.01" value="0" min="0">
+                    </div>
+                    <div class="filter-group">
+                        <label for="transactionLimit">Number of transactions:</label>
+                        <select id="transactionLimit">
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="200">200</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="transactionType">Transaction type:</label>
+                        <select id="transactionType">
+                            <option value="all">All</option>
+                            <option value="buy">Buys</option>
+                            <option value="sell">Sells</option>
+                            <option value="transfer">Transfers</option>
+                            <option value="sol_transfer">SOL Transfers</option>
+                        </select>
+                    </div>
+                    <button class="filter-btn" onclick="applyFilters()">
+                        <i class="fas fa-filter"></i> Apply Filters
+                    </button>
+                    <button class="refresh-btn" onclick="refreshData()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Transactions Feed -->
+        <section class="transactions-section">
+            <div class="transactions-header">
+                <h3><i class="fas fa-list"></i> Transactions Feed</h3>
+                <div class="transaction-stats">
+                    <span class="stat-pill buy" id="buyCount">📈 0</span>
+                    <span class="stat-pill sell" id="sellCount">📉 0</span>
+                    <span class="stat-pill transfer" id="transferCount">🔄 0</span>
+                    <span class="stat-pill neutral" id="otherCount">⚡ 0</span>
+                </div>
+            </div>
+            
+            <div class="transactions-list" id="transactionsList">
+                <!-- Transactions will be loaded here -->
+            </div>
+        </section>
+
+        <!-- Alerts Section -->
+        <section class="alerts-section">
+            <div class="alert-container" id="alertContainer">
+                <!-- Alerts will be displayed here -->
+            </div>
+        </section>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <i class="fas fa-circle-notch fa-spin"></i>
+            <p>Loading data...</p>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

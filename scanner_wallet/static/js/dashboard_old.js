@@ -1,60 +1,78 @@
+// script.js
+
 class SolanaWalletDashboard {
     constructor() {
         this.walletAddresses = [];
         this.currentWallet = 'all';
         this.apiBaseUrl = '/api';
-        this.refreshInterval = 30000; // 30 seconds
+        this.refreshInterval = 30000; // 30 secondes
         this.autoRefreshEnabled = true;
         this.distributionChart = null;
         this.lastTransactionCount = 0;
         this.alertThreshold = 1; // SOL
         this.tokenCache = new Map();
-        this.apiCache = new Map();
         
         this.init();
     }
 
     async init() {
-        console.log('🚀 Initializing Solana Multi-Wallet Dashboard');
+        console.log('🚀 Initialisation du dashboard Multi-Wallet Solana');
         
+        // Afficher l'overlay de chargement
         this.showLoading();
         
         try {
+            // Charger la liste des wallets
             await this.loadWallets();
-            this.loadFilters();
+            
+            // Charger les données initiales
             await this.loadDashboardData();
-            await this.fetchSolPrice();
-            setInterval(() => this.fetchSolPrice(), 60000); // Update SOL price every minute
+            
+            // Initialiser les event listeners
             this.setupEventListeners();
+            
+            // Démarrer l'auto-refresh
             this.startAutoRefresh();
             
-            console.log('✅ Dashboard initialized successfully');
+            // Masquer l'overlay de chargement
+            this.hideLoading();
+            
+            console.log('✅ Dashboard multi-wallet initialisé avec succès');
         } catch (error) {
-            console.error('❌ Initialization error:', error);
-            this.showAlert('error', 'Initialization Error', 'Unable to load dashboard data');
-        } finally {
+            console.error('❌ Erreur lors de l\'initialisation:', error);
+            this.showAlert('error', 'Erreur d\'initialisation', 'Impossible de charger les données du dashboard');
             this.hideLoading();
         }
     }
 
     async loadWallets() {
         try {
-            const response = await this.fetchWithRetry(`${this.apiBaseUrl}/wallets`);
-            const data = await response.json();
-            this.walletAddresses = data.wallets || [];
+            const response = await fetch(`${this.apiBaseUrl}/wallets`);
+            if (response.ok) {
+                const data = await response.json();
+                this.walletAddresses = data.wallets || [];
+            } else {
+                // Fallback vers l'ancienne méthode si l'API n'existe pas encore
+                this.walletAddresses = ['2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK'];
+            }
+            
+            this.updateWalletSelector();
+            this.updateWalletTabs();
+            
         } catch (error) {
-            console.error('Error loading wallets:', error);
+            console.error('Erreur lors du chargement des wallets:', error);
+            // Fallback
             this.walletAddresses = ['2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK'];
+            this.updateWalletSelector();
+            this.updateWalletTabs();
         }
-        this.updateWalletSelector();
-        this.updateWalletTabs();
     }
 
     updateWalletSelector() {
         const selector = document.getElementById('walletSelect');
         if (!selector) return;
 
-        selector.innerHTML = '<option value="all">All wallets</option>';
+        selector.innerHTML = '<option value="all">Tous les wallets</option>';
         
         this.walletAddresses.forEach(address => {
             const option = document.createElement('option');
@@ -70,21 +88,17 @@ class SolanaWalletDashboard {
 
         tabsContainer.innerHTML = '';
 
+        // Tab pour tous les wallets
         const allTab = document.createElement('div');
         allTab.className = `wallet-tab ${this.currentWallet === 'all' ? 'active' : ''}`;
         allTab.innerHTML = `
             <i class="fas fa-layer-group"></i>
-            <span>All</span>
+            <span>Tous</span>
         `;
         allTab.addEventListener('click', () => this.switchWallet('all'));
-        allTab.setAttribute('tabindex', '0');
-        allTab.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                this.switchWallet('all');
-            }
-        });
         tabsContainer.appendChild(allTab);
 
+        // Tabs individuels
         this.walletAddresses.forEach(address => {
             const tab = document.createElement('div');
             tab.className = `wallet-tab ${this.currentWallet === address ? 'active' : ''}`;
@@ -96,12 +110,6 @@ class SolanaWalletDashboard {
                 </div>
             `;
             tab.addEventListener('click', () => this.switchWallet(address));
-            tab.setAttribute('tabindex', '0');
-            tab.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    this.switchWallet(address);
-                }
-            });
             tabsContainer.appendChild(tab);
         });
     }
@@ -110,31 +118,39 @@ class SolanaWalletDashboard {
         this.currentWallet = walletAddress;
         this.updateWalletTabs();
         
+        // Mettre à jour l'affichage de l'adresse
         const walletAddressElement = document.getElementById('walletAddress');
         if (walletAddressElement) {
-            walletAddressElement.textContent = walletAddress === 'all' ? 'All wallets' : walletAddress;
-            walletAddressElement.setAttribute('aria-label', `Current wallet: ${walletAddressElement.textContent}`);
+            if (walletAddress === 'all') {
+                walletAddressElement.textContent = 'Tous les wallets';
+            } else {
+                walletAddressElement.textContent = walletAddress;
+            }
         }
 
+        // Recharger les données
         await this.loadDashboardData();
     }
 
     setupEventListeners() {
+        // Sélecteur de wallet
         const walletSelector = document.getElementById('walletSelect');
         if (walletSelector) {
-            walletSelector.addEventListener('change', (e) => this.switchWallet(e.target.value));
+            walletSelector.addEventListener('change', (e) => {
+                this.switchWallet(e.target.value);
+            });
         }
 
+        // Bouton de copie de l'adresse
         const copyBtn = document.querySelector('.copy-btn');
         if (copyBtn) {
             copyBtn.addEventListener('click', () => this.copyWalletAddress());
         }
 
+        // Filtres
         const minAmountInput = document.getElementById('minAmount');
         const transactionLimitSelect = document.getElementById('transactionLimit');
         const transactionTypeSelect = document.getElementById('transactionType');
-        const alertThresholdInput = document.getElementById('alertThreshold');
-        const searchInput = document.getElementById('transactionSearch');
         
         if (minAmountInput) {
             minAmountInput.addEventListener('change', () => this.applyFilters());
@@ -148,23 +164,14 @@ class SolanaWalletDashboard {
             transactionTypeSelect.addEventListener('change', () => this.applyFilters());
         }
 
-        if (alertThresholdInput) {
-            alertThresholdInput.addEventListener('change', () => {
-                this.alertThreshold = parseFloat(alertThresholdInput.value) || 1;
-                this.applyFilters();
-            });
-        }
-
-        if (searchInput) {
-            searchInput.addEventListener('input', this.debounce(() => this.searchTransactions(), 300));
-        }
-
+        // Auto-refresh au focus de la fenêtre
         window.addEventListener('focus', () => {
             if (this.autoRefreshEnabled) {
                 this.refreshData();
             }
         });
 
+        // Gestion des raccourcis clavier
         document.addEventListener('keydown', (event) => {
             if (event.ctrlKey || event.metaKey) {
                 switch (event.key) {
@@ -185,61 +192,31 @@ class SolanaWalletDashboard {
 
     async loadDashboardData() {
         try {
+            // Construire l'URL avec le wallet sélectionné
             let statsUrl = `${this.apiBaseUrl}/stats`;
             if (this.currentWallet !== 'all') {
                 statsUrl += `/${this.currentWallet}`;
             }
 
-            const statsResponse = await this.fetchWithRetry(statsUrl);
+            // Charger les statistiques principales
+            const statsResponse = await fetch(statsUrl);
+            if (!statsResponse.ok) {
+                throw new Error(`Erreur HTTP: ${statsResponse.status}`);
+            }
             const statsData = await statsResponse.json();
             
+            // Mettre à jour l'interface avec les stats
             this.updateStatsDisplay(statsData);
+            
+            // Créer le graphique de distribution
             this.createDistributionChart(statsData.transaction_distribution);
+            
+            // Charger les transactions
             await this.loadTransactions();
             
         } catch (error) {
-            console.error('Error loading dashboard data:', error);
-            this.showAlert('error', 'Data Error', 'Unable to load dashboard data');
-        }
-    }
-
-    async fetchSolPrice() {
-        try {
-            const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd,eur');
-            if (response.ok) {
-                const data = await response.json();
-                const usdPrice = data.solana.usd;
-                const eurPrice = data.solana.eur;
-                this.updateElement('solPrice', `SOL Price: $${this.formatNumber(usdPrice, 2)} / €${this.formatNumber(eurPrice, 2)}`);
-            }
-        } catch (error) {
-            console.error('Error fetching SOL price:', error);
-            this.updateElement('solPrice', 'SOL Price: Unavailable');
-        }
-    }
-
-    async fetchWithRetry(url, retries = 3, delay = 1000) {
-        const cacheKey = url;
-        if (this.apiCache.has(cacheKey)) {
-            const cached = this.apiCache.get(cacheKey);
-            if (Date.now() - cached.timestamp < 30000) {
-                return new Response(JSON.stringify(cached.data), { status: 200 });
-            }
-        }
-
-        for (let i = 0; i < retries; i++) {
-            try {
-                const response = await fetch(url);
-                if (response.ok) {
-                    const data = await response.clone().json();
-                    this.apiCache.set(cacheKey, { data, timestamp: Date.now() });
-                    return response;
-                }
-                throw new Error(`HTTP Error: ${response.status}`);
-            } catch (error) {
-                if (i === retries - 1) throw error;
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
+            console.error('Erreur lors du chargement des données:', error);
+            throw error;
         }
     }
 
@@ -253,20 +230,20 @@ class SolanaWalletDashboard {
     updateStatsDisplay(data) {
         const stats = data.stats;
         
-        const balanceElement = document.getElementById('balance');
-        if (balanceElement) {
-            balanceElement.innerHTML = `${this.formatNumber(stats.balance_sol, 4)} SOL`;
-            balanceElement.setAttribute('aria-label', `Current balance: ${this.formatNumber(stats.balance_sol, 4)} SOL`);
-        }
+        // Solde avec devises
+        this.updateElement('balance', `${this.formatNumber(stats.balance_sol, 4)} SOL`);
         this.updateElement('balanceUsd', this.formatCurrency(stats.balance_usd, 'USD'));
         this.updateElement('balanceEur', this.formatCurrency(stats.balance_eur, 'EUR'));
         
+        // Transactions en entier
         this.updateElement('totalTransactions', stats.total_transactions);
         
+        // Volume avec devises
         this.updateElement('totalVolume', `${this.formatNumber(stats.total_volume, 2)} SOL`);
         this.updateElement('totalVolumeUsd', this.formatCurrency(stats.total_volume_usd, 'USD'));
         this.updateElement('totalVolumeEur', this.formatCurrency(stats.total_volume_eur, 'EUR'));
         
+        // P&L avec devises et couleur
         const pnlElement = document.getElementById('pnl');
         if (pnlElement) {
             pnlElement.innerHTML = `
@@ -274,18 +251,18 @@ class SolanaWalletDashboard {
                 <small>${this.formatCurrency(stats.pnl_usd, 'USD')} / ${this.formatCurrency(stats.pnl_eur, 'EUR')}</small>
             `;
             pnlElement.className = `stat-value ${stats.pnl >= 0 ? 'positive' : 'negative'}`;
-            pnlElement.setAttribute('aria-label', `Net P&L: ${stats.pnl >= 0 ? '+' : ''}${this.formatNumber(stats.pnl, 4)} SOL`);
         }
         
+        // Plus grosse transaction avec devises
         const largestElement = document.getElementById('largestTransaction');
         if (largestElement) {
             largestElement.innerHTML = `
                 ${this.formatNumber(stats.largest_transaction, 4)} SOL<br>
                 <small>${this.formatCurrency(stats.largest_transaction_usd, 'USD')}</small>
             `;
-            largestElement.setAttribute('aria-label', `Largest transaction: ${this.formatNumber(stats.largest_transaction, 4)} SOL`);
         }
         
+        // Dernière mise à jour
         this.updateElement('lastUpdate', stats.last_update);
     }
 
@@ -305,15 +282,58 @@ class SolanaWalletDashboard {
                 transactionsUrl += `&type=${transactionType}`;
             }
             
-            const response = await this.fetchWithRetry(transactionsUrl);
+            const response = await fetch(transactionsUrl);
+            if (!response.ok) {
+                throw new Error(`Erreur HTTP: ${response.status}`);
+            }
+            
             const transactions = await response.json();
             this.displayTransactions(transactions);
             this.updateTransactionStats(transactions);
             
         } catch (error) {
-            console.error('Error loading transactions:', error);
-            this.showAlert('error', 'Error', 'Unable to load transactions');
+            console.error('Erreur lors du chargement des transactions:', error);
+            this.showAlert('error', 'Erreur', 'Impossible de charger les transactions');
         }
+    }
+
+    
+
+    getTransactionTypeLabel(type) {
+        const labels = {
+            'buy': '📈 ACHAT',
+            'sell': '📉 VENTE',
+            'transfer': '🔄 TRANSFERT',
+            'sol_transfer': '⚡ SOL',
+            'other': '🔹 AUTRE'
+        };
+        return labels[type] || labels.other;
+    }
+
+    generateTransactionLinks(signature, tokenMint) {
+        let links = `
+            <div class="transaction-links">
+                <a href="https://solscan.io/tx/${signature}" target="_blank">
+                    <i class="fas fa-external-link-alt"></i> Solscan
+                </a>
+        `;
+
+        if (tokenMint && tokenMint !== 'SOL') {
+            links += `
+                <a href="https://pump.fun/${tokenMint}" target="_blank">
+                    <i class="fas fa-rocket"></i> Pump.fun
+                </a>
+                <a href="https://dexscreener.com/solana/${tokenMint}" target="_blank">
+                    <i class="fas fa-chart-line"></i> DexScreener
+                </a>
+                <a href="https://jup.ag/swap/SOL-${tokenMint}" target="_blank">
+                    <i class="fas fa-exchange-alt"></i> Jupiter
+                </a>
+            `;
+        }
+
+        links += '</div>';
+        return links;
     }
 
     displayTransactions(transactions) {
@@ -324,7 +344,7 @@ class SolanaWalletDashboard {
             transactionsList.innerHTML = `
                 <div class="text-center" style="padding: 40px;">
                     <i class="fas fa-search" style="font-size: 48px; color: #ccc; margin-bottom: 15px;"></i>
-                    <p style="color: #666;">No transactions found with current filters</p>
+                    <p style="color: #666;">Aucune transaction trouvée avec les filtres actuels</p>
                 </div>
             `;
             return;
@@ -335,6 +355,7 @@ class SolanaWalletDashboard {
             const amount = parseFloat(tx.amount);
             const fee = parseFloat(tx.fee);
             
+            // Informations du token
             const tokenSymbol = tx.token_symbol || 'SOL';
             const tokenName = tx.token_name || 'Solana';
             const tokenAmount = tx.token_amount || Math.abs(amount);
@@ -343,6 +364,7 @@ class SolanaWalletDashboard {
             const tokenMint = tx.token_mint;
             const isLargeTokenAmount = tx.is_large_token_amount || false;
             
+            // Déterminer l'icône du type
             let typeIcon = 'fas fa-exchange-alt';
             let typeClass = transactionType;
             
@@ -371,18 +393,24 @@ class SolanaWalletDashboard {
                     }
             }
 
+            // AMÉLIORATION: Détection des grosses transactions
+            // 1. Grosse quantité de tokens (même si valeur SOL faible)
+            // 2. OU grosse valeur en SOL/USD
             const isLargeTransaction = isLargeTokenAmount || Math.abs(amount) >= this.alertThreshold;
 
+            // Calculer la valeur estimée en USD pour les tokens
             let estimatedValueUSD = 0;
             if (pricePerToken > 0 && tokenAmount > 0) {
-                const solPrice = 100; // Approximate SOL price
+                // Estimer via le prix SOL (approximatif)
+                const solPrice = 100; // Prix SOL approximatif - à récupérer depuis l'API
                 estimatedValueUSD = tokenAmount * pricePerToken * solPrice;
             }
 
+            // Générer les liens améliorés
             const links = this.generateImprovedTransactionLinks(tx.signature, tokenMint, tokenSymbol, transactionType);
 
             return `
-                <div class="transaction-item lazy-load ${isLargeTransaction ? 'large-transaction' : ''}" data-signature="${tx.signature}" tabindex="0">
+                <div class="transaction-item ${isLargeTransaction ? 'large-transaction' : ''}" data-signature="${tx.signature}">
                     <div class="transaction-type ${typeClass}">
                         <i class="${typeIcon}"></i>
                         ${isLargeTransaction ? '<div class="large-indicator">🔥</div>' : ''}
@@ -416,12 +444,12 @@ class SolanaWalletDashboard {
                             </div>
                             
                             <div class="transaction-status ${tx.status}">
-                                ${tx.status === 'success' ? 'Success' : 'Failed'}
+                                ${tx.status === 'success' ? 'Succès' : 'Échec'}
                             </div>
                             
                             ${isLargeTransaction ? `
                                 <span class="large-transaction-indicator">
-                                    ${isLargeTokenAmount ? '🚀 LARGE QUANTITY' : '💰 LARGE TRANSACTION'}
+                                    ${isLargeTokenAmount ? '🚀 GROSSE QUANTITÉ' : '💰 GROSSE TRANSACTION'}
                                 </span>
                             ` : ''}
 
@@ -460,7 +488,7 @@ class SolanaWalletDashboard {
                         </div>
                         
                         <div class="fee-value">
-                            Fee: ${this.formatNumber(fee, 6)} SOL
+                            Frais: ${this.formatNumber(fee, 6)} SOL
                         </div>
                     </div>
                 </div>
@@ -469,29 +497,8 @@ class SolanaWalletDashboard {
 
         transactionsList.innerHTML = transactionsHTML;
 
+        // Ajouter les event listeners pour les transactions
         this.addTransactionEventListeners();
-
-        const observer = new IntersectionObserver((entries, observer) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.classList.remove('lazy-load');
-                    observer.unobserve(entry.target);
-                }
-            });
-        }, { rootMargin: '100px' });
-
-        document.querySelectorAll('.lazy-load').forEach(item => observer.observe(item));
-    }
-
-    getTransactionTypeLabel(type) {
-        const labels = {
-            'buy': '📈 BUY',
-            'sell': '📉 SELL',
-            'transfer': '🔄 TRANSFER',
-            'sol_transfer': '⚡ SOL',
-            'other': '🔹 OTHER'
-        };
-        return labels[type] || labels.other;
     }
 
     generateImprovedTransactionLinks(signature, tokenMint, tokenSymbol, transactionType) {
@@ -502,7 +509,9 @@ class SolanaWalletDashboard {
                 </a>
         `;
 
+        // Ajouter les liens spécifiques aux tokens selon le type de transaction
         if (tokenMint && tokenMint !== 'SOL') {
+            // Lien Pump.fun pour les achats/ventes
             if (transactionType === 'buy' || transactionType === 'sell') {
                 links += `
                     <a href="https://pump.fun/${tokenMint}" target="_blank" class="link-pumpfun">
@@ -511,18 +520,14 @@ class SolanaWalletDashboard {
                 `;
             }
 
+            // Lien DexScreener pour voir les graphiques
             links += `
                 <a href="https://dexscreener.com/solana/${tokenMint}" target="_blank" class="link-dexscreener">
-                    <i class="fas fa-chart-line"></i> Price & Charts
-                </a>
-                <a href="https://solscan.io/token/${tokenMint}" target="_blank" class="link-token">
-                    <i class="fas fa-info-circle"></i> Token Info
-                </a>
-                <a href="https://birdeye.so/token/${tokenMint}?chain=solana" target="_blank" class="link-birdeye">
-                    <i class="fas fa-eye"></i> Birdeye
+                    <i class="fas fa-chart-line"></i> Prix & Charts
                 </a>
             `;
 
+            // Lien Jupiter pour swap
             if (transactionType === 'buy' || transactionType === 'sell') {
                 links += `
                     <a href="https://jup.ag/swap/SOL-${tokenMint}" target="_blank" class="link-jupiter">
@@ -530,6 +535,20 @@ class SolanaWalletDashboard {
                     </a>
                 `;
             }
+
+            // Lien vers le token sur Solscan
+            links += `
+                <a href="https://solscan.io/token/${tokenMint}" target="_blank" class="link-token">
+                    <i class="fas fa-info-circle"></i> Info Token
+                </a>
+            `;
+
+            // Lien Birdeye pour analytics avancées
+            links += `
+                <a href="https://birdeye.so/token/${tokenMint}?chain=solana" target="_blank" class="link-birdeye">
+                    <i class="fas fa-eye"></i> Birdeye
+                </a>
+            `;
         }
 
         links += '</div>';
@@ -537,6 +556,7 @@ class SolanaWalletDashboard {
     }
 
     getTokenLogo(tokenSymbol, tokenMint) {
+        // Tenter de récupérer le logo depuis le cache ou afficher les initiales
         if (tokenMint && this.tokenCache.has(tokenMint)) {
             const cached = this.tokenCache.get(tokenMint);
             if (cached.logo_uri) {
@@ -551,34 +571,40 @@ class SolanaWalletDashboard {
         const transactionItems = document.querySelectorAll('.transaction-item');
         transactionItems.forEach(item => {
             item.addEventListener('click', (e) => {
-                if (!e.target.closest('.transaction-links a')) {
-                    const signature = item.dataset.signature;
-                    this.openTransactionDetails(signature);
+                // Ne pas déclencher si on clique sur un lien
+                if (e.target.closest('.transaction-links a')) {
+                    return;
                 }
-            });
-            item.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    const signature = item.dataset.signature;
-                    this.openTransactionDetails(signature);
-                }
+                const signature = item.dataset.signature;
+                this.openTransactionDetails(signature);
             });
         });
     }
 
     openTransactionDetails(signature) {
-        window.open(`https://solscan.io/tx/${signature}`, '_blank');
+        const url = `https://solscan.io/tx/${signature}`;
+        window.open(url, '_blank');
     }
 
     updateTransactionStats(transactions) {
-        let buyCount = 0, sellCount = 0, transferCount = 0, otherCount = 0;
+        let buyCount = 0;
+        let sellCount = 0;
+        let transferCount = 0;
+        let otherCount = 0;
 
         transactions.forEach(tx => {
             switch (tx.transaction_type) {
-                case 'buy': buyCount++; break;
-                case 'sell': sellCount++; break;
-                case 'transfer': transferCount++; break;
-                default: otherCount++;
+                case 'buy':
+                    buyCount++;
+                    break;
+                case 'sell':
+                    sellCount++;
+                    break;
+                case 'transfer':
+                    transferCount++;
+                    break;
+                default:
+                    otherCount++;
             }
         });
 
@@ -592,6 +618,7 @@ class SolanaWalletDashboard {
         const ctx = document.getElementById('distributionChart');
         if (!ctx || !distributionData || distributionData.length === 0) return;
 
+        // Détruire le graphique existant
         if (this.distributionChart) {
             this.distributionChart.destroy();
         }
@@ -606,7 +633,13 @@ class SolanaWalletDashboard {
                 labels: labels,
                 datasets: [{
                     data: data,
-                    backgroundColor: ['#27ae60', '#e74c3c', '#3498db', '#f39c12', '#9b59b6'],
+                    backgroundColor: [
+                        '#27ae60',
+                        '#e74c3c',
+                        '#3498db',
+                        '#f39c12',
+                        '#9b59b6'
+                    ],
                     borderWidth: 2,
                     borderColor: '#fff'
                 }]
@@ -617,14 +650,22 @@ class SolanaWalletDashboard {
                 plugins: {
                     legend: {
                         position: 'bottom',
-                        labels: { padding: 20, usePointStyle: true }
+                        labels: {
+                            padding: 20,
+                            usePointStyle: true
+                        }
                     },
                     tooltip: {
                         callbacks: {
-                            label: (context) => [
-                                `${context.label}: ${context.parsed} transactions`,
-                                `Volume: ${this.formatNumber(volumes[context.dataIndex], 2)} SOL`
-                            ]
+                            label: (context) => {
+                                const label = context.label;
+                                const count = context.parsed;
+                                const volume = volumes[context.dataIndex];
+                                return [
+                                    `${label}: ${count} transactions`,
+                                    `Volume: ${this.formatNumber(volume, 2)} SOL`
+                                ];
+                            }
                         }
                     }
                 }
@@ -633,18 +674,18 @@ class SolanaWalletDashboard {
     }
 
     copyWalletAddress() {
-        const walletAddress = this.currentWallet === 'all' ? 'All wallets' : this.currentWallet;
+        const walletAddress = this.currentWallet === 'all' ? 'Tous les wallets' : this.currentWallet;
         
         if (this.currentWallet === 'all') {
-            this.showAlert('info', 'Info', 'Cannot copy "All wallets"');
+            this.showAlert('info', 'Info', 'Impossible de copier "Tous les wallets"');
             return;
         }
         
         if (navigator.clipboard) {
             navigator.clipboard.writeText(walletAddress).then(() => {
-                this.showAlert('success', 'Copied!', 'Wallet address copied to clipboard');
+                this.showAlert('success', 'Copié !', 'Adresse du wallet copiée dans le presse-papiers');
             }).catch(err => {
-                console.error('Copy error:', err);
+                console.error('Erreur lors de la copie:', err);
                 this.fallbackCopyTextToClipboard(walletAddress);
             });
         } else {
@@ -657,16 +698,21 @@ class SolanaWalletDashboard {
         textArea.value = text;
         textArea.style.position = 'fixed';
         textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
         
         try {
-            document.execCommand('copy');
-            this.showAlert('success', 'Copied!', 'Wallet address copied to clipboard');
+            const successful = document.execCommand('copy');
+            if (successful) {
+                this.showAlert('success', 'Copié !', 'Adresse du wallet copiée dans le presse-papiers');
+            } else {
+                this.showAlert('error', 'Erreur', 'Impossible de copier l\'adresse');
+            }
         } catch (err) {
-            console.error('Fallback copy error:', err);
-            this.showAlert('error', 'Error', 'Unable to copy address');
+            console.error('Erreur lors de la copie:', err);
+            this.showAlert('error', 'Erreur', 'Impossible de copier l\'adresse');
         }
         
         document.body.removeChild(textArea);
@@ -677,73 +723,20 @@ class SolanaWalletDashboard {
         try {
             await this.loadTransactions();
         } catch (error) {
-            console.error('Error applying filters:', error);
-            this.showAlert('error', 'Error', 'Unable to apply filters');
+            console.error('Erreur lors de l\'application des filtres:', error);
         } finally {
             this.hideLoading();
         }
     }
 
-    saveFilters() {
-        const filters = {
-            minAmount: document.getElementById('minAmount')?.value || 0,
-            transactionLimit: document.getElementById('transactionLimit')?.value || 50,
-            transactionType: document.getElementById('transactionType')?.value || 'all',
-            alertThreshold: document.getElementById('alertThreshold')?.value || 1
-        };
-        localStorage.setItem('walletFilters', JSON.stringify(filters));
-        this.showAlert('success', 'Filters Saved', 'Filter preferences have been saved.');
-    }
-
-    loadFilters() {
-        const savedFilters = localStorage.getItem('walletFilters');
-        if (savedFilters) {
-            const filters = JSON.parse(savedFilters);
-            document.getElementById('minAmount').value = filters.minAmount;
-            document.getElementById('transactionLimit').value = filters.transactionLimit;
-            document.getElementById('transactionType').value = filters.transactionType;
-            document.getElementById('alertThreshold').value = filters.alertThreshold;
-            this.alertThreshold = parseFloat(filters.alertThreshold) || 1;
-        }
-    }
-
-    searchTransactions() {
-        const searchInput = document.getElementById('transactionSearch')?.value.toLowerCase();
-        if (!searchInput) {
-            this.applyFilters();
-            return;
-        }
-
-        const transactionItems = document.querySelectorAll('.transaction-item');
-        transactionItems.forEach(item => {
-            const signature = item.dataset.signature.toLowerCase();
-            const tokenSymbol = item.querySelector('.token-symbol')?.textContent.toLowerCase() || '';
-            const wallet = item.querySelector('.wallet-indicator')?.textContent.toLowerCase() || '';
-            const matches = signature.includes(searchInput) || tokenSymbol.includes(searchInput) || wallet.includes(searchInput);
-            item.style.display = matches ? '' : 'none';
-        });
-    }
-
-    debounce(func, wait) {
-        let timeout;
-        return function executedFunction(...args) {
-            const later = () => {
-                clearTimeout(timeout);
-                func(...args);
-            };
-            clearTimeout(timeout);
-            timeout = setTimeout(later, wait);
-        };
-    }
-
     async refreshData() {
-        console.log('🔄 Refreshing data...');
+        console.log('🔄 Actualisation des données...');
         try {
             await this.loadDashboardData();
-            this.showAlert('success', 'Refreshed', 'Data updated successfully');
+            this.showAlert('success', 'Actualisé', 'Données mises à jour avec succès');
         } catch (error) {
-            console.error('Refresh error:', error);
-            this.showAlert('error', 'Error', 'Unable to refresh data');
+            console.error('Erreur lors de l\'actualisation:', error);
+            this.showAlert('error', 'Erreur', 'Impossible d\'actualiser les données');
         }
     }
 
@@ -757,12 +750,16 @@ class SolanaWalletDashboard {
 
     showLoading() {
         const overlay = document.getElementById('loadingOverlay');
-        if (overlay) overlay.classList.add('show');
+        if (overlay) {
+            overlay.classList.add('show');
+        }
     }
 
     hideLoading() {
         const overlay = document.getElementById('loadingOverlay');
-        if (overlay) overlay.classList.remove('show');
+        if (overlay) {
+            overlay.classList.remove('show');
+        }
     }
 
     showAlert(type, title, message) {
@@ -778,7 +775,7 @@ class SolanaWalletDashboard {
         };
 
         const alertHTML = `
-            <div class="alert ${type}" id="${alertId}" role="alert">
+            <div class="alert ${type}" id="${alertId}">
                 <div class="alert-icon">
                     <i class="${icons[type] || icons.info}"></i>
                 </div>
@@ -791,23 +788,29 @@ class SolanaWalletDashboard {
 
         alertContainer.insertAdjacentHTML('beforeend', alertHTML);
 
+        // Auto-dismiss après 5 secondes
         setTimeout(() => {
             const alert = document.getElementById(alertId);
             if (alert) {
                 alert.style.opacity = '0';
                 alert.style.transform = 'translateX(-100%)';
-                setTimeout(() => alert.remove(), 300);
+                setTimeout(() => {
+                    alert.remove();
+                }, 300);
             }
         }, 5000);
     }
 
     updateElement(id, value) {
         const element = document.getElementById(id);
-        if (element) element.textContent = value;
+        if (element) {
+            element.textContent = value;
+        }
     }
 
     formatNumber(number, decimals = 2) {
         if (typeof number !== 'number') return '0';
+        
         return new Intl.NumberFormat('fr-FR', {
             minimumFractionDigits: decimals,
             maximumFractionDigits: decimals
@@ -818,99 +821,72 @@ class SolanaWalletDashboard {
         const now = new Date();
         const diffInSeconds = Math.floor((now - date) / 1000);
 
-        if (diffInSeconds < 60) return 'Just now';
-        if (diffInSeconds < 3600) {
+        if (diffInSeconds < 60) {
+            return 'Il y a quelques secondes';
+        } else if (diffInSeconds < 3600) {
             const minutes = Math.floor(diffInSeconds / 60);
-            return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-        }
-        if (diffInSeconds < 86400) {
+            return `Il y a ${minutes} minute${minutes > 1 ? 's' : ''}`;
+        } else if (diffInSeconds < 86400) {
             const hours = Math.floor(diffInSeconds / 3600);
-            return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+            return `Il y a ${hours} heure${hours > 1 ? 's' : ''}`;
+        } else {
+            const days = Math.floor(diffInSeconds / 86400);
+            if (days === 1) {
+                return 'Hier';
+            } else if (days < 7) {
+                return `Il y a ${days} jours`;
+            } else {
+                return date.toLocaleDateString('fr-FR');
+            }
         }
-        const days = Math.floor(diffInSeconds / 86400);
-        if (days === 1) return 'Yesterday';
-        if (days < 7) return `${days} days ago`;
-        return date.toLocaleDateString('fr-FR');
     }
 }
 
+// Fonctions globales pour l'interface
 function copyWalletAddress() {
-    if (window.dashboard) window.dashboard.copyWalletAddress();
+    if (window.dashboard) {
+        window.dashboard.copyWalletAddress();
+    }
 }
 
 function applyFilters() {
-    if (window.dashboard) window.dashboard.applyFilters();
-}
-
-function refreshData() {
-    if (window.dashboard) window.dashboard.refreshData();
-}
-
-function switchWallet(walletAddress) {
-    if (window.dashboard) window.dashboard.switchWallet(walletAddress);
-}
-
-function setTransactionType(type) {
-    document.getElementById('transactionType').value = type;
-    applyFilters();
-}
-
-function saveFilters() {
-    if (window.dashboard) window.dashboard.saveFilters();
-}
-
-function searchTransactions() {
-    if (window.dashboard) window.dashboard.searchTransactions();
-}
-
-function toggleTheme() {
-    const dark = document.body.classList.toggle('dark-mode');
-    localStorage.setItem('theme', dark ? 'dark' : 'light');
-    document.getElementById('themeToggle').setAttribute('aria-checked', dark);
-}
-
-function toggleSection(sectionId) {
-    const content = document.getElementById(sectionId);
-    const toggleIcon = content.parentElement.querySelector('.toggle-icon');
-    if (content.classList.contains('collapsed')) {
-        content.classList.remove('collapsed');
-        content.style.maxHeight = content.scrollHeight + 'px';
-        toggleIcon.classList.remove('collapsed');
-        content.setAttribute('aria-expanded', 'true');
-    } else {
-        content.classList.add('collapsed');
-        content.style.maxHeight = '0';
-        toggleIcon.classList.add('collapsed');
-        content.setAttribute('aria-expanded', 'false');
+    if (window.dashboard) {
+        window.dashboard.applyFilters();
     }
 }
 
-function exportCSV() {
-    const transactions = document.querySelectorAll('.transaction-item');
-    let csvContent = 'data:text/csv;charset=utf-8,';
-    csvContent += 'Signature,Type,Amount SOL,Token Amount,Token Symbol,Fee,Wallet,Date,Status\n';
-
-    transactions.forEach(tx => {
-        const sig = tx.getAttribute('data-signature');
-        const type = tx.querySelector('.transaction-type-badge')?.textContent.trim() || '';
-        const amount = tx.querySelector('.amount-value')?.textContent.trim().replace(' SOL', '') || '';
-        const tokenAmount = tx.querySelector('.token-amount-value')?.textContent.trim().split(' ')[0] || '';
-        const tokenSymbol = tx.querySelector('.token-symbol')?.textContent.trim() || 'SOL';
-        const fee = tx.querySelector('.fee-value')?.textContent.trim().replace('Fee: ', '').replace(' SOL', '') || '';
-        const wallet = tx.querySelector('.wallet-indicator')?.textContent.trim() || '';
-        const date = tx.querySelector('.transaction-time')?.textContent.trim().replace(' ago', '') || '';
-        const status = tx.querySelector('.transaction-status')?.textContent.trim() || '';
-        csvContent += `"${sig}","${type}","${amount}","${tokenAmount}","${tokenSymbol}","${fee}","${wallet}","${date}","${status}"\n`;
-    });
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `transactions_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+function refreshData() {
+    if (window.dashboard) {
+        window.dashboard.refreshData();
+    }
 }
 
-// Initialize the dashboard
-window.dashboard = new SolanaWalletDashboard();
+function switchWallet(walletAddress) {
+    if (window.dashboard) {
+        window.dashboard.switchWallet(walletAddress);
+    }
+}
+
+// Initialisation quand le DOM est prêt
+document.addEventListener('DOMContentLoaded', () => {
+    window.dashboard = new SolanaWalletDashboard();
+});
+
+// Gestion des erreurs globales
+window.addEventListener('error', (event) => {
+    console.error('Erreur globale:', event.error);
+    if (window.dashboard) {
+        window.dashboard.showAlert('error', 'Erreur', 'Une erreur inattendue s\'est produite');
+    }
+});
+
+// Performance monitoring
+if ('performance' in window) {
+    window.addEventListener('load', () => {
+        setTimeout(() => {
+            const perfData = performance.getEntriesByType('navigation')[0];
+            const loadTime = perfData.loadEventEnd - perfData.loadEventStart;
+            console.log(`⚡ Dashboard multi-wallet chargé en ${loadTime}ms`);
+        }, 0);
+    });
+}

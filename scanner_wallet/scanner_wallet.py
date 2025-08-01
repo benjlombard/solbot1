@@ -3,6 +3,15 @@
 Moniteur de Wallet Solana avec support QuickNode API
 Surveille les transactions d'un wallet Solana et les sauvegarde dans SQLite
 """
+#https://solscan.io/account/AVAZvHLR2PcWpDf8BXY4rVxNHYRBytycHkcB5z5QNXYm#balanceChanges
+#https://solscan.io/account/DyvJoTQpQ2tCqKEGuL2ecWVGssm8Qci9ot49LUsmcmtG#balanceChanges
+#https://solscan.io/account/BieeZkdnBAgNYknzo3RH2vku7FcPkFZMZmRJANh2TpW
+#https://solscan.io/account/4DdrfiDHpmx55i4SPssxVzS9ZaKLb8qr45NKY9Er9nNh#balanceChanges
+#https://solscan.io/account/DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm#balanceChanges
+#https://solscan.io/account/3DKfZz4iHgu42LGu3ttQxqz6u4m5z9ptuar8pBsRqkKC#balanceChanges
+#https://solscan.io/account/HXkP2HJ3436u1urLnLsupqjtX1647bA2TtcHNWiDt49U#balanceChanges
+#https://solscan.io/account/DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj#balanceChanges
+#https://solscan.io/account/2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK#balanceChanges
 
 import sqlite3
 import requests
@@ -209,7 +218,8 @@ class SolanaWalletMonitor:
 
     def analyze_token_transaction(self, tx_detail: Dict, wallet_address: str) -> Dict:
         """
-        Analyse une transaction pour identifier les tokens, le type (buy/sell/transfer) et les montants
+        Analyse AMÉLIORÉE d'une transaction pour identifier les tokens, le type (buy/sell/transfer) et les montants
+        Détecte mieux les petits achats de tokens avec de grosses quantités
         """
         analysis = {
             'transaction_type': 'other',
@@ -220,7 +230,8 @@ class SolanaWalletMonitor:
             'price_per_token': 0,
             'sol_amount_change': tx_detail.get('amount', 0),
             'is_token_transaction': False,
-            'token_metadata': None
+            'token_metadata': None,
+            'is_large_token_amount': False  # NOUVEAU: pour détecter les grosses quantités de tokens
         }
         
         try:
@@ -248,7 +259,8 @@ class SolanaWalletMonitor:
                 pre_balances_map[f"{account_index}_{mint}"] = {
                     'mint': mint,
                     'amount': amount,
-                    'decimals': balance.get('uiTokenAmount', {}).get('decimals', 9)
+                    'decimals': balance.get('uiTokenAmount', {}).get('decimals', 9),
+                    'account_index': account_index
                 }
             
             for balance in post_token_balances:
@@ -259,105 +271,173 @@ class SolanaWalletMonitor:
                 post_balances_map[f"{account_index}_{mint}"] = {
                     'mint': mint,
                     'amount': amount,
-                    'decimals': balance.get('uiTokenAmount', {}).get('decimals', 9)
+                    'decimals': balance.get('uiTokenAmount', {}).get('decimals', 9),
+                    'account_index': account_index
                 }
             
             # Trouver l'index du wallet dans les comptes
             accounts = message.get('accountKeys', [])
-            wallet_index = None
+            wallet_account_indices = []
+            
+            # AMÉLIORATION: Chercher toutes les occurrences du wallet (pas seulement la première)
             for i, account in enumerate(accounts):
                 if account == wallet_address:
-                    wallet_index = i
-                    break
+                    wallet_account_indices.append(i)
             
-            if wallet_index is None:
+            if not wallet_account_indices:
+                logger.debug(f"Wallet {wallet_address[:8]}... non trouvé dans les comptes de la transaction")
                 return analysis
             
-            # Analyser les changements de balance pour ce wallet
+            # Analyser les changements de balance pour tous les comptes liés à ce wallet
             token_changes = []
             
-            # Comparer les balances avant/après
+            # Comparer les balances avant/après pour tous les comptes
             all_keys = set(pre_balances_map.keys()) | set(post_balances_map.keys())
             
             for key in all_keys:
                 account_index = int(key.split('_')[0])
+                mint = key.split('_')[1]
                 
-                # Ne regarder que les comptes liés à notre wallet
-                if account_index != wallet_index:
-                    continue
-                    
-                pre_balance = pre_balances_map.get(key, {'amount': 0, 'mint': None, 'decimals': 9})
-                post_balance = post_balances_map.get(key, {'amount': 0, 'mint': None, 'decimals': 9})
+                # AMÉLIORATION: Regarder tous les comptes de tokens, pas seulement ceux du wallet principal
+                # Car les tokens peuvent être dans des comptes associés (Associated Token Accounts)
                 
-                mint = pre_balance.get('mint') or post_balance.get('mint')
-                if not mint:
-                    continue
-                    
+                pre_balance = pre_balances_map.get(key, {'amount': 0, 'mint': mint, 'decimals': 9})
+                post_balance = post_balances_map.get(key, {'amount': 0, 'mint': mint, 'decimals': 9})
+                
                 pre_amount = pre_balance.get('amount', 0) or 0
                 post_amount = post_balance.get('amount', 0) or 0
                 amount_change = post_amount - pre_amount
                 
-                if abs(amount_change) > 0.000001:  # Ignorer les changements microscopiques
+                # AMÉLIORATION: Seuil plus bas pour détecter les micro-changements
+                if abs(amount_change) > 0.000000001:  # Seuil encore plus bas
                     token_changes.append({
                         'mint': mint,
                         'amount_change': amount_change,
-                        'decimals': post_balance.get('decimals', 9)
+                        'decimals': post_balance.get('decimals', 9),
+                        'account_index': account_index,
+                        'pre_amount': pre_amount,
+                        'post_amount': post_amount
                     })
+                    
+                    logger.debug(f"🔍 Changement token détecté: {mint[:8]}... "
+                            f"Change: {amount_change:,.6f} (de {pre_amount:,.6f} à {post_amount:,.6f})")
             
             # Si on a des changements de tokens, analyser le type de transaction
             if token_changes:
                 analysis['is_token_transaction'] = True
                 
-                # Prendre le plus gros changement de token
-                main_token_change = max(token_changes, key=lambda x: abs(x['amount_change']))
+                # AMÉLIORATION: Prendre le changement avec la plus grosse valeur absolue OU la plus grosse quantité
+                main_token_change = None
+                
+                # Priorité 1: Le plus gros changement en valeur absolue
+                max_change = max(token_changes, key=lambda x: abs(x['amount_change']))
+                
+                # Priorité 2: Si plusieurs changements similaires, prendre celui avec la plus grosse quantité
+                significant_changes = [tc for tc in token_changes if abs(tc['amount_change']) > abs(max_change['amount_change']) * 0.1]
+                
+                if len(significant_changes) > 1:
+                    # Prendre celui avec la plus grosse quantité finale
+                    main_token_change = max(significant_changes, key=lambda x: x['post_amount'])
+                else:
+                    main_token_change = max_change
                 
                 analysis['token_mint'] = main_token_change['mint']
                 analysis['token_amount'] = abs(main_token_change['amount_change'])
                 
-                # Récupérer les métadonnées du token
-                token_metadata = self.get_token_metadata(main_token_change['mint'])
-                analysis['token_metadata'] = token_metadata
-                analysis['token_symbol'] = token_metadata['symbol']
-                analysis['token_name'] = token_metadata['name']
+                # NOUVEAU: Détecter les grosses quantités de tokens (même si valeur SOL faible)
+                token_amount = analysis['token_amount']
                 
-                # Déterminer le type de transaction
+                # Critères pour "grosse quantité" de tokens
+                if (token_amount >= 100000 or  # Plus de 100k tokens
+                    token_amount >= 1000 and main_token_change['decimals'] <= 6 or  # Plus de 1k pour tokens avec peu de décimales
+                    token_amount >= 10 and main_token_change['decimals'] <= 2):  # Plus de 10 pour tokens avec très peu de décimales
+                    analysis['is_large_token_amount'] = True
+                    logger.info(f"🔥 GROSSE QUANTITÉ de tokens détectée: {token_amount:,.2f} tokens")
+                
+                # Récupérer les métadonnées du token
+                try:
+                    token_metadata = self.get_token_metadata(main_token_change['mint'])
+                    analysis['token_metadata'] = token_metadata
+                    analysis['token_symbol'] = token_metadata['symbol']
+                    analysis['token_name'] = token_metadata['name']
+                except Exception as e:
+                    logger.warning(f"Erreur métadonnées token {main_token_change['mint']}: {e}")
+                    analysis['token_symbol'] = 'UNKNOWN'
+                    analysis['token_name'] = 'Unknown Token'
+                
+                # AMÉLIORATION: Logique de détection du type de transaction plus précise
                 sol_change = analysis['sol_amount_change']
                 token_change = main_token_change['amount_change']
                 
-                if token_change > 0 and sol_change < 0:
-                    # Tokens augmentent, SOL diminue = ACHAT
-                    analysis['transaction_type'] = 'buy'
-                    # Calculer le prix approximatif par token
-                    if analysis['token_amount'] > 0:
-                        analysis['price_per_token'] = abs(sol_change) / analysis['token_amount']
-                        
-                elif token_change < 0 and sol_change > 0:
-                    # Tokens diminuent, SOL augmente = VENTE
-                    analysis['transaction_type'] = 'sell'
-                    # Calculer le prix approximatif par token
-                    if analysis['token_amount'] > 0:
-                        analysis['price_per_token'] = abs(sol_change) / analysis['token_amount']
-                        
-                elif token_change != 0:
-                    # Changement de tokens sans changement significatif de SOL = TRANSFER
-                    analysis['transaction_type'] = 'transfer'
+                # Seuils plus sensibles pour détecter les achats/ventes
+                SOL_CHANGE_THRESHOLD = 0.001  # 0.001 SOL minimum
                 
-                logger.debug(f"🔍 Transaction {analysis['transaction_type'].upper()}: "
-                            f"{analysis['token_amount']:.4f} {analysis['token_symbol']} "
-                            f"({abs(sol_change):.4f} SOL)")
-            
+                logger.debug(f"🔍 Analyse transaction: SOL change = {sol_change:.6f}, Token change = {token_change:,.6f}")
+                
+                if token_change > 0:  # Augmentation de tokens
+                    if sol_change < -SOL_CHANGE_THRESHOLD:
+                        # Tokens augmentent, SOL diminue significativement = ACHAT CLAIR
+                        analysis['transaction_type'] = 'buy'
+                        analysis['price_per_token'] = abs(sol_change) / analysis['token_amount'] if analysis['token_amount'] > 0 else 0
+                        logger.info(f"✅ ACHAT détecté: +{analysis['token_amount']:,.4f} {analysis['token_symbol']} pour {abs(sol_change):.6f} SOL")
+                        
+                    elif abs(sol_change) <= SOL_CHANGE_THRESHOLD:
+                        # Tokens augmentent, SOL ne change pas beaucoup = POSSIBLEMENT UN ACHAT avec frais inclus
+                        # Vérifier s'il y a des frais de transaction significatifs
+                        fee = meta.get('fee', 0) / 1e9  # Convertir en SOL
+                        
+                        if fee > 0.001:  # Si frais > 0.001 SOL
+                            analysis['transaction_type'] = 'buy'
+                            # Estimer le prix basé sur les frais (approximation)
+                            analysis['price_per_token'] = fee / analysis['token_amount'] if analysis['token_amount'] > 0 else 0
+                            logger.info(f"✅ ACHAT détecté (via frais): +{analysis['token_amount']:,.4f} {analysis['token_symbol']} (frais: {fee:.6f} SOL)")
+                        else:
+                            # Probablement un transfert entrant ou airdrop
+                            analysis['transaction_type'] = 'transfer'
+                            logger.info(f"🔄 TRANSFERT/AIRDROP: +{analysis['token_amount']:,.4f} {analysis['token_symbol']}")
+                    else:
+                        # Tokens et SOL augmentent = transfert entrant étrange ou swap complexe
+                        analysis['transaction_type'] = 'transfer'
+                        
+                elif token_change < 0:  # Diminution de tokens
+                    if sol_change > SOL_CHANGE_THRESHOLD:
+                        # Tokens diminuent, SOL augmente = VENTE CLAIRE
+                        analysis['transaction_type'] = 'sell'
+                        analysis['price_per_token'] = abs(sol_change) / analysis['token_amount'] if analysis['token_amount'] > 0 else 0
+                        logger.info(f"✅ VENTE détectée: -{analysis['token_amount']:,.4f} {analysis['token_symbol']} pour +{sol_change:.6f} SOL")
+                        
+                    elif abs(sol_change) <= SOL_CHANGE_THRESHOLD:
+                        # Tokens diminuent, SOL ne change pas beaucoup = transfert sortant
+                        analysis['transaction_type'] = 'transfer'
+                        logger.info(f"🔄 TRANSFERT sortant: -{analysis['token_amount']:,.4f} {analysis['token_symbol']}")
+                    else:
+                        # Tokens et SOL diminuent = possiblement un swap ou transfert avec frais
+                        analysis['transaction_type'] = 'transfer'
+                
+                # Log final de l'analyse
+                logger.info(f"🎯 Transaction {analysis['transaction_type'].upper()}: "
+                        f"{analysis['token_amount']:,.4f} {analysis['token_symbol']} "
+                        f"(SOL change: {sol_change:+.6f}) "
+                        f"{'🔥 GROSSE QUANTITÉ' if analysis['is_large_token_amount'] else ''}")
+                        
             else:
-                # Pas de changement de tokens détecté, mais on a un changement SOL
+                # Pas de changement de tokens détecté, analyser comme transaction SOL
                 if abs(analysis['sol_amount_change']) > 0.001:
                     analysis['transaction_type'] = 'sol_transfer'
                     analysis['token_symbol'] = 'SOL'
                     analysis['token_name'] = 'Solana'
                     analysis['token_amount'] = abs(analysis['sol_amount_change'])
+                    
+                    # Même les transferts SOL peuvent être "gros"
+                    if analysis['token_amount'] >= 1.0:  # Plus de 1 SOL
+                        analysis['is_large_token_amount'] = True
             
             return analysis
-            
+
         except Exception as e:
             logger.error(f"❌ Erreur lors de l'analyse de la transaction: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return analysis
 
     def init_database(self):
@@ -421,7 +501,9 @@ class SolanaWalletMonitor:
     
 
     def update_database_schema(self, cursor):
-        """Met à jour la structure de la base de données existante"""
+        """
+        Met à jour la structure de la base de données avec le nouveau champ
+        """
         # Liste des colonnes à ajouter si elles n'existent pas
         columns_to_add = [
             ('wallet_address', 'TEXT'),
@@ -431,7 +513,8 @@ class SolanaWalletMonitor:
             ('transaction_type', 'TEXT'),
             ('token_amount', 'REAL'),
             ('price_per_token', 'REAL'),
-            ('is_token_transaction', 'BOOLEAN DEFAULT 0')
+            ('is_token_transaction', 'BOOLEAN DEFAULT 0'),
+            ('is_large_token_amount', 'BOOLEAN DEFAULT 0')  # NOUVEAU
         ]
         
         # Récupérer la structure actuelle de la table
@@ -446,6 +529,7 @@ class SolanaWalletMonitor:
                     logger.info(f"✅ Colonne '{column_name}' ajoutée à la table transactions")
                 except sqlite3.OperationalError as e:
                     logger.warning(f"⚠️ Impossible d'ajouter la colonne '{column_name}': {e}")
+
 
     def get_solana_rpc_data(self, method: str, params: List) -> Optional[Dict]:
         """Effectue un appel RPC vers Solana avec gestion des erreurs et fallbacks"""
@@ -627,7 +711,9 @@ class SolanaWalletMonitor:
             conn.close()
     
     def save_transaction_for_wallet(self, tx: Dict, wallet_address: str):
-        """Sauvegarde une transaction dans la base de données pour un wallet spécifique"""
+        """
+        Version améliorée pour sauvegarder avec les nouvelles informations
+        """
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
         
@@ -636,11 +722,11 @@ class SolanaWalletMonitor:
                 INSERT OR IGNORE INTO transactions 
                 (signature, wallet_address, slot, block_time, amount, fee, status, 
                 token_mint, token_symbol, token_name, transaction_type, 
-                token_amount, price_per_token, is_token_transaction)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                token_amount, price_per_token, is_token_transaction, is_large_token_amount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 tx["signature"],
-                wallet_address,  # Utiliser le wallet_address passé en paramètre
+                wallet_address,
                 tx["slot"],
                 tx["block_time"],
                 tx["amount"],
@@ -652,9 +738,16 @@ class SolanaWalletMonitor:
                 tx.get("transaction_type"),
                 tx.get("token_amount"),
                 tx.get("price_per_token"),
-                tx.get("is_token_transaction", False)
+                tx.get("is_token_transaction", False),
+                tx.get("is_large_token_amount", False)  # NOUVEAU champ
             ))
             conn.commit()
+            
+            # Log pour debug
+            if tx.get("is_token_transaction") and tx.get("transaction_type") == 'buy':
+                logger.info(f"💾 Sauvegarde ACHAT: {tx.get('token_amount', 0):,.4f} {tx.get('token_symbol', 'UNKNOWN')} "
+                        f"({'🔥 GROSSE QUANTITÉ' if tx.get('is_large_token_amount') else 'normale'})")
+                        
         except sqlite3.Error as e:
             logger.error(f"Erreur lors de la sauvegarde: {e}")
         finally:
@@ -796,7 +889,9 @@ class SolanaWalletMonitor:
         return transactions
 
     def get_transaction_details_for_wallet(self, signature: str, wallet_address: str) -> Optional[Dict]:
-        """Récupère les détails d'une transaction pour un wallet spécifique"""
+        """
+        Version améliorée qui détecte mieux les achats de tokens
+        """
         result = self.get_solana_rpc_data(
             "getTransaction",
             [signature, {"encoding": "json", "maxSupportedTransactionVersion": 0}]
@@ -808,7 +903,7 @@ class SolanaWalletMonitor:
         tx = result["result"]
         meta = tx.get("meta", {})
         
-        # Calcul du changement de balance pour CE wallet
+        # Calcul du changement de balance SOL pour CE wallet
         pre_balances = meta.get("preBalances", [])
         post_balances = meta.get("postBalances", [])
         accounts = tx.get("transaction", {}).get("message", {}).get("accountKeys", [])
@@ -825,12 +920,11 @@ class SolanaWalletMonitor:
             post_balance = post_balances[wallet_index] if post_balances[wallet_index] is not None else 0
             amount = (post_balance - pre_balance) / 1e9
         
-        # Analyser les tokens pour CE wallet
+        # Analyser les tokens avec la nouvelle logique améliorée
         try:
             token_analysis = self.analyze_token_transaction(result, wallet_address)
         except Exception as e:
             logger.error(f"Erreur lors de l'analyse des tokens pour {signature}: {e}")
-            # Valeurs par défaut en cas d'erreur
             token_analysis = {
                 'transaction_type': 'other',
                 'token_mint': None,
@@ -838,12 +932,13 @@ class SolanaWalletMonitor:
                 'token_name': None,
                 'token_amount': 0,
                 'price_per_token': 0,
-                'is_token_transaction': False
+                'is_token_transaction': False,
+                'is_large_token_amount': False
             }
 
         transaction_detail = {
             "signature": signature,
-            "wallet_address": wallet_address,  # IMPORTANT: associer à ce wallet
+            "wallet_address": wallet_address,
             "slot": tx.get("slot", 0),
             "block_time": tx.get("blockTime"),
             "amount": amount,
@@ -856,9 +951,10 @@ class SolanaWalletMonitor:
             "token_name": token_analysis['token_name'],
             "token_amount": token_analysis['token_amount'],
             "price_per_token": token_analysis['price_per_token'],
-            "is_token_transaction": token_analysis['is_token_transaction']
+            "is_token_transaction": token_analysis['is_token_transaction'],
+            "is_large_token_amount": token_analysis['is_large_token_amount']  # NOUVEAU
         }
-    
+
         return transaction_detail
 
     def get_wallet_balance_for_address(self, wallet_address: str) -> float:
