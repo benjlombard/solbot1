@@ -3,3 +3,6 @@ static/js/pump_fun_module.js:secret-detection:256
 bot_sniper_tg.py:secret-detection:215
 bot_sniper_tg.py:secret-detection:275
 social_media_alpha_scanner.py:secret-detection:404
+social_media_alpha_scanner.py:secret-detection:404
+scanner_wallet/run_monitor.py:secret-detection:142
+scanner_wallet/static/js/dashboard.js:secret-detection:197

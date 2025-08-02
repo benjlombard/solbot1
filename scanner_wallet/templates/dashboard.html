@@ -126,6 +126,98 @@
             </div>
         </section>
 
+        <!-- Token Summary Table Section -->
+        <section class="token-summary-section">
+            <div class="section-header" onclick="toggleSection('tokenSummarySection')">
+                <h3><i class="fas fa-coins"></i> Token Trading Summary</h3>
+                <i class="fas fa-chevron-down toggle-icon"></i>
+            </div>
+            <div class="token-summary-content" id="tokenSummarySection">
+                <!-- Summary Stats -->
+                <div class="token-summary-stats">
+                    <div class="summary-stat">
+                        <span class="summary-value" id="totalTokensTracked">0</span>
+                        <span class="summary-label">Tokens Tracked</span>
+                    </div>
+                    <div class="summary-stat profitable">
+                        <span class="summary-value" id="profitableTokens">0</span>
+                        <span class="summary-label">Profitable</span>
+                    </div>
+                    <div class="summary-stat negative">
+                        <span class="summary-value" id="lossTokens">0</span>
+                        <span class="summary-label">Losses</span>
+                    </div>
+                    <div class="summary-stat hot">
+                        <span class="summary-value" id="hotTokens">0</span>
+                        <span class="summary-label">🔥 Hot Tokens</span>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="token-filters">
+                    <div class="filter-group">
+                        <label for="tokenPeriod">Period:</label>
+                        <select id="tokenPeriod">
+                            <option value="1">Last 24 hours</option>
+                            <option value="7">Last 7 days</option>
+                            <option value="30" selected>Last 30 days</option>
+                            <option value="0">All time</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="tokenSortBy">Sort by:</label>
+                        <select id="tokenSortBy">
+                            <option value="total_value">Total Value</option>
+                            <option value="last_activity">Recent Activity</option>
+                            <option value="pnl">P&L</option>
+                            <option value="hotness">Hotness Score</option>
+                            <option value="net_position">Position Size</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="tokenMinValue">Min Value (SOL):</label>
+                        <input type="number" id="tokenMinValue" value="0.1" step="0.1" min="0">
+                    </div>
+                    <button class="filter-btn" onclick="loadTokenSummary()">
+                        <i class="fas fa-sync"></i> Refresh
+                    </button>
+                </div>
+
+                <!-- Token Summary Table -->
+                <div class="token-table-container">
+                    <table class="token-summary-table" id="tokenSummaryTable">
+                        <thead>
+                            <tr>
+                                <th class="token-col">Token</th>
+                                <th class="buys-col" title="Number of buys / Total SOL spent">Buys</th>
+                                <th class="sells-col" title="Number of sells / Total SOL received">Sells</th>
+                                <th class="position-col" title="Net token position">Net Position</th>
+                                <th class="price-col" title="Average buy and sell prices">Avg Prices</th>
+                                <th class="pnl-col" title="Estimated P&L">P&L</th>
+                                <th class="activity-col" title="Last transaction time">Last Activity</th>
+                                <th class="actions-col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tokenSummaryTableBody">
+                            <!-- Tokens will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Loading state -->
+                <div class="token-loading" id="tokenLoading" style="display: none;">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span>Loading token data...</span>
+                </div>
+
+                <!-- Empty state -->
+                <div class="token-empty" id="tokenEmpty" style="display: none;">
+                    <i class="fas fa-coins" style="font-size: 48px; color: #ccc; margin-bottom: 15px;"></i>
+                    <p>No token trading data found with current filters</p>
+                </div>
+            </div>
+        </section>
+
         <!-- Charts Section -->
         <section class="charts-section">
             <div class="section-header" onclick="toggleSection('chartsSection')">

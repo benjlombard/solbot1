@@ -1026,6 +1026,306 @@ body.dark-mode .transaction-search input {
     border-color: #444;
 }
 
+/* Token Summary Table Styles */
+.token-summary-section {
+    background: var(--card-background);
+    backdrop-filter: blur(20px);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    overflow: hidden;
+    margin-bottom: 30px;
+}
+
+.token-summary-content {
+    padding: 20px;
+}
+
+.token-summary-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 10px;
+}
+
+.summary-stat {
+    text-align: center;
+    padding: 10px;
+    border-radius: 8px;
+    background: white;
+    border-left: 4px solid #e9ecef;
+}
+
+.summary-stat.profitable { border-left-color: var(--success-color); }
+.summary-stat.negative { border-left-color: var(--error-color); }
+.summary-stat.hot { border-left-color: #ff6b35; }
+
+.summary-value {
+    display: block;
+    font-size: 20px;
+    font-weight: bold;
+    color: var(--text-primary);
+}
+
+.summary-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.token-filters {
+    display: flex;
+    gap: 15px;
+    align-items: end;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 10px;
+}
+
+.token-table-container {
+    overflow-x: auto;
+    border-radius: 10px;
+    border: 1px solid #e9ecef;
+}
+
+.token-summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.token-summary-table th {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: white;
+    padding: 12px 8px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.3s ease;
+}
+
+.token-summary-table th:hover {
+    background: linear-gradient(135deg, #7c3aed, #10b981);
+}
+
+.token-summary-table td {
+    padding: 12px 8px;
+    border-bottom: 1px solid #f8f9fa;
+    vertical-align: middle;
+}
+
+.token-summary-table tbody tr:hover {
+    background: rgba(153, 69, 255, 0.05);
+}
+
+/* Column specific styles */
+.token-col { width: 20%; min-width: 150px; }
+.buys-col, .sells-col { width: 15%; }
+.position-col { width: 15%; }
+.price-col { width: 12%; }
+.pnl-col { width: 12%; }
+.activity-col { width: 11%; }
+.actions-col { width: 15%; min-width: 120px; }
+
+.token-badges {
+    display: flex;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.token-badge {
+    font-size: 8px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.token-badge.hot {
+    background: linear-gradient(45deg, #ff6b35, #ff8e53);
+    color: white;
+}
+
+.token-badge.new {
+    background: var(--success-color);
+    color: white;
+}
+
+.token-badge.large-position {
+    background: var(--warning-color);
+    color: white;
+}
+
+.trading-stats {
+    font-size: 12px;
+}
+
+.stat-primary {
+    font-weight: 600;
+    color: var(--text-primary);
+    display: block;
+}
+
+.stat-secondary {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.buys-stats .stat-primary { color: var(--success-color); }
+.sells-stats .stat-primary { color: var(--error-color); }
+
+.position-value {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.position-value.positive { color: var(--success-color); }
+.position-value.negative { color: var(--error-color); }
+.position-value.neutral { color: var(--text-secondary); }
+
+.position-details {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.price-info {
+    font-size: 11px;
+}
+
+.buy-price {
+    color: var(--success-color);
+    font-weight: 500;
+}
+
+.sell-price {
+    color: var(--error-color);
+    font-weight: 500;
+}
+
+.pnl-value {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.pnl-value.positive { color: var(--success-color); }
+.pnl-value.negative { color: var(--error-color); }
+.pnl-value.neutral { color: var(--text-secondary); }
+
+.pnl-percentage {
+    font-size: 10px;
+    font-weight: normal;
+    opacity: 0.8;
+}
+
+.activity-time {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.activity-recent {
+    color: var(--success-color);
+    font-weight: 500;
+}
+
+.wallet-count {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.token-actions {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.token-action-btn {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.token-action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.btn-charts {
+    background: #3498db;
+    color: white;
+}
+
+.btn-buy {
+    background: var(--success-color);
+    color: white;
+}
+
+.btn-copy {
+    background: var(--warning-color);
+    color: white;
+}
+
+.btn-details {
+    background: var(--text-secondary);
+    color: white;
+}
+
+.token-loading, .token-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-secondary);
+}
+
+.token-loading i {
+    font-size: 24px;
+    margin-bottom: 10px;
+    color: var(--primary-color);
+}
+
+/* Responsive design for token table */
+@media (max-width: 768px) {
+    .token-filters {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .token-summary-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .token-summary-table {
+        font-size: 12px;
+    }
+    
+    .token-col { min-width: 120px; }
+    .token-name { max-width: 80px; }
+    
+    .token-actions {
+        flex-direction: column;
+    }
+    
+    .token-action-btn {
+        font-size: 9px;
+        padding: 3px 6px;
+    }
+}
+
 /* Utility Classes */
 .positive { color: var(--success-color); }
 .negative { color: var(--error-color); }

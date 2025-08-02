@@ -10,6 +10,8 @@ class SolanaWalletDashboard {
         this.alertThreshold = 1; // SOL
         this.tokenCache = new Map();
         this.apiCache = new Map();
+        this.tokenSummaryData = [];
+        this.tokenSummaryLoaded = false;
         
         this.init();
     }
@@ -48,6 +50,273 @@ class SolanaWalletDashboard {
         }
         this.updateWalletSelector();
         this.updateWalletTabs();
+    }
+
+    async loadTokenSummary() {
+    const loadingEl = document.getElementById('tokenLoading');
+    const emptyEl = document.getElementById('tokenEmpty');
+    const tableBody = document.getElementById('tokenSummaryTableBody');
+    
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (tableBody) tableBody.innerHTML = '';
+
+    try {
+        const period = document.getElementById('tokenPeriod')?.value || '30';
+        const sortBy = document.getElementById('tokenSortBy')?.value || 'total_value';
+        const minValue = document.getElementById('tokenMinValue')?.value || '0.1';
+        const wallet = this.currentWallet;
+
+        const response = await this.fetchWithRetry(`${this.apiBaseUrl}/token-summary?period=${period}&sort_by=${sortBy}&min_value=${minValue}&wallet=${wallet}`);
+        const data = await response.json();
+
+        if (loadingEl) loadingEl.style.display = 'none';
+
+        if (data.error) {
+            console.error('Error loading token summary:', data.error);
+            if (emptyEl) {
+                emptyEl.style.display = 'block';
+                emptyEl.innerHTML = `
+                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #e74c3c; margin-bottom: 15px;"></i>
+                    <p>Error loading token data: ${data.error}</p>
+                `;
+            }
+            return;
+        }
+
+        this.tokenSummaryData = data.tokens || [];
+        this.updateTokenSummaryStats(data.summary || {});
+        this.displayTokenSummaryTable(this.tokenSummaryData);
+
+        if (this.tokenSummaryData.length === 0) {
+            if (emptyEl) emptyEl.style.display = 'block';
+        } else {
+            this.tokenSummaryLoaded = true;
+        }
+
+    } catch (error) {
+        console.error('Error loading token summary:', error);
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (emptyEl) {
+            emptyEl.style.display = 'block';
+            emptyEl.innerHTML = `
+                <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #e74c3c; margin-bottom: 15px;"></i>
+                <p>Failed to load token data. Please try again.</p>
+            `;
+        }
+    }
+}
+
+    updateTokenSummaryStats(summary) {
+        const elements = {
+            'totalTokensTracked': summary.total_tokens || 0,
+            'profitableTokens': summary.profitable_tokens || 0,
+            'lossTokens': summary.loss_tokens || 0,
+            'hotTokens': summary.hot_tokens_count || 0
+        };
+
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        });
+    }
+
+    displayTokenSummaryTable(tokens) {
+        const tableBody = document.getElementById('tokenSummaryTableBody');
+        if (!tableBody) return;
+
+        if (tokens.length === 0) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 40px; color: #666;">
+                        No tokens found with current filters
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        const rows = tokens.map(token => {
+            const stats = token.trading_stats;
+            const performance = token.performance;
+            const timing = token.timing;
+            const metadata = token.metadata;
+
+            // Format numbers
+            const formatLargeNumber = (num) => {
+                if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+                if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+                return num.toFixed(2);
+            };
+
+            const formatSOL = (num) => {
+                if (num >= 100) return num.toFixed(1);
+                if (num >= 1) return num.toFixed(2);
+                return num.toFixed(4);
+            };
+
+            // Token badges
+            let badges = '';
+            if (metadata.is_hot) badges += '<span class="token-badge hot">🔥 HOT</span>';
+            if (timing.is_recent_activity) badges += '<span class="token-badge new">NEW</span>';
+            if (metadata.position_size === 'large') badges += '<span class="token-badge large-position">LARGE</span>';
+
+            // Position status
+            const netPosition = stats.net_position;
+            let positionClass = 'neutral';
+            let positionPrefix = '';
+            if (netPosition > 0) {
+                positionClass = 'positive';
+                positionPrefix = '+';
+            } else if (netPosition < 0) {
+                positionClass = 'negative';
+                positionPrefix = '';
+            }
+
+            // P&L formatting
+            const pnlClass = performance.is_profitable ? 'positive' : 'negative';
+            const pnlPrefix = performance.estimated_pnl_sol >= 0 ? '+' : '';
+
+            // Last activity
+            const lastActivityTime = timing.last_transaction;
+            const timeDiff = Math.floor((Date.now() / 1000) - lastActivityTime);
+            let activityText = 'Unknown';
+            let activityClass = '';
+            
+            if (timeDiff < 3600) {
+                activityText = `${Math.floor(timeDiff / 60)}m ago`;
+                activityClass = 'activity-recent';
+            } else if (timeDiff < 86400) {
+                activityText = `${Math.floor(timeDiff / 3600)}h ago`;
+                activityClass = 'activity-recent';
+            } else {
+                activityText = `${Math.floor(timeDiff / 86400)}d ago`;
+            }
+
+            return `
+                <tr data-token="${token.token_mint}">
+                    <td class="token-col">
+                        <div class="token-info">
+                            <div class="token-logo">
+                                ${this.getTokenLogo(token.symbol, token.token_mint)}
+                            </div>
+                            <div class="token-details">
+                                <div class="token-symbol">${token.symbol}</div>
+                                <div class="token-name" title="${token.name}">${token.name}</div>
+                                <div class="token-badges">${badges}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="buys-col">
+                        <div class="trading-stats buys-stats">
+                            <span class="stat-primary">${stats.total_buys} buys</span>
+                            <span class="stat-secondary">${formatSOL(stats.total_sol_spent)} SOL</span>
+                        </div>
+                    </td>
+                    <td class="sells-col">
+                        <div class="trading-stats sells-stats">
+                            <span class="stat-primary">${stats.total_sells} sells</span>
+                            <span class="stat-secondary">${formatSOL(stats.total_sol_received)} SOL</span>
+                        </div>
+                    </td>
+                    <td class="position-col">
+                        <div class="position-value ${positionClass}">
+                            ${positionPrefix}${formatLargeNumber(Math.abs(netPosition))}
+                        </div>
+                        <div class="position-details">
+                            ${stats.unique_wallets} wallet${stats.unique_wallets > 1 ? 's' : ''}
+                        </div>
+                    </td>
+                    <td class="price-col">
+                        <div class="price-info">
+                            ${stats.avg_buy_price > 0 ? `<div class="buy-price">Buy: ${stats.avg_buy_price.toFixed(8)}</div>` : ''}
+                            ${stats.avg_sell_price > 0 ? `<div class="sell-price">Sell: ${stats.avg_sell_price.toFixed(8)}</div>` : ''}
+                            ${stats.avg_buy_price === 0 && stats.avg_sell_price === 0 ? '<span class="stat-secondary">No price data</span>' : ''}
+                        </div>
+                    </td>
+                    <td class="pnl-col">
+                        <div class="pnl-value ${pnlClass}">
+                            ${pnlPrefix}${formatSOL(Math.abs(performance.estimated_pnl_sol))} SOL
+                            <span class="pnl-percentage">(${pnlPrefix}${Math.abs(performance.pnl_percentage).toFixed(1)}%)</span>
+                        </div>
+                    </td>
+                    <td class="activity-col">
+                        <div class="activity-time ${activityClass}">
+                            ${activityText}
+                        </div>
+                        <div class="wallet-count">
+                            ${stats.total_transactions} tx
+                        </div>
+                    </td>
+                    <td class="actions-col">
+                        <div class="token-actions">
+                            <a href="${token.links.dexscreener}" target="_blank" class="token-action-btn btn-charts" title="View charts">
+                                📊
+                            </a>
+                            <a href="${token.links.jupiter}" target="_blank" class="token-action-btn btn-buy" title="Trade on Jupiter">
+                                🚀
+                            </a>
+                            <button class="token-action-btn btn-copy" onclick="copyTokenInfo('${token.token_mint}', '${token.symbol}')" title="Copy token info">
+                                📋
+                            </button>
+                            <button class="token-action-btn btn-details" onclick="showTokenDetails('${token.token_mint}')" title="View details">
+                                ℹ️
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        tableBody.innerHTML = rows;
+    }
+
+    copyTokenInfo(tokenMint, symbol) {
+        const tokenData = this.tokenSummaryData.find(t => t.token_mint === tokenMint);
+        if (!tokenData) return;
+
+        const info = `Token: ${symbol}
+        Mint: ${tokenMint}
+        Buys: ${tokenData.trading_stats.total_buys}
+        Sells: ${tokenData.trading_stats.total_sells}
+        Net Position: ${tokenData.trading_stats.net_position.toFixed(2)}
+        P&L: ${tokenData.performance.estimated_pnl_sol.toFixed(4)} SOL (${tokenData.performance.pnl_percentage.toFixed(1)}%)
+
+        Links:
+        Jupiter: ${tokenData.links.jupiter}
+        DexScreener: ${tokenData.links.dexscreener}`;
+
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(info).then(() => {
+                this.showAlert('success', 'Copied!', `${symbol} token info copied to clipboard`);
+            }).catch(() => {
+                this.showAlert('error', 'Error', 'Failed to copy token info');
+            });
+        } else {
+            this.showAlert('info', 'Token Info', info);
+        }
+    }
+
+    async showTokenDetails(tokenMint) {
+        try {
+            const response = await this.fetchWithRetry(`${this.apiBaseUrl}/token-details/${tokenMint}`);
+            const data = await response.json();
+            
+            if (data.error) {
+                this.showAlert('error', 'Error', 'Failed to load token details');
+                return;
+            }
+
+            const tokenData = this.tokenSummaryData.find(t => t.token_mint === tokenMint);
+            const symbol = tokenData ? tokenData.symbol : 'Token';
+            
+            console.log(`${symbol} Details:`, data);
+            this.showAlert('info', `${symbol} Details`, `Total Transactions: ${data.total_transactions}\nRecent transactions logged to console.`);
+            
+        } catch (error) {
+            console.error('Error loading token details:', error);
+            this.showAlert('error', 'Error', 'Failed to load token details');
+        }
     }
 
     updateWalletSelector() {
@@ -159,6 +428,20 @@ class SolanaWalletDashboard {
             searchInput.addEventListener('input', this.debounce(() => this.searchTransactions(), 300));
         }
 
+        const tokenPeriod = document.getElementById('tokenPeriod');
+        const tokenSortBy = document.getElementById('tokenSortBy');
+        const tokenMinValue = document.getElementById('tokenMinValue');
+
+        if (tokenPeriod) {
+            tokenPeriod.addEventListener('change', () => this.loadTokenSummary());
+        }
+        if (tokenSortBy) {
+            tokenSortBy.addEventListener('change', () => this.loadTokenSummary());
+        }
+        if (tokenMinValue) {
+            tokenMinValue.addEventListener('change', this.debounce(() => this.loadTokenSummary(), 500));
+        }
+
         window.addEventListener('focus', () => {
             if (this.autoRefreshEnabled) {
                 this.refreshData();
@@ -196,6 +479,7 @@ class SolanaWalletDashboard {
             this.updateStatsDisplay(statsData);
             this.createDistributionChart(statsData.transaction_distribution);
             await this.loadTransactions();
+            await this.loadTokenSummary();
             
         } catch (error) {
             console.error('Error loading dashboard data:', error);
@@ -910,6 +1194,126 @@ function exportCSV() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+function loadTokenSummary() {
+    if (window.dashboard) window.dashboard.loadTokenSummary();
+}
+
+function copyTokenInfo(tokenMint, symbol) {
+    if (window.dashboard) window.dashboard.copyTokenInfo(tokenMint, symbol);
+}
+
+function showTokenDetails(tokenMint) {
+    if (window.dashboard) window.dashboard.showTokenDetails(tokenMint);
+}
+
+function formatTransaction(tx) {
+    const date = new Date(tx.block_time * 1000).toLocaleString();
+    const isTokenTx = tx.is_token_transaction;
+    const isBalanceChange = tx.token_symbol && tx.token_symbol.startsWith('TOKEN_');
+    
+    let typeClass = 'neutral';
+    let typeIcon = '⚡';
+    let typeLabel = tx.transaction_type;
+    
+    if (tx.transaction_type === 'buy') {
+        typeClass = 'buy';
+        typeIcon = '📈';
+        typeLabel = 'Buy';
+    } else if (tx.transaction_type === 'sell') {
+        typeClass = 'sell';
+        typeIcon = '📉';
+        typeLabel = 'Sell';
+    } else if (tx.transaction_type === 'transfer') {
+        typeClass = 'transfer';
+        typeIcon = '🔄';
+        typeLabel = 'Transfer';
+    }
+    
+    // Badge spécial pour balance changes
+    const balanceChangeBadge = isBalanceChange ? 
+        '<span class="badge balance-change" title="Détecté via Balance Change">BC</span>' : '';
+    
+    // Affichage du montant principal
+    let amountDisplay = '';
+    if (isTokenTx && tx.token_amount > 0) {
+        const tokenSymbol = tx.token_symbol || 'UNKNOWN';
+        amountDisplay = `
+            <div class="token-amount">${formatNumber(tx.token_amount)} ${tokenSymbol}</div>
+            ${tx.amount !== 0 ? `<div class="sol-amount">${formatSOL(tx.amount)} SOL</div>` : ''}
+        `;
+    } else {
+        amountDisplay = `<div class="sol-amount">${formatSOL(tx.amount)} SOL</div>`;
+    }
+    
+    return `
+        <div class="transaction-item ${typeClass}" data-signature="${tx.signature}">
+            <div class="transaction-icon">
+                ${typeIcon}
+            </div>
+            <div class="transaction-content">
+                <div class="transaction-header">
+                    <span class="transaction-type">${typeLabel}</span>
+                    ${balanceChangeBadge}
+                    <span class="transaction-date">${date}</span>
+                </div>
+                <div class="transaction-details">
+                    <div class="transaction-amounts">
+                        ${amountDisplay}
+                    </div>
+                    <div class="transaction-meta">
+                        <span class="signature" title="${tx.signature}">
+                            ${tx.signature.substring(0, 8)}...
+                        </span>
+                        <span class="fee">Fee: ${formatSOL(tx.fee)}</span>
+                        <span class="status ${tx.status}">${tx.status}</span>
+                        ${tx.wallet_address ? `<span class="wallet" title="${tx.wallet_address}">
+                            ${tx.wallet_address.substring(0, 6)}...
+                        </span>` : ''}
+                    </div>
+                </div>
+            </div>
+            <div class="transaction-actions">
+                <button onclick="copyToClipboard('${tx.signature}')" title="Copy signature">
+                    <i class="fas fa-copy"></i>
+                </button>
+                <a href="https://solscan.io/tx/${tx.signature}" target="_blank" title="View on Solscan">
+                    <i class="fas fa-external-link-alt"></i>
+                </a>
+            </div>
+        </div>
+    `;
+}
+
+// CSS pour le badge balance change
+const balanceChangeCSS = `
+.badge.balance-change {
+    background: linear-gradient(45deg, #4ade80, #22c55e);
+    color: white;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: bold;
+    margin-left: 8px;
+}
+
+.token-amount {
+    font-weight: bold;
+    color: var(--primary-color);
+}
+
+.sol-amount {
+    font-size: 0.9em;
+    color: var(--text-secondary);
+}
+`;
+
+if (!document.querySelector('#balance-change-styles')) {
+    const style = document.createElement('style');
+    style.id = 'balance-change-styles';
+    style.textContent = balanceChangeCSS;
+    document.head.appendChild(style);
 }
 
 // Initialize the dashboard
