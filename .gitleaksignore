@@ -9,3 +9,4 @@ scanner_wallet/static/js/dashboard.js:secret-detection:197
 scanner_wallet/old/check_scammer_1.py:secret-detection:436
 scanner_wallet/templates/analyze_token_creator.html:secret-detection:1292
 scanner_wallet/static/js/app.js:secret-detection:176
+scanner_wallet/run_monitor.py:secret-detection:150

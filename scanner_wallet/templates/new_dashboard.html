@@ -785,6 +785,41 @@
             </div>
         </div>
         
+        <div class="control-panel" style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 2rem; margin-bottom: 2rem; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);">
+            <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem;">
+                <div style="width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: linear-gradient(45deg, var(--accent-neon), var(--accent-orange)); color: var(--darker-bg); font-size: 1.1rem;">
+                    <i class="fas fa-brain"></i>
+                </div>
+                <h3 style="font-size: 1.4rem; font-weight: 700; color: var(--text-primary);">🎯 Mode de Sélection des Wallets</h3>
+            </div>
+            
+            <div class="selection-mode-controls" style="display: flex; gap: 1.5rem; margin-bottom: 1rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-primary);">
+                    <input type="radio" name="selection-mode" value="priority" checked style="margin-right: 0.5rem;">
+                    🏆 Priorités Dynamiques
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-primary);">
+                    <input type="radio" name="selection-mode" value="random" style="margin-right: 0.5rem;">
+                    🎲 Sélection Aléatoire
+                </label>
+            </div>
+            
+            <div id="random-options" style="display: none; margin-left: 20px; margin-bottom: 1rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: var(--text-secondary);">
+                    <input type="checkbox" id="weighted-random" checked style="margin-right: 0.5rem;">
+                    Pondérer par les priorités
+                </label>
+            </div>
+            
+            <button id="apply-selection-mode" style="padding: 0.8rem 1.5rem; background: linear-gradient(45deg, var(--accent-neon), var(--accent-orange)); color: var(--darker-bg); border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.3s ease;">
+                Appliquer le Mode
+            </button>
+            
+            <div id="selection-status" style="margin-top: 1rem; padding: 0.8rem; background: rgba(0, 255, 157, 0.1); border-radius: 8px; color: var(--accent-neon); font-size: 0.9rem; display: none;">
+                <i class="fas fa-info-circle"></i> <span id="status-text">Mode appliqué avec succès</span>
+            </div>
+        </div>
+
         <!-- Balance Changes Table -->
         <div class="table-panel fade-in">
             <div class="table-header">
@@ -873,6 +908,119 @@
         let balanceChangesData = [];
         let currentFilter = 'all';
         let currentSort = { field: 'time', direction: 'desc' };
+        
+
+        let currentSelectionMode = 'priority';
+        let weightedRandom = true;
+
+        // Configuration du panneau de sélection
+        function setupSelectionPanel() {
+            const radioButtons = document.querySelectorAll('input[name="selection-mode"]');
+            const randomOptions = document.getElementById('random-options');
+            const applyButton = document.getElementById('apply-selection-mode');
+            const statusDiv = document.getElementById('selection-status');
+            const statusText = document.getElementById('status-text');
+            
+            // Afficher/masquer les options aléatoires
+            radioButtons.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    if (this.value === 'random') {
+                        randomOptions.style.display = 'block';
+                    } else {
+                        randomOptions.style.display = 'none';
+                    }
+                });
+            });
+            
+            // Appliquer le changement de mode
+            applyButton.addEventListener('click', async function() {
+                const selectedMode = document.querySelector('input[name="selection-mode"]:checked').value;
+                const weightedRandomChecked = document.getElementById('weighted-random').checked;
+                
+                try {
+                    // Changer le style du bouton pendant la requête
+                    applyButton.style.opacity = '0.6';
+                    applyButton.textContent = 'Application...';
+                    applyButton.disabled = true;
+                    
+                    const response = await fetch(API_BASE_URL + '/selection-mode', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            mode: selectedMode,
+                            weighted_by_priority: weightedRandomChecked
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        currentSelectionMode = selectedMode;
+                        weightedRandom = weightedRandomChecked;
+                        
+                        // Afficher le message de succès
+                        statusText.textContent = `Mode ${selectedMode === 'priority' ? 'Priorités Dynamiques' : 'Sélection Aléatoire'} activé`;
+                        statusDiv.style.display = 'block';
+                        
+                        // Masquer le message après 3 secondes
+                        setTimeout(() => {
+                            statusDiv.style.display = 'none';
+                        }, 3000);
+                        
+                        console.log('✅ Mode de sélection mis à jour:', selectedMode);
+                    } else {
+                        throw new Error(data.error || 'Erreur inconnue');
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ Erreur changement mode:', error);
+                    statusText.textContent = 'Erreur: ' + error.message;
+                    statusDiv.style.background = 'rgba(255, 23, 68, 0.1)';
+                    statusDiv.style.color = 'var(--danger)';
+                    statusDiv.style.display = 'block';
+                    
+                    setTimeout(() => {
+                        statusDiv.style.display = 'none';
+                        statusDiv.style.background = 'rgba(0, 255, 157, 0.1)';
+                        statusDiv.style.color = 'var(--accent-neon)';
+                    }, 5000);
+                } finally {
+                    // Restaurer le bouton
+                    applyButton.style.opacity = '1';
+                    applyButton.textContent = 'Appliquer le Mode';
+                    applyButton.disabled = false;
+                }
+            });
+            
+            // Charger le mode actuel au démarrage
+            loadCurrentSelectionMode();
+        }
+
+        // Charger le mode de sélection actuel
+        async function loadCurrentSelectionMode() {
+            try {
+                const response = await fetch(API_BASE_URL + '/selection-mode');
+                if (response.ok) {
+                    const data = await response.json();
+                    currentSelectionMode = data.current_mode;
+                    weightedRandom = data.weighted_by_priority;
+                    
+                    // Mettre à jour l'interface
+                    document.querySelector(`input[value="${data.current_mode}"]`).checked = true;
+                    document.getElementById('weighted-random').checked = data.weighted_by_priority;
+                    
+                    if (data.current_mode === 'random') {
+                        document.getElementById('random-options').style.display = 'block';
+                    }
+                    
+                    console.log('📊 Mode actuel chargé:', data.current_mode);
+                }
+            } catch (error) {
+                console.error('⚠️ Impossible de charger le mode actuel:', error);
+            }
+        }
 
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', init);
@@ -891,7 +1039,8 @@
 
             // Setup event listeners
             setupEventListeners();
-
+            setupSelectionPanel();
+            
             const apiConnected = await testConnection();
             if (apiConnected) {
                 await loadDashboardData();

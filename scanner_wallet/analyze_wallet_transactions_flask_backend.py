@@ -223,6 +223,61 @@ class ReportGenerator:
         
         return stats
     
+    def _normalize_analysis_result(self, result: Dict) -> Dict:
+        """Normalise la structure des résultats d'analyse"""
+        if not isinstance(result, dict):
+            logger.error(f"❌ Résultat n'est pas un dictionnaire: {type(result)}")
+            return {"error": "Format de résultat invalide"}
+        
+        # Vérifier et corriger risk_analysis
+        if 'risk_analysis' in result:
+            risk_data = result['risk_analysis']
+            
+            # Si c'est un entier (score direct), transformer en structure complète
+            if isinstance(risk_data, (int, float)):
+                logger.warning(f"⚠️ risk_analysis est un nombre ({risk_data}), conversion en dict")
+                result['risk_analysis'] = {
+                    'score': int(risk_data),
+                    'level': self._get_risk_level(int(risk_data)),
+                    'factors': [],
+                    'warnings': ["Score calculé automatiquement"]
+                }
+            
+            # Si c'est None ou invalide
+            elif not isinstance(risk_data, dict):
+                logger.warning(f"⚠️ risk_analysis invalide ({type(risk_data)}), création par défaut")
+                result['risk_analysis'] = {
+                    'score': 50,  # Score neutre par défaut
+                    'level': 'MEDIUM',
+                    'factors': [],
+                    'warnings': ["Impossible de calculer le score de risque"]
+                }
+        
+        # Si risk_analysis n'existe pas du tout
+        else:
+            logger.warning("⚠️ risk_analysis manquant, création par défaut")
+            result['risk_analysis'] = {
+                'score': 50,
+                'level': 'MEDIUM',
+                'factors': [],
+                'warnings': ["Analyse de risque non disponible"]
+            }
+        
+        return result
+
+    def _get_risk_level(self, score: int) -> str:
+        """Convertit un score numérique en niveau de risque"""
+        if score >= 80:
+            return 'VERY_HIGH'
+        elif score >= 60:
+            return 'HIGH'
+        elif score >= 40:
+            return 'MEDIUM'
+        elif score >= 20:
+            return 'LOW'
+        else:
+            return 'VERY_LOW'
+
     def analyze_wallet_real(self, wallet_address: str, token_address: str = None, 
                            days_back: int = 7, force_refresh: bool = False) -> Dict:
         """Analyse réelle d'un wallet avec TokenCreatorAnalyzer"""
@@ -236,12 +291,28 @@ class ReportGenerator:
         
         try:
             # Utiliser la méthode complète de votre analyzer
-            result = self.analyzer.analyze_wallet_complete(
+            raw_result = self.analyzer.analyze_wallet_complete(
                 wallet_address=wallet_address,
                 days_back=days_back,
                 token_address=token_address
             )
+            result = self._normalize_analysis_result(raw_result)
+
+            # AJOUT : Debug de la structure du résultat
+            logger.info(f"🔍 Structure résultat analyzer:")
+            logger.info(f"   Type: {type(result)}")
+            logger.info(f"   Clés: {list(result.keys()) if isinstance(result, dict) else 'Pas un dict'}")
             
+            if isinstance(result, dict) and 'risk_analysis' in result:
+                risk_data = result['risk_analysis']
+                logger.info(f"   Type risk_analysis: {type(risk_data)}")
+                if isinstance(risk_data, dict):
+                    logger.info(f"   Clés risk_analysis: {list(risk_data.keys())}")
+                else:
+                    logger.warning(f"   ❌ risk_analysis n'est pas un dict: {risk_data}")
+            
+            return result
+
             logger.info(f"✅ Analyse terminée avec succès")
             logger.info(f"   Score de risque: {result.get('risk_analysis', {}).get('score', 'N/A')}")
             logger.info(f"   Durée: {result.get('analysis_duration', 0):.1f}s")
@@ -255,8 +326,8 @@ class ReportGenerator:
             raise e
     
     def analyze_token_creator_real(self, token_address: str, hours_back: int = 24, 
-                                  exhaustive_search: bool = True, 
-                                  force_refresh: bool = False) -> Dict:
+                              exhaustive_search: bool = True, 
+                              force_refresh: bool = False) -> Dict:
         """Analyse réelle d'un token creator avec TokenCreatorAnalyzer"""
         if not self.analyzer:
             raise Exception("TokenCreatorAnalyzer non initialisé")
@@ -275,19 +346,49 @@ class ReportGenerator:
                 force_refresh_creator=force_refresh
             )
             
-            if result and "wallet_analysis" in result:
-                logger.info(f"✅ Analyse token terminée avec succès")
-                logger.info(f"   Créateur: {result.get('creator_address', 'N/A')[:8]}...")
-                logger.info(f"   Requêtes RPC: {result.get('rpc_requests', 0)}")
-                
-                # Retourner les données du wallet_analysis qui contiennent tout
-                wallet_data = result["wallet_analysis"]
-                wallet_data["token_address"] = token_address
-                wallet_data["creator_address"] = result.get("creator_address")
-                
-                return wallet_data
+            logger.info(f"🔍 Structure du résultat: {list(result.keys()) if result else 'None'}")
+            
+            if result:
+                # Vérifier si on a une analyse de wallet dans le résultat
+                if "wallet_analysis" in result:
+                    logger.info(f"✅ Analyse token terminée avec succès (avec wallet_analysis)")
+                    wallet_data = result["wallet_analysis"]
+                    wallet_data["token_address"] = token_address
+                    wallet_data["creator_address"] = result.get("creator_address")
+                    return wallet_data
+                    
+                # Si pas de wallet_analysis, mais qu'on a des données d'analyse directe
+                elif any(key in result for key in ["basic_info", "trading_patterns", "risk_analysis"]):
+                    logger.info(f"✅ Analyse token terminée avec succès (données directes)")
+                    result["token_address"] = token_address
+                    return result
+                    
+                # Si on a au moins un creator_address, faire une analyse séparée du wallet
+                elif "creator_address" in result:
+                    creator_address = result["creator_address"]
+                    logger.info(f"🔄 Analyse du créateur {creator_address[:8]}... séparément")
+                    
+                    # Analyser le wallet du créateur
+                    wallet_result = self.analyze_wallet_real(
+                        wallet_address=creator_address,
+                        token_address=token_address,
+                        days_back=hours_back // 24 or 1,  # Convertir heures en jours
+                        force_refresh=force_refresh
+                    )
+                    
+                    # Ajouter les infos du token
+                    wallet_result["token_address"] = token_address
+                    wallet_result["creator_address"] = creator_address
+
+                    if isinstance(wallet_result, dict):
+                        wallet_result = self._normalize_analysis_result(wallet_result)
+
+                    return wallet_result
+                else:
+                    logger.error(f"❌ Structure de résultat inattendue: {result}")
+                    raise Exception(f"Structure de résultat inattendue. Clés disponibles: {list(result.keys())}")
             else:
-                raise Exception("Analyse token échouée ou incomplète")
+                raise Exception("Résultat vide de analyze_token_creator")
             
         except Exception as e:
             logger.error(f"❌ Erreur analyse token: {e}")
@@ -349,6 +450,17 @@ def analyze_wallet():
             force_refresh=force_refresh
         )
         
+        # Vérification de sécurité supplémentaire
+        if not isinstance(result, dict):
+            logger.error(f"❌ Résultat d'analyse invalide: {type(result)}")
+            return jsonify({"error": "Format de résultat d'analyse invalide"}), 500
+        
+        # S'assurer que risk_analysis existe et est un dict
+        risk_analysis = result.get("risk_analysis", {})
+        if not isinstance(risk_analysis, dict):
+            logger.warning(f"⚠️ Correction risk_analysis dans endpoint: {type(risk_analysis)}")
+            result["risk_analysis"] = {"score": 50, "level": "MEDIUM"}
+
         # Sauvegarder le rapport
         report_id = report_generator.save_report(
             wallet_address, result, token_address, "wallet_analysis"
@@ -403,9 +515,23 @@ def analyze_token_creator():
             force_refresh=force_refresh
         )
         
+        # Vérification de sécurité supplémentaire
+        if not isinstance(result, dict):
+            logger.error(f"❌ Résultat d'analyse invalide: {type(result)}")
+            return jsonify({"error": "Format de résultat d'analyse invalide"}), 500
+        
+        # S'assurer que risk_analysis existe et est un dict
+        risk_analysis = result.get("risk_analysis", {})
+        if not isinstance(risk_analysis, dict):
+            logger.warning(f"⚠️ Correction risk_analysis dans endpoint: {type(risk_analysis)}")
+            result["risk_analysis"] = {"score": 50, "level": "MEDIUM"}
+
+        # Déterminer l'adresse du wallet à utiliser pour la sauvegarde
+        wallet_address = result.get("wallet_address") or result.get("creator_address", "")
+
         # Sauvegarder le rapport
         report_id = report_generator.save_report(
-            result.get("wallet_address", ""), result, token_address, "token_creator_analysis"
+            wallet_address, result, token_address, "token_creator_analysis"
         )
         
         return jsonify({
@@ -426,7 +552,12 @@ def analyze_token_creator():
         
     except Exception as e:
         logger.error(f"❌ Erreur analyse token: {e}")
-        return jsonify({"error": f"Erreur lors de l'analyse du token: {str(e)}"}), 500
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            "error": f"Erreur lors de l'analyse du token: {str(e)}", 
+            "details": str(e)
+        }), 500
+
 
 @app.route('/report/<int:report_id>')
 def view_report(report_id):

@@ -178,6 +178,71 @@ class SolanaWalletMonitor:
         conn.close()
         logger.info("✅ Base de données initialisée avec schéma optimisé")
 
+    def get_random_wallet_to_scan(self) -> Optional[str]:
+        """Sélectionne un wallet aléatoirement en tenant compte des priorités et cooldowns"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
+        try:
+            logger.debug("🎲 Sélection aléatoire du wallet...")
+            
+            # Récupérer tous les wallets éligibles
+            cursor.execute('''
+                SELECT 
+                    wallet_address, 
+                    priority_score,
+                    last_scan_time,
+                    (? - last_scan_time) as seconds_since_scan
+                FROM wallet_priorities
+                WHERE (? - last_scan_time) >= ?
+                ORDER BY wallet_address
+            ''', (current_time, current_time, Config.MIN_INTERVAL_BETWEEN_SCANS))
+            
+            eligible_wallets = cursor.fetchall()
+            
+            if not eligible_wallets:
+                logger.debug("⏸️ Aucun wallet éligible pour sélection aléatoire")
+                return None
+            
+            logger.debug(f"🎯 {len(eligible_wallets)} wallets éligibles pour sélection aléatoire")
+            
+            if Config.RANDOM_SELECTION_WEIGHT_BY_PRIORITY:
+                # Sélection pondérée par la priorité
+                weights = []
+                wallets = []
+                
+                for wallet, priority, last_scan, since_scan in eligible_wallets:
+                    # Calculer le poids basé sur la priorité et le temps écoulé
+                    base_weight = max(0.1, priority)  # Poids minimum de 0.1
+                    
+                    # Bonus pour le temps écoulé
+                    time_bonus = min(2.0, since_scan / 600)  # Bonus max de 2.0 après 10min
+                    
+                    final_weight = base_weight + time_bonus
+                    weights.append(final_weight)
+                    wallets.append(wallet)
+                    
+                    logger.debug(f"   📊 {wallet[:8]}... Poids: {final_weight:.2f} (priorité: {priority:.2f}, temps: {since_scan}s)")
+                
+                # Sélection pondérée
+                import random
+                selected_wallet = random.choices(wallets, weights=weights, k=1)[0]
+                
+            else:
+                # Sélection purement aléatoire
+                import random
+                selected_wallet = random.choice([row[0] for row in eligible_wallets])
+            
+            logger.info(f"🎲 Wallet sélectionné aléatoirement: {selected_wallet[:8]}...")
+            return selected_wallet
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur sélection aléatoire: {e}")
+            return None
+        finally:
+            conn.close()
+
     def initialize_wallet_priorities(self):
         """Initialise les priorités pour tous les wallets configurés avec logs détaillés"""
         logger.info("🎯 INITIALISATION DES PRIORITÉS DYNAMIQUES")
@@ -294,6 +359,16 @@ class SolanaWalletMonitor:
             conn.close()
 
     def get_next_wallet_to_scan(self) -> Optional[str]:
+        """Retourne le prochain wallet à scanner selon le mode configuré"""
+        
+        if Config.WALLET_SELECTION_MODE == "random":
+            logger.debug("🎲 Mode de sélection: ALÉATOIRE")
+            return self.get_random_wallet_to_scan()
+        else:
+            logger.debug("🎯 Mode de sélection: PRIORITÉ")
+            return self.get_priority_wallet_to_scan()
+
+    def get_priority_wallet_to_scan(self) -> Optional[str]:
         """Retourne le prochain wallet à scanner selon les priorités avec logs détaillés"""
         conn = sqlite3.connect(self.db_name)
         cursor = conn.cursor()
@@ -1485,9 +1560,21 @@ class SolanaWalletMonitor:
                 
                 # ÉTAPE 1: SÉLECTION INTELLIGENTE DU WALLET
                 logger.info("\n" + "-" * 80)
-                logger.info("🎯 ÉTAPE 1: SÉLECTION INTELLIGENTE DU WALLET")
+                logger.info(f"🎯 ÉTAPE 1: SÉLECTION DU WALLET ({Config.WALLET_SELECTION_MODE.upper()})")
                 logger.info("-" * 80)
+
+                if Config.WALLET_SELECTION_MODE == "random":
+                    mode_desc = "🎲 ALÉATOIRE"
+                    if Config.RANDOM_SELECTION_WEIGHT_BY_PRIORITY:
+                        mode_desc += " (pondéré par priorités)"
+                    else:
+                        mode_desc += " (équiprobable)"
+                else:
+                    mode_desc = "🎯 PRIORITÉS DYNAMIQUES"
                 
+                logger.info(f"🔧 Mode de sélection: {mode_desc}")
+                logger.info(f"⏱️ Intervalle minimum: {Config.MIN_INTERVAL_BETWEEN_SCANS}s")
+
                 # Afficher l'état actuel des priorités
                 try:
                     conn = sqlite3.connect(self.db_name)
@@ -1527,6 +1614,26 @@ class SolanaWalletMonitor:
                 
                 logger.info(f"🎯 WALLET SÉLECTIONNÉ: {wallet_to_scan[:8]}...{wallet_to_scan[-8:]}")
                 
+                if Config.WALLET_SELECTION_MODE == "random":
+                    # Afficher les wallets éligibles et leurs poids
+                    conn = sqlite3.connect(self.db_name)
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        SELECT wallet_address, priority_score, 
+                            (? - last_scan_time) as since_scan
+                        FROM wallet_priorities
+                        ORDER BY priority_score DESC
+                    ''', (int(time.time()),))
+                    
+                    all_wallets_status = cursor.fetchall()
+                    logger.info("📊 État de tous les wallets pour sélection aléatoire:")
+                    for wallet, priority, since in all_wallets_status:
+                        eligible = since >= Config.MIN_INTERVAL_BETWEEN_SCANS
+                        status = "✅ ÉLIGIBLE" if eligible else f"⏳ {Config.MIN_INTERVAL_BETWEEN_SCANS - since}s"
+                        logger.info(f"   {wallet[:8]}... Priorité: {priority:.2f} | Depuis: {since}s | {status}")
+                    
+                    conn.close()
+
                 # Récupérer les détails de priorité du wallet sélectionné
                 try:
                     conn = sqlite3.connect(self.db_name)
@@ -1950,6 +2057,99 @@ CORS(app)
 @app.route('/')
 def dashboard():
     return render_template('new_dashboard.html')
+
+@app.route('/api/selection-mode', methods=['GET', 'POST'])
+def selection_mode():
+    """API pour récupérer ou modifier le mode de sélection des wallets"""
+    if request.method == 'GET':
+        return jsonify({
+            'current_mode': Config.WALLET_SELECTION_MODE,
+            'weighted_by_priority': Config.RANDOM_SELECTION_WEIGHT_BY_PRIORITY,
+            'min_interval': Config.MIN_INTERVAL_BETWEEN_SCANS,
+            'available_modes': ['priority', 'random']
+        })
+    
+    elif request.method == 'POST':
+        try:
+            data = request.get_json()
+            new_mode = data.get('mode')
+            
+            if new_mode not in ['priority', 'random']:
+                return jsonify({'error': 'Mode must be "priority" or "random"'}), 400
+            
+            # Modifier temporairement le mode (non persistant)
+            Config.WALLET_SELECTION_MODE = new_mode
+            
+            if 'weighted_by_priority' in data:
+                Config.RANDOM_SELECTION_WEIGHT_BY_PRIORITY = bool(data['weighted_by_priority'])
+            
+            logger.info(f"🔧 Mode de sélection changé: {new_mode.upper()}")
+            
+            return jsonify({
+                'success': True,
+                'new_mode': Config.WALLET_SELECTION_MODE,
+                'weighted_by_priority': Config.RANDOM_SELECTION_WEIGHT_BY_PRIORITY
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur changement mode: {e}")
+            return jsonify({'error': str(e)}), 500
+
+@app.route('/api/selection-stats')
+def get_selection_stats():
+    """API pour récupérer les statistiques de sélection des wallets"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
+        # Statistiques des dernières 24h
+        cursor.execute('''
+            SELECT 
+                sh.wallet_address,
+                COUNT(*) as scan_count,
+                AVG(sh.scan_duration) as avg_duration,
+                MAX(sh.completed_at) as last_scan,
+                SUM(sh.activity_detected) as activity_count
+            FROM scan_history sh
+            WHERE sh.completed_at >= ?
+            GROUP BY sh.wallet_address
+            ORDER BY scan_count DESC
+        ''', (current_time - 86400,))
+        
+        selection_stats = []
+        for row in cursor.fetchall():
+            wallet = row[0]
+            selection_stats.append({
+                'wallet_address': wallet,
+                'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
+                'scan_count_24h': row[1],
+                'avg_duration': round(row[2], 1) if row[2] else 0,
+                'last_scan': row[3],
+                'activity_detections': row[4] or 0,
+                'hours_since_scan': round((current_time - row[3]) / 3600, 1) if row[3] else 999
+            })
+        
+        # Statistiques globales
+        total_scans = sum(stat['scan_count_24h'] for stat in selection_stats)
+        most_scanned = max(selection_stats, key=lambda x: x['scan_count_24h']) if selection_stats else None
+        least_scanned = min(selection_stats, key=lambda x: x['scan_count_24h']) if selection_stats else None
+        
+        conn.close()
+        return jsonify({
+            'selection_mode': Config.WALLET_SELECTION_MODE,
+            'wallet_stats': selection_stats,
+            'global_stats': {
+                'total_scans_24h': total_scans,
+                'most_scanned_wallet': most_scanned['wallet_short'] if most_scanned else None,
+                'least_scanned_wallet': least_scanned['wallet_short'] if least_scanned else None,
+                'avg_scans_per_wallet': round(total_scans / len(selection_stats), 1) if selection_stats else 0
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur statistiques sélection: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/health')
 def health_check():

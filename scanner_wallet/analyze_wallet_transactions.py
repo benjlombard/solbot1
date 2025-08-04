@@ -696,7 +696,7 @@ class TokenCreatorAnalyzer:
                 response = requests.post(
                     self.quicknode_endpoint,
                     json=payload,
-                    timeout=20,
+                    timeout=40,
                     headers=headers
                 )
 
@@ -2054,9 +2054,9 @@ class TokenCreatorAnalyzer:
         return profit_analysis
 
     def _calculate_risk_score(self, wallet_info: Dict, tokens_analysis: Dict, sol_analysis: Dict, 
-                            trading_patterns: Dict, counterparties_analysis: Dict, 
-                            linked_wallets_analysis: Dict, liquidity_analysis: Dict, 
-                            profit_analysis: Dict) -> Dict:
+                        trading_patterns: Dict, counterparties_analysis: Dict, 
+                        linked_wallets_analysis: Dict, liquidity_analysis: Dict, 
+                        profit_analysis: Dict) -> Dict:
         """Calcule un score de risque automatisé de 0 à 100"""
         logger.info("   📊 Calcul du score de risque...")
         
@@ -2065,6 +2065,31 @@ class TokenCreatorAnalyzer:
         max_score = 100
         
         try:
+            # Validation des paramètres d'entrée
+            if not isinstance(wallet_info, dict):
+                wallet_info = {}
+            if not isinstance(tokens_analysis, dict):
+                tokens_analysis = {}
+            if not isinstance(trading_patterns, dict):
+                trading_patterns = {}
+            if not isinstance(counterparties_analysis, dict):
+                counterparties_analysis = {}
+            if not isinstance(linked_wallets_analysis, dict):
+                linked_wallets_analysis = {}
+            if not isinstance(liquidity_analysis, (dict, int)):
+                liquidity_analysis = {}
+            if not isinstance(profit_analysis, dict):
+                profit_analysis = {}
+            
+            # Si liquidity_analysis est un entier (cas problématique), le convertir
+            if isinstance(liquidity_analysis, int):
+                logger.warning(f"⚠️ liquidity_analysis est un entier ({liquidity_analysis}), conversion en dict")
+                liquidity_analysis = {
+                    "pools_found": [],
+                    "dex_presence": {},
+                    "risk_assessment": "INCONNU - Données invalides"
+                }
+            
             # FACTEUR 1: Balance du wallet (25 points max)
             wallet_balance = wallet_info.get("sol_balance", 0)
             if wallet_balance == 0:
@@ -2117,7 +2142,7 @@ class TokenCreatorAnalyzer:
             linked_wallets = linked_wallets_analysis.get("linked_wallets", [])
             suspicious_patterns = linked_wallets_analysis.get("suspicious_patterns", [])
             
-            high_risk_wallets = [w for w in linked_wallets if w.get("risk_level") == "HIGH"]
+            high_risk_wallets = [w for w in linked_wallets if isinstance(w, dict) and w.get("risk_level") == "HIGH"]
             if len(high_risk_wallets) > 0:
                 risk_score += 10
                 risk_factors.append(f"{len(high_risk_wallets)} wallet(s) à haut risque (+10 pts)")
@@ -2126,8 +2151,17 @@ class TokenCreatorAnalyzer:
                 risk_factors.append("Patterns suspects détectés (+5 pts)")
             
             # FACTEUR 6: Liquidité du token (10 points max)
-            pools_found = len(liquidity_analysis.get("pools_found", []))
-            dex_count = len(liquidity_analysis.get("dex_presence", {}))
+            pools_found_data = liquidity_analysis.get("pools_found", [])
+            dex_presence_data = liquidity_analysis.get("dex_presence", {})
+            
+            # S'assurer que ce sont des listes/dicts
+            if not isinstance(pools_found_data, list):
+                pools_found_data = []
+            if not isinstance(dex_presence_data, dict):
+                dex_presence_data = {}
+            
+            pools_found = len(pools_found_data)
+            dex_count = len(dex_presence_data)
             
             if pools_found == 0:
                 risk_score += 10
@@ -2140,15 +2174,17 @@ class TokenCreatorAnalyzer:
                 risk_factors.append("Peu de présence DEX (+3 pts)")
             
             # FACTEUR 7: Profitabilité du créateur (10 points max)
-            if profit_analysis.get("net_profit", 0) > 100:  # Gros profit
-                risk_score += 10
-                risk_factors.append(f"Profit élevé: {profit_analysis['net_profit']:.1f} SOL (+10 pts)")
-            elif profit_analysis.get("net_profit", 0) > 50:
-                risk_score += 7
-                risk_factors.append("Profit significatif (+7 pts)")
-            elif profit_analysis.get("net_profit", 0) > 10:
-                risk_score += 5
-                risk_factors.append("Profit modéré (+5 pts)")
+            net_profit = profit_analysis.get("net_profit", 0)
+            if isinstance(net_profit, (int, float)):
+                if net_profit > 100:  # Gros profit
+                    risk_score += 10
+                    risk_factors.append(f"Profit élevé: {net_profit:.1f} SOL (+10 pts)")
+                elif net_profit > 50:
+                    risk_score += 7
+                    risk_factors.append("Profit significatif (+7 pts)")
+                elif net_profit > 10:
+                    risk_score += 5
+                    risk_factors.append("Profit modéré (+5 pts)")
             
             # Limiter le score à 100
             risk_score = min(risk_score, max_score)
@@ -2191,6 +2227,15 @@ class TokenCreatorAnalyzer:
             
         except Exception as e:
             logger.warning(f"   ❌ Erreur calcul score risque: {e}")
+            logger.warning(f"   🔍 Types des paramètres:")
+            logger.warning(f"      wallet_info: {type(wallet_info)}")
+            logger.warning(f"      tokens_analysis: {type(tokens_analysis)}")
+            logger.warning(f"      trading_patterns: {type(trading_patterns)}")
+            logger.warning(f"      counterparties_analysis: {type(counterparties_analysis)}")
+            logger.warning(f"      linked_wallets_analysis: {type(linked_wallets_analysis)}")
+            logger.warning(f"      liquidity_analysis: {type(liquidity_analysis)}")
+            logger.warning(f"      profit_analysis: {type(profit_analysis)}")
+            
             return {
                 "score": 50,
                 "level": "INCONNU",
@@ -2218,9 +2263,9 @@ class TokenCreatorAnalyzer:
 
 
     def _generate_wallet_report(self, wallet_address: str, wallet_info: Dict, tokens_analysis: Dict, 
-                          sol_analysis: Dict, token_analysis: Dict, trading_patterns: Dict, 
-                          analysis_duration: float, days_back: int, token_address: str = None) -> Dict:
-        """Génère et affiche le rapport complet du wallet"""
+                      sol_analysis: Dict, token_analysis: Dict, trading_patterns: Dict, 
+                      analysis_duration: float, days_back: int, token_address: str = None) -> Dict:
+        """Génère et affiche le rapport complet du wallet - VERSION CORRIGÉE"""
         
         logger.info("\n" + "=" * 80)
         logger.info("📋 RAPPORT COMPLET DU WALLET")
@@ -2235,142 +2280,192 @@ class TokenCreatorAnalyzer:
         # Informations de base
         logger.info("\n🏦 INFORMATIONS GÉNÉRALES")
         logger.info("-" * 40)
-        logger.info(f"💰 Balance SOL: {wallet_info['sol_balance']:.4f} SOL")
-        logger.info(f"🔧 Type: {'Programme' if wallet_info['is_program'] else 'Wallet EOA'}")
+        logger.info(f"💰 Balance SOL: {wallet_info.get('sol_balance', 0):.4f} SOL")
+        logger.info(f"🔧 Type: {'Programme' if wallet_info.get('is_program', False) else 'Wallet EOA'}")
         
         # Tokens
         logger.info("\n🪙 PORTEFEUILLE DE TOKENS")
         logger.info("-" * 40)
-        tokens = tokens_analysis["tokens"]
-        logger.info(f"📊 Total tokens: {tokens_analysis['total_tokens']} (avec balance > 0)")
-        logger.info(f"📋 Total accounts: {tokens_analysis['total_accounts']}")
+        tokens = tokens_analysis.get("tokens", [])
+        logger.info(f"📊 Total tokens: {tokens_analysis.get('total_tokens', 0)} (avec balance > 0)")
+        logger.info(f"📋 Total accounts: {tokens_analysis.get('total_accounts', 0)}")
         
         if tokens:
             logger.info("\n🏆 TOP 10 TOKENS PAR BALANCE:")
             for i, token in enumerate(tokens[:10]):
-                logger.info(f"   {i+1:2d}. {token['address'][:8]}... : {token['balance']:,.4f}")
+                logger.info(f"   {i+1:2d}. {token.get('address', 'N/A')[:8]}... : {token.get('balance', 0):,.4f}")
         
         # Activité SOL
         logger.info("\n💰 ACTIVITÉ SOL")
         logger.info("-" * 40)
-        logger.info(f"📊 Total transactions: {sol_analysis['total_transactions']}")
-        logger.info(f"🔍 Échantillon analysé: {sol_analysis['analyzed_sample']}")
-        logger.info(f"💸 Total fees: {sol_analysis['total_fees']:.6f} SOL")
-        logger.info(f"🔄 Transferts SOL: {len(sol_analysis['sol_transfers'])}")
+        logger.info(f"📊 Total transactions: {sol_analysis.get('total_transactions', 0)}")
+        logger.info(f"🔍 Échantillon analysé: {sol_analysis.get('analyzed_sample', 0)}")
+        logger.info(f"💸 Total fees: {sol_analysis.get('total_fees', 0):.6f} SOL")
+        logger.info(f"🔄 Transferts SOL: {len(sol_analysis.get('sol_transfers', []))}")
         
         # Programmes les plus utilisés
-        if sol_analysis["most_used_programs"]:
+        most_used_programs = sol_analysis.get("most_used_programs", [])
+        if most_used_programs:
             logger.info("\n🔧 PROGRAMMES LES PLUS UTILISÉS:")
-            for program, count in sol_analysis["most_used_programs"][:5]:
+            for program, count in most_used_programs[:5]:
                 program_name = self._get_program_name(program)
                 logger.info(f"   • {program_name}: {count} interactions")
         
-        # Patterns de trading
+        # PATTERNS DE TRADING - VERSION CORRIGÉE
         logger.info("\n📊 PATTERNS D'ACTIVITÉ")
         logger.info("-" * 40)
+        
+        # Vérifier si les clés existent avant de les utiliser
+        activity_level = trading_patterns.get("activity_level", "unknown")
+        time_window_hours = trading_patterns.get("time_window_hours", 0)
+        time_window_minutes = trading_patterns.get("time_window_minutes", 0)
+        transactions_per_hour = trading_patterns.get("transactions_per_hour", 0)
+        transactions_per_minute = trading_patterns.get("transactions_per_minute", 0)
+        transactions_per_second = trading_patterns.get("transactions_per_second", 0)
+        total_volume = trading_patterns.get("total_volume_manipulated", 0)
+        avg_amount = trading_patterns.get("avg_amount", 0)
+        max_amount = trading_patterns.get("max_amount", 0)
+        
         activity_labels = {
             "very_high": "🔥 TRÈS ÉLEVÉE",
             "high": "📈 ÉLEVÉE", 
             "medium": "📊 MOYENNE",
             "low": "📉 FAIBLE",
-            "very_low": "💤 TRÈS FAIBLE"
+            "very_low": "💤 TRÈS FAIBLE",
+            "unknown": "❓ INCONNUE"
         }
-        activity_level = trading_patterns["activity_level"]
-        logger.info(f"⏰ Fenêtre d'activité: {trading_patterns['time_window_hours']:.1f}h ({trading_patterns['time_window_minutes']:.0f}min)")
-        logger.info(f"📅 Transactions/fenêtre: {trading_patterns['transactions_per_hour']:.1f}/h")
-        logger.info(f"⚡ Fréquence: {trading_patterns['transactions_per_minute']:.1f}/min | {trading_patterns['transactions_per_second']:.2f}/sec")
-        logger.info(f"💰 Volume total manipulé: {trading_patterns['total_volume_manipulated']:.4f} SOL")
         
-        if trading_patterns["avg_amount"] > 0:
-            logger.info(f"💰 Montant moyen: {trading_patterns['avg_amount']:.4f} SOL")
-            logger.info(f"🎯 Montant max: {trading_patterns['max_amount']:.4f} SOL")
+        logger.info(f"📊 Niveau d'activité: {activity_labels.get(activity_level, activity_level)}")
         
-
+        if time_window_hours > 0:
+            logger.info(f"⏰ Fenêtre d'activité: {time_window_hours:.1f}h ({time_window_minutes:.0f}min)")
+            logger.info(f"📅 Fréquence: {transactions_per_hour:.1f}/h")
+            logger.info(f"⚡ Détail: {transactions_per_minute:.1f}/min | {transactions_per_second:.2f}/sec")
+        else:
+            logger.info("⏰ Fenêtre d'activité: Aucune transaction récente")
+        
+        if total_volume > 0:
+            logger.info(f"💰 Volume total manipulé: {total_volume:.4f} SOL")
+            
+        if avg_amount > 0:
+            logger.info(f"💰 Montant moyen: {avg_amount:.4f} SOL")
+            logger.info(f"🎯 Montant max: {max_amount:.4f} SOL")
+        
+        # CONTREPARTIES
         logger.info("\n🔗 ANALYSE DES CONTREPARTIES")
         logger.info("-" * 40)
-        counterparties_analysis = self._analyze_transaction_counterparties(sol_analysis.get("sol_transfers", []))
         
-        if counterparties_analysis["top_counterparties"]:
-            logger.info(f"📊 {counterparties_analysis['unique_counterparties']} contreparties uniques")
-            logger.info("\n🏆 TOP 5 CONTREPARTIES:")
-            for i, (address, count) in enumerate(counterparties_analysis["top_counterparties"][:5]):
-                percentage = (count / counterparties_analysis["total_interactions"]) * 100
-                logger.info(f"   {i+1}. {address[:8]}... : {count} interactions ({percentage:.1f}%)")
-        else:
-            logger.info("⚪ Aucune contrepartie identifiée")
+        try:
+            counterparties_analysis = self._analyze_transaction_counterparties(sol_analysis.get("sol_transfers", []))
+            
+            if counterparties_analysis.get("top_counterparties"):
+                logger.info(f"📊 {counterparties_analysis.get('unique_counterparties', 0)} contreparties uniques")
+                logger.info("\n🏆 TOP 5 CONTREPARTIES:")
+                for i, (address, count) in enumerate(counterparties_analysis["top_counterparties"][:5]):
+                    total_interactions = counterparties_analysis.get("total_interactions", 1)
+                    percentage = (count / total_interactions) * 100
+                    logger.info(f"   {i+1}. {address[:8]}... : {count} interactions ({percentage:.1f}%)")
+            else:
+                logger.info("⚪ Aucune contrepartie identifiée")
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur analyse contreparties: {e}")
+            counterparties_analysis = {"top_counterparties": [], "unique_counterparties": 0, "total_interactions": 0}
 
-        # NOUVELLE SECTION 2: WALLETS LIÉS
+        # WALLETS LIÉS
         logger.info("\n🕸️ WALLETS LIÉS DÉTECTÉS")
         logger.info("-" * 40)
-        linked_wallets_analysis = self._detect_linked_wallets(sol_analysis.get("sol_transfers", []))
         
-        if linked_wallets_analysis["linked_wallets"]:
-            logger.info(f"🎯 {len(linked_wallets_analysis['linked_wallets'])} wallets potentiellement liés")
-            for wallet in linked_wallets_analysis["linked_wallets"][:3]:
-                logger.info(f"   • {wallet['address'][:8]}... : {wallet['interaction_count']} interactions "
-                        f"({wallet['interaction_percentage']:.1f}%) - {wallet['risk_level']}")
-        else:
-            logger.info("✅ Aucun wallet suspect détecté")
+        try:
+            linked_wallets_analysis = self._detect_linked_wallets(sol_analysis.get("sol_transfers", []))
+            
+            if linked_wallets_analysis.get("linked_wallets"):
+                logger.info(f"🎯 {len(linked_wallets_analysis['linked_wallets'])} wallets potentiellement liés")
+                for wallet in linked_wallets_analysis["linked_wallets"][:3]:
+                    logger.info(f"   • {wallet.get('address', 'N/A')[:8]}... : {wallet.get('interaction_count', 0)} interactions "
+                            f"({wallet.get('interaction_percentage', 0):.1f}%) - {wallet.get('risk_level', 'UNKNOWN')}")
+            else:
+                logger.info("✅ Aucun wallet suspect détecté")
+            
+            if linked_wallets_analysis.get("suspicious_patterns"):
+                logger.info(f"\n⚠️ {len(linked_wallets_analysis['suspicious_patterns'])} patterns suspects:")
+                for pattern in linked_wallets_analysis["suspicious_patterns"][:3]:
+                    logger.info(f"   🚨 {pattern.get('description', 'Pattern suspect')}")
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur analyse wallets liés: {e}")
+            linked_wallets_analysis = {"linked_wallets": [], "suspicious_patterns": []}
         
-        if linked_wallets_analysis["suspicious_patterns"]:
-            logger.info(f"\n⚠️ {len(linked_wallets_analysis['suspicious_patterns'])} patterns suspects:")
-            for pattern in linked_wallets_analysis["suspicious_patterns"][:3]:
-                logger.info(f"   🚨 {pattern['description']}")
-
-        # NOUVELLE SECTION 3: LIQUIDITÉ DU TOKEN (si token_address fourni)
+        # LIQUIDITÉ DU TOKEN (si token_address fourni)
+        liquidity_analysis = {}
         if token_address:
             logger.info("\n💧 LIQUIDITÉ DU TOKEN")
             logger.info("-" * 40)
-            liquidity_analysis = self._check_token_liquidity(token_address)
-            
-            logger.info(f"🏊 Pools trouvés: {len(liquidity_analysis['pools_found'])}")
-            logger.info(f"🏢 DEX présents: {len(liquidity_analysis['dex_presence'])}")
-            logger.info(f"⚠️ Évaluation risque: {liquidity_analysis['risk_assessment']}")
-            
-            if liquidity_analysis["pools_found"]:
-                for pool in liquidity_analysis["pools_found"][:2]:
-                    logger.info(f"   💰 {pool['dex']}: ${pool['liquidity_usd']:,.0f} liquidité")
+            try:
+                liquidity_analysis = self._check_token_liquidity(token_address)
+                
+                logger.info(f"🏊 Pools trouvés: {len(liquidity_analysis.get('pools_found', []))}")
+                logger.info(f"🏢 DEX présents: {len(liquidity_analysis.get('dex_presence', {}))}")
+                logger.info(f"⚠️ Évaluation risque: {liquidity_analysis.get('risk_assessment', 'INCONNU')}")
+                
+                for pool in liquidity_analysis.get("pools_found", [])[:2]:
+                    logger.info(f"   💰 {pool.get('dex', 'DEX')}: ${pool.get('liquidity_usd', 0):,.0f} liquidité")
+            except Exception as e:
+                logger.warning(f"⚠️ Erreur analyse liquidité: {e}")
+                liquidity_analysis = {"pools_found": [], "dex_presence": {}, "risk_assessment": "ERREUR"}
 
-
-        # NOUVELLE SECTION: CALCUL DU PROFIT
+        # PROFIT ANALYSIS
         logger.info("\n💰 ANALYSE DU PROFIT CRÉATEUR")
         logger.info("-" * 40)
-        profit_analysis = self._calculate_creator_profit(wallet_address, token_address or "", sol_analysis.get("sol_transfers", []))
         
-        logger.info(f"💵 Revenus totaux: {profit_analysis['total_revenue']:.4f} SOL")
-        logger.info(f"💸 Dépenses totales: {profit_analysis['total_expenses']:.4f} SOL")
-        logger.info(f"💰 Profit net: {profit_analysis['net_profit']:.4f} SOL")
-        logger.info(f"📈 ROI: {profit_analysis['profit_percentage']:.1f}%")
-        logger.info(f"📊 Transactions: {profit_analysis['profitable_transactions']} gains / {profit_analysis['loss_transactions']} pertes")
-        logger.info(f"🎯 Plus gros gain: {profit_analysis['biggest_gain']:.4f} SOL")
-        logger.info(f"🎯 Plus grosse perte: {profit_analysis['biggest_loss']:.4f} SOL")
-        logger.info(f"✅ Rentable: {'Oui' if profit_analysis['break_even'] else 'Non'}")
-        liquidity_analysis = 1 #to remove
-        # NOUVELLE SECTION: SCORE DE RISQUE
+        try:
+            profit_analysis = self._calculate_creator_profit(wallet_address, token_address or "", sol_analysis.get("sol_transfers", []))
+            
+            logger.info(f"💵 Revenus totaux: {profit_analysis.get('total_revenue', 0):.4f} SOL")
+            logger.info(f"💸 Dépenses totales: {profit_analysis.get('total_expenses', 0):.4f} SOL")
+            logger.info(f"💰 Profit net: {profit_analysis.get('net_profit', 0):.4f} SOL")
+            logger.info(f"📈 ROI: {profit_analysis.get('profit_percentage', 0):.1f}%")
+            logger.info(f"📊 Transactions: {profit_analysis.get('profitable_transactions', 0)} gains / {profit_analysis.get('loss_transactions', 0)} pertes")
+            logger.info(f"🎯 Plus gros gain: {profit_analysis.get('biggest_gain', 0):.4f} SOL")
+            logger.info(f"🎯 Plus grosse perte: {profit_analysis.get('biggest_loss', 0):.4f} SOL")
+            logger.info(f"✅ Rentable: {'Oui' if profit_analysis.get('break_even', False) else 'Non'}")
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur analyse profit: {e}")
+            profit_analysis = {"net_profit": 0, "total_revenue": 0, "total_expenses": 0, "break_even": False}
+
+        # SCORE DE RISQUE
         logger.info("\n📊 ÉVALUATION DU RISQUE")
         logger.info("-" * 40)
-        risk_analysis = self._calculate_risk_score(
-            wallet_info, tokens_analysis, sol_analysis, trading_patterns,
-            counterparties_analysis, linked_wallets_analysis, liquidity_analysis, profit_analysis
-        )
         
-        # logger.info(f"🎯 SCORE DE RISQUE: {risk_analysis['score']}/{risk_analysis['max_score']}")
-        # logger.info(f"{risk_analysis['color']} NIVEAU: {risk_analysis['level']}")
-        # logger.info(f"💡 RECOMMANDATION: {risk_analysis['recommendation']}")
-        
-        # if risk_analysis.get("factors"):
-        #     logger.info(f"\n⚠️ FACTEURS DE RISQUE IDENTIFIÉS ({risk_analysis['factor_count']}):")
-        #     for factor in risk_analysis["factors"][:5]:  # Top 5 facteurs
-        #         logger.info(f"   • {factor}")
-
+        try:
+            risk_analysis = self._calculate_risk_score(
+                wallet_info, tokens_analysis, sol_analysis, trading_patterns,
+                counterparties_analysis, linked_wallets_analysis, liquidity_analysis, profit_analysis
+            )
+            
+            logger.info(f"🎯 SCORE DE RISQUE: {risk_analysis.get('score', 50)}/{risk_analysis.get('max_score', 100)}")
+            logger.info(f"{risk_analysis.get('color', '⚠️')} NIVEAU: {risk_analysis.get('level', 'INCONNU')}")
+            logger.info(f"💡 RECOMMANDATION: {risk_analysis.get('recommendation', 'ÉVALUATION IMPOSSIBLE')}")
+            
+            factors = risk_analysis.get("factors", [])
+            if factors:
+                logger.info(f"\n⚠️ FACTEURS DE RISQUE IDENTIFIÉS ({len(factors)}):")
+                for factor in factors[:5]:
+                    logger.info(f"   • {factor}")
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur calcul risque: {e}")
+            risk_analysis = {"score": 50, "level": "INCONNU", "factors": []}
 
         # Conclusion
         logger.info("\n🎯 RÉSUMÉ EXÉCUTIF")
         logger.info("-" * 40)
-        self._generate_executive_summary(wallet_info, tokens_analysis, trading_patterns)
+        try:
+            self._generate_executive_summary(wallet_info, tokens_analysis, trading_patterns)
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur résumé exécutif: {e}")
+            logger.info("❓ Impossible de générer le résumé")
         
         logger.info("\n" + "=" * 80)
         
+        # Préparer les features ML avec valeurs par défaut
         ml_features = {
             "sol_balance": wallet_info.get("sol_balance", 0),
             "total_tokens": tokens_analysis.get("total_tokens", 0),
@@ -2384,7 +2479,7 @@ class TokenCreatorAnalyzer:
             "activity_level": trading_patterns.get("activity_level", "unknown")
         }
         
-        # Labels pour supervision (à ajuster selon vos besoins)
+        # Labels pour supervision
         labels = {
             "is_suspicious": risk_analysis.get("score", 0) > 70,
             "is_profitable": profit_analysis.get("net_profit", 0) > 10,
@@ -2393,13 +2488,16 @@ class TokenCreatorAnalyzer:
         }
         
         # Sauvegarder pour ML
-        self._save_ml_features(
-            wallet_address, 
-            ml_features, 
-            risk_analysis.get("score", 0),
-            profit_analysis.get("net_profit", 0),
-            labels
-        )
+        try:
+            self._save_ml_features(
+                wallet_address, 
+                ml_features, 
+                risk_analysis.get("score", 0),
+                profit_analysis.get("net_profit", 0),
+                labels
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur sauvegarde ML: {e}")
 
         # Retourner les données pour usage programmatique
         return {

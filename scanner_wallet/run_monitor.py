@@ -90,6 +90,14 @@ def check_configuration():
         print(f"   🎯 Limite transactions: {Config.DEFAULT_TRANSACTION_LIMIT}")
         print(f"   📦 Batch size: {Config.TOKEN_DISCOVERY_BATCH_SIZE}")
         
+        print(f"   🎯 Mode de sélection: {Config.WALLET_SELECTION_MODE.upper()}")
+        if Config.WALLET_SELECTION_MODE == "random":
+            weight_desc = "pondéré" if Config.RANDOM_SELECTION_WEIGHT_BY_PRIORITY else "équiprobable"
+            print(f"   🎲 Sélection aléatoire {weight_desc}")
+            print(f"   ⏱️ Intervalle minimum: {Config.MIN_INTERVAL_BETWEEN_SCANS}s")
+        else:
+            print(f"   🏆 Sélection par priorités dynamiques")
+
         return Config
         
     except Exception as e:

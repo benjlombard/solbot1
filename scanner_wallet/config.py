@@ -163,6 +163,10 @@ class DevelopmentConfig(Config):
     LOG_LEVEL = 'DEBUG'
     RATE_LIMIT_DELAY = 0.3  # Plus lent en dev pour éviter les problèmes
     FULL_SCAN_INTERVAL_HOURS = 2  # Scans plus fréquents en dev
+    WALLET_SELECTION_MODE = "random"  # "priority" ou "random"
+    RANDOM_SELECTION_WEIGHT_BY_PRIORITY = False  # Si True, les wallets avec plus haute priorité ont plus de chances d'être sélectionnés
+    MIN_INTERVAL_BETWEEN_SCANS = 30  # Intervalle minimum entre scans du même wallet (en secondes)
+    RANDOM_SELECTION_COOLDOWN = 300  # Cooldown pour les wallets récemment scannés en mode aléatoire (5min)
 
 class ProductionConfig(Config):
     """Configuration pour la production"""
