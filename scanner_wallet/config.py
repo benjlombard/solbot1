@@ -5,15 +5,53 @@ from typing import List
 
 # Récupérer les wallets directement au niveau du module
 def get_wallet_addresses() -> List[str]:
-    wallets_str = os.getenv('WALLET_ADDRESSES', '2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK')
+    """Récupère la liste des wallets à surveiller"""
+    
+    # Mode test
+    if os.getenv('TEST_MODE', 'false').lower() == 'true':
+        test_wallet = os.getenv('TEST_WALLET')
+        if test_wallet:
+            print(f"🧪 MODE TEST activé - Wallet: {test_wallet[:8]}...{test_wallet[-8:]}")
+            return [test_wallet]
+    
+    # CORRECTION: Utiliser le wallet spécifique par défaut
+    default_wallet = 'AVAZvHLR2PcWpDf8BXY4rVxNHYRBytycHkcB5z5QNXYm'
+    wallets_str = os.getenv('WALLET_ADDRESSES', default_wallet)
+    print(wallets_str)
     if not wallets_str:
-        return ['2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK']
-    wallets = [wallet.strip() for wallet in wallets_str.split(',') if wallet.strip()]
-    return wallets
+        return [default_wallet]
 
+    # AJOUT MANQUANT: Traitement de la chaîne pour la convertir en liste
+    try:
+        # Séparer par virgules et nettoyer chaque wallet
+        wallets = [wallet.strip() for wallet in wallets_str.split(',') if wallet.strip()]
+        
+        # Filtrer les wallets valides (longueur minimale)
+        valid_wallets = []
+        for wallet in wallets:
+            if len(wallet) >= 32:  # Longueur minimale d'une adresse Solana
+                valid_wallets.append(wallet)
+            else:
+                print(f"⚠️ Wallet invalide ignoré: {wallet}")
+        
+        if valid_wallets:
+            print(f"✅ {len(valid_wallets)} wallet(s) chargé(s) depuis WALLET_ADDRESSES")
+            for i, wallet in enumerate(valid_wallets):
+                print(f"   {i+1}. {wallet[:8]}...{wallet[-8:]}")
+            return valid_wallets
+        else:
+            print("⚠️ Aucun wallet valide trouvé, utilisation du wallet par défaut")
+            return [default_wallet]
+            
+    except Exception as e:
+        print(f"❌ Erreur traitement WALLET_ADDRESSES: {e}")
+        print("⚠️ Utilisation du wallet par défaut")
+        return [default_wallet]
+        
 # Variables globales
 WALLET_ADDRESSES = get_wallet_addresses()
-WALLET_ADDRESS = WALLET_ADDRESSES[0] if WALLET_ADDRESSES else '2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK'
+WALLET_ADDRESS = WALLET_ADDRESSES[0] if WALLET_ADDRESSES else '4DdrfiDHpmx55i4SPssxVzS9ZaKLb8qr45NKY9Er9nNh'
+
 
 class Config:
     """Configuration principale du moniteur Solana optimisé v2.0"""
@@ -151,6 +189,7 @@ DefaultConfig = get_config()
 # Validation automatique au chargement du module
 try:
     warnings = DefaultConfig.validate_config()
+    print(f"✅ Configuration chargée - Wallet principal: {DefaultConfig.WALLET_ADDRESS[:8]}...{DefaultConfig.WALLET_ADDRESS[-8:]}")
     if warnings:
         print("⚠️ Avertissements de configuration:")
         for warning in warnings:

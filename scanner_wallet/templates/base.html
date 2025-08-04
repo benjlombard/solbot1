@@ -1,0 +1,128 @@
+<!-- templates/base.html -->
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Solana Wallet Analyzer{% endblock %}</title>
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/analyze_wallet_transactions.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Meta tags -->
+    <meta name="description" content="Solana wallet analyzer with real-time risk detection">
+    <meta name="keywords" content="Solana, wallet, analyzer, blockchain, crypto, risk analysis">
+    <meta name="author" content="Solana Wallet Analyzer">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="Solana Wallet Analyzer">
+    <meta property="og:description" content="Comprehensive analysis of Solana wallets with risk scoring">
+    <meta property="og:type" content="website">
+    
+    <!-- Preconnect for performance -->
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="{{ url_for('index') }}" class="nav-logo">
+                <i class="fas fa-wallet"></i>
+                <span>Solana Analyzer</span>
+            </a>
+            
+            <ul class="nav-menu">
+                <li>
+                    <a href="{{ url_for('index') }}" 
+                       class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">
+                        <i class="fas fa-home"></i>
+                        <span>Home</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('list_reports') }}" 
+                       class="nav-link {% if request.endpoint == 'list_reports' %}active{% endif %}">
+                        <i class="fas fa-file-alt"></i>
+                        <span>Reports</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('cache_stats') }}" 
+                       class="nav-link {% if request.endpoint == 'cache_stats' %}active{% endif %}">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Statistics</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="/health" class="nav-link">
+                        <i class="fas fa-heartbeat"></i>
+                        <span>Status</span>
+                    </a>
+                </li>
+            </ul>
+            
+            <div class="nav-mobile-toggle">
+                <i class="fas fa-bars"></i>
+            </div>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-section">
+                <h3><i class="fas fa-wallet"></i> Solana Analyzer</h3>
+                <p>Real-time blockchain analysis for secure transactions.</p>
+            </div>
+            
+            <div class="footer-section">
+                <h4>Features</h4>
+                <ul>
+                    <li>Wallet analysis</li>
+                    <li>Creator detection</li>
+                    <li>Risk scoring</li>
+                    <li>Transaction history</li>
+                </ul>
+            </div>
+            
+            <div class="footer-section">
+                <h4>Useful Links</h4>
+                <ul>
+                    <li><a href="https://solana.com" target="_blank">Solana</a></li>
+                    <li><a href="https://docs.solana.com" target="_blank">Documentation</a></li>
+                    <li><a href="/api/stats" target="_blank">API Stats</a></li>
+                </ul>
+            </div>
+            
+            <div class="footer-bottom">
+                <p>&copy; 2024 Solana Wallet Analyzer. Secure blockchain analysis.</p>
+                <div class="footer-status">
+                    <span class="status-indicator operational"></span>
+                    <span>System operational</span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% block scripts %}{% endblock %}
+    
+    <!-- Service Worker for PWA (optional) -->
+    <!--<script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js')
+                .then(reg => console.log('SW registered'))
+                .catch(err => console.log('SW registration failed'));
+        }
+    </script>-->
+</body>
+</html>

@@ -1,0 +1,42 @@
+{
+  "token_address": "4cXUiV9aCTHaXEwvBSJt53Dwn8n9kaoSE1UXr6qQzh1U",
+  "creator_address": "51F4uThc6DtQ4M5t3XH6PVEvPPWHdLKHnBVVVzRb8diF",
+  "ata_pubkey": "6JB9DCKrpfzC4tChp6PCBSqS93ZPcjTJigbg4Uy7Uqfa",
+  "balance_changes": [
+    {
+      "Txhash": "2SdD7FHwwr2aXz6PAmg6kw6UpeVaJYxveuQDJX8mKEhTcVWLXTGx1FQSPpZbgcoUNDLiFWYkMJEwWwaWyB3bDPPw",
+      "BlockTimeUnix": 1754196719,
+      "BlockTime": "2025-08-03T06:51:59",
+      "Fee(SOL)": 0.001005,
+      "TokenAccount": "8mPJJ6SZd3Etz9b3QoZ4BNQG18iqoiTKi3wfiZpwcd55",
+      "ChangeType": "inc",
+      "ChangeAmount": 707783634087,
+      "PreBalancer": 999255293490104,
+      "PostBalancer": 999963077124191,
+      "TokenAddress": "4cXUiV9aCTHaXEwvBSJt53Dwn8n9kaoSE1UXr6qQzh1U",
+      "TokenDecimals": 6,
+      "TokenMultiplier": 1.0
+    },
+    {
+      "Txhash": "2SdD7FHwwr2aXz6PAmg6kw6UpeVaJYxveuQDJX8mKEhTcVWLXTGx1FQSPpZbgcoUNDLiFWYkMJEwWwaWyB3bDPPw",
+      "BlockTimeUnix": 1754196719,
+      "BlockTime": "2025-08-03T06:51:59",
+      "Fee(SOL)": 0.001005,
+      "TokenAccount": "51F4uThc6DtQ4M5t3XH6PVEvPPWHdLKHnBVVVzRb8diF",
+      "ChangeType": "dec",
+      "ChangeAmount": 707783634087,
+      "PreBalancer": 707783634087,
+      "PostBalancer": 0,
+      "TokenAddress": "4cXUiV9aCTHaXEwvBSJt53Dwn8n9kaoSE1UXr6qQzh1U",
+      "TokenDecimals": 6,
+      "TokenMultiplier": 1.0
+    }
+  ],
+  "stats": {
+    "total_changes": 2,
+    "inc_count": 1,
+    "dec_count": 1,
+    "scan_duration": 1.9696495532989502,
+    "rpc_requests": 12
+  }
+}

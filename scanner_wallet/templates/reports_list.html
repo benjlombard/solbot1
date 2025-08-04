@@ -1,0 +1,180 @@
+<!-- templates/reports_list.html -->
+{% extends "base.html" %}
+
+{% block title %}Rapports d'analyse - Solana Analyzer{% endblock %}
+
+{% block content %}
+<div class="reports-page">
+    <div class="page-header">
+        <div class="header-content">
+            <h1><i class="fas fa-file-alt"></i> Historique des Analyses</h1>
+            <p>Consultez tous les rapports d'analyse générés</p>
+        </div>
+        
+        <div class="header-actions">
+            <a href="{{ url_for('index') }}" class="btn-primary">
+                <i class="fas fa-plus"></i>
+                Nouvelle analyse
+            </a>
+            
+            <button onclick="refreshReports()" class="btn-secondary">
+                <i class="fas fa-sync-alt"></i>
+                Actualiser
+            </button>
+        </div>
+    </div>
+
+    {% if reports %}
+    <div class="reports-stats">
+        <div class="stat-card">
+            <i class="fas fa-chart-line"></i>
+            <div class="stat-content">
+                <div class="stat-value">{{ reports|length }}</div>
+                <div class="stat-label">Rapports récents</div>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <i class="fas fa-shield-alt"></i>
+            <div class="stat-content">
+                <div class="stat-value">{{ "%.1f"|format(reports|map(attribute='risk_score')|average) if reports else 0 }}</div>
+                <div class="stat-label">Score moyen</div>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <i class="fas fa-clock"></i>
+            <div class="stat-content">
+                <div class="stat-value">{{ "%.1f"|format(reports|map(attribute='analysis_duration')|average) if reports else 0 }}s</div>
+                <div class="stat-label">Durée moyenne</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="reports-grid">
+        {% for report in reports %}
+        <div class="report-card" data-risk-level="{{ 'high' if report.risk_score > 70 else 'medium' if report.risk_score > 40 else 'low' }}">
+            <div class="report-header">
+                <div class="report-id">
+                    <i class="fas fa-hashtag"></i>
+                    Rapport #{{ report.id }}
+                </div>
+                
+                <div class="report-risk risk-{{ 'critique' if report.risk_score > 80 else 'élevé' if report.risk_score > 60 else 'modéré' if report.risk_score > 30 else 'faible' }}">
+                    <span class="risk-score">{{ report.risk_score }}/100</span>
+                </div>
+            </div>
+            
+            <div class="report-content">
+                <div class="report-wallet">
+                    <label>Wallet:</label>
+                    <code>{{ report.wallet_address[:8] }}...{{ report.wallet_address[-8:] }}</code>
+                </div>
+                
+                {% if report.token_address %}
+                <div class="report-token">
+                    <label>Token:</label>
+                    <code>{{ report.token_address[:8] }}...{{ report.token_address[-8:] }}</code>
+                </div>
+                {% endif %}
+                
+                <div class="report-meta">
+                    <div class="meta-item">
+                        <i class="fas fa-calendar"></i>
+                        <span>{{ report.created_at }}</span>
+                    </div>
+                    
+                    <div class="meta-item">
+                        <i class="fas fa-stopwatch"></i>
+                        <span>{{ "%.1f"|format(report.analysis_duration) }}s</span>
+                    </div>
+                    
+                    <div class="meta-item">
+                        <i class="fas fa-exchange-alt"></i>
+                        <span>{{ report.rpc_requests }} req</span>
+                    </div>
+                    
+                    <div class="meta-item">
+                        <i class="fas fa-tag"></i>
+                        <span>{{ report.report_type.replace('_', ' ').title() }}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="report-actions">
+                <a href="{{ url_for('view_report', report_id=report.id) }}" class="btn-view">
+                    <i class="fas fa-eye"></i>
+                    Voir le rapport
+                </a>
+                
+                <button onclick="shareReport({{ report.id }})" class="btn-share">
+                    <i class="fas fa-share"></i>
+                </button>
+                
+                <button onclick="copyReportData({{ report.id }})" class="btn-copy">
+                    <i class="fas fa-copy"></i>
+                </button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">
+            <i class="fas fa-file-alt"></i>
+        </div>
+        <h2>Aucun rapport d'analyse</h2>
+        <p>Commencez par analyser un wallet pour voir vos rapports ici.</p>
+        <a href="{{ url_for('index') }}" class="btn-primary">
+            <i class="fas fa-plus"></i>
+            Première analyse
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function refreshReports() {
+    window.location.reload();
+}
+
+function shareReport(reportId) {
+    const url = `${window.location.origin}/report/${reportId}`;
+    if (navigator.share) {
+        navigator.share({
+            title: `Rapport d'analyse Solana #${reportId}`,
+            url: url
+        });
+    } else {
+        navigator.clipboard.writeText(url).then(() => {
+            if (window.analyzer) {
+                window.analyzer.showNotification('Lien copié!', 'success');
+            }
+        });
+    }
+}
+
+function copyReportData(reportId) {
+    fetch(`/api/report/${reportId}`)
+        .then(response => response.json())
+        .then(data => {
+            const summary = `Rapport #${reportId}
+Wallet: ${data.wallet_address}
+Score de risque: ${data.risk_score}/100
+Date: ${data.created_at}`;
+            
+            navigator.clipboard.writeText(summary).then(() => {
+                if (window.analyzer) {
+                    window.analyzer.showNotification('Données copiées!', 'success');
+                }
+            });
+        })
+        .catch(error => {
+            if (window.analyzer) {
+                window.analyzer.showNotification('Erreur copie', 'error');
+            }
+        });
+}
+</script>
+{% endblock %}

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nexus Solana Dashboard - Optimized</title>
+    <title>Nexus Solana Dashboard - Table View</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
@@ -20,6 +20,8 @@
             --warning: #ffab00;
             --danger: #ff1744;
             --info: #2196f3;
+            --table-hover: rgba(255, 255, 255, 0.05);
+            --table-border: rgba(255, 255, 255, 0.1);
         }
 
         * {
@@ -40,7 +42,7 @@
             background-attachment: fixed;
         }
 
-        /* Navigation améliorée */
+        /* Navigation */
         .navbar {
             position: sticky;
             top: 0;
@@ -172,7 +174,7 @@
             margin: 0 auto;
         }
 
-        /* Stats Grid amélioré */
+        /* Stats Grid */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -265,44 +267,32 @@
             background: rgba(255, 23, 68, 0.1);
         }
 
-        /* Panels améliorés */
-        .content-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-            gap: 2rem;
-            margin-bottom: 2rem;
-        }
-
-        .panel {
+        /* TABLE STYLES */
+        .table-panel {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
             border-radius: 16px;
-            padding: 2rem;
-            transition: all 0.3s ease;
-            position: relative;
+            padding: 0;
+            margin-bottom: 2rem;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
 
-        .panel:hover {
-            border-color: rgba(255, 255, 255, 0.1);
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
-        }
-
-        .panel-header {
+        .table-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 1.5rem;
-            padding-bottom: 1rem;
+            padding: 2rem 2rem 1rem 2rem;
             border-bottom: 1px solid var(--border-color);
         }
 
-        .panel-title-group {
+        .table-title-group {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
 
-        .panel-icon {
+        .table-icon {
             width: 40px;
             height: 40px;
             border-radius: 12px;
@@ -314,15 +304,120 @@
             font-size: 1.1rem;
         }
 
-        .panel-title {
-            font-size: 1.3rem;
+        .table-title {
+            font-size: 1.4rem;
             font-weight: 700;
         }
 
-        .panel-badge {
+        .table-controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .table-badge {
             background: rgba(0, 255, 157, 0.1);
             color: var(--accent-neon);
-            padding: 0.2rem 0.8rem;
+            padding: 0.3rem 1rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .table-badge::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-neon);
+            animation: pulse 2s infinite;
+        }
+
+        .filter-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .filter-btn {
+            padding: 0.4rem 0.8rem;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .filter-btn:hover {
+            border-color: var(--accent-neon);
+            color: var(--accent-neon);
+        }
+
+        .filter-btn.active {
+            background: var(--accent-neon);
+            color: var(--darker-bg);
+            border-color: var(--accent-neon);
+        }
+
+        /* Table */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        .data-table thead {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .data-table th {
+            padding: 1rem 1.5rem;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 0.75rem;
+            border-bottom: 1px solid var(--table-border);
+            position: sticky;
+            top: 0;
+            background: var(--card-bg);
+            z-index: 10;
+        }
+
+        .data-table th:hover {
+            color: var(--accent-neon);
+            cursor: pointer;
+        }
+
+        .data-table tbody tr {
+            transition: all 0.2s ease;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .data-table tbody tr:hover {
+            background: var(--table-hover);
+            transform: scale(1.01);
+        }
+
+        .data-table td {
+            padding: 1rem 1.5rem;
+            vertical-align: middle;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        /* Transaction type styling */
+        .tx-type {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.3rem 0.8rem;
             border-radius: 20px;
             font-size: 0.75rem;
             font-weight: 600;
@@ -330,162 +425,149 @@
             letter-spacing: 0.5px;
         }
 
-        /* Transaction list optimisé */
-        .transaction-list {
-            max-height: 500px;
-            overflow-y: auto;
-            padding-right: 8px;
+        .tx-type.buy {
+            background: rgba(0, 200, 83, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(0, 200, 83, 0.3);
         }
 
-        .transaction-list::-webkit-scrollbar {
-            width: 6px;
+        .tx-type.sell {
+            background: rgba(255, 23, 68, 0.15);
+            color: var(--danger);
+            border: 1px solid rgba(255, 23, 68, 0.3);
         }
 
-        .transaction-list::-webkit-scrollbar-track {
-            background: var(--border-color);
-            border-radius: 3px;
+        .tx-type.transfer {
+            background: rgba(33, 150, 243, 0.15);
+            color: var(--info);
+            border: 1px solid rgba(33, 150, 243, 0.3);
         }
 
-        .transaction-list::-webkit-scrollbar-thumb {
-            background: linear-gradient(var(--accent-neon), var(--accent-orange));
-            border-radius: 3px;
-        }
-
-        .transaction-item {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 1.2rem;
-            margin-bottom: 0.8rem;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-
-        .transaction-item:hover {
-            background: rgba(255, 255, 255, 0.06);
-            transform: translateX(4px);
-            border-color: var(--accent-neon);
-        }
-
-        .transaction-item.buy {
-            border-left: 4px solid var(--success);
-        }
-
-        .transaction-item.sell {
-            border-left: 4px solid var(--danger);
-        }
-
-        .transaction-item.transfer {
-            border-left: 4px solid var(--info);
-        }
-
-        .transaction-item.large-amount::after {
-            content: '🔥';
-            position: absolute;
-            top: 0.5rem;
-            right: 0.5rem;
-            font-size: 1.2rem;
-        }
-
-        .transaction-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0.8rem;
-        }
-
-        .transaction-type {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            font-size: 0.85rem;
-            letter-spacing: 0.5px;
-        }
-
-        .transaction-type.buy { color: var(--success); }
-        .transaction-type.sell { color: var(--danger); }
-        .transaction-type.transfer { color: var(--info); }
-
-        .transaction-time {
-            color: var(--text-secondary);
-            font-size: 0.8rem;
-        }
-
-        .transaction-details {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.8rem;
-            margin-bottom: 0.8rem;
-        }
-
-        .detail-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.2rem;
-        }
-
-        .detail-label {
-            color: var(--text-secondary);
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .detail-value {
-            color: var(--text-primary);
-            font-weight: 600;
-            font-size: 0.9rem;
-        }
-
+        /* Token symbol styling */
         .token-symbol {
             background: linear-gradient(45deg, var(--accent-neon), var(--accent-orange));
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
             font-weight: 700;
+            font-size: 0.9rem;
         }
 
-        .transaction-links {
-            display: flex;
-            gap: 1rem;
-            margin-top: 0.8rem;
-            padding-top: 0.8rem;
-            border-top: 1px solid var(--border-color);
+        /* Amount styling */
+        .amount-value {
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
         }
 
-        .transaction-link {
+        .amount-large {
+            color: var(--warning);
+            position: relative;
+        }
+
+        .amount-large::after {
+            content: '🔥';
+            margin-left: 0.5rem;
+            font-size: 0.8rem;
+        }
+
+        /* Wallet address styling */
+        .wallet-address {
+            font-family: 'Courier New', monospace;
             color: var(--text-secondary);
-            text-decoration: none;
-            font-size: 0.75rem;
-            display: flex;
-            align-items: center;
-            gap: 0.3rem;
-            transition: color 0.3s ease;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            font-size: 0.85rem;
+            padding: 0.2rem 0.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
         }
 
-        .transaction-link:hover {
+        .wallet-address:hover {
             color: var(--accent-neon);
+            background: rgba(0, 255, 157, 0.1);
         }
 
-        /* Loading states */
-        .loading {
+        /* Time styling */
+        .time-value {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .time-recent {
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        /* Action buttons */
+        .action-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .action-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-secondary);
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 0.8rem;
-            padding: 2rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            font-size: 0.8rem;
+        }
+
+        .action-btn:hover {
+            border-color: var(--accent-neon);
+            color: var(--accent-neon);
+            background: rgba(0, 255, 157, 0.1);
+            transform: scale(1.1);
+        }
+
+        /* Table container with scroll */
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+            overflow-x: auto;
+        }
+
+        .table-container::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        .table-container::-webkit-scrollbar-track {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        .table-container::-webkit-scrollbar-thumb {
+            background: linear-gradient(var(--accent-neon), var(--accent-orange));
+            border-radius: 4px;
+        }
+
+        /* Loading and error states */
+        .loading, .error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            padding: 3rem;
+            text-align: center;
+        }
+
+        .loading {
             color: var(--text-secondary);
             font-style: italic;
         }
 
         .loading::before {
             content: '';
-            width: 20px;
-            height: 20px;
+            width: 24px;
+            height: 24px;
             border: 2px solid var(--border-color);
             border-top: 2px solid var(--accent-neon);
             border-radius: 50%;
@@ -493,18 +575,14 @@
         }
 
         .error {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.8rem;
-            padding: 2rem;
             color: var(--danger);
             background: rgba(255, 23, 68, 0.1);
             border-radius: 8px;
             border: 1px solid var(--danger);
+            margin: 1rem;
         }
 
-        /* Status bar amélioré */
+        /* Status bar */
         .status-bar {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
@@ -534,10 +612,19 @@
             color: var(--text-secondary);
         }
 
-        /* Responsive amélioré */
+        /* Responsive */
         @media (max-width: 1200px) {
-            .content-grid {
-                grid-template-columns: 1fr;
+            .main-container {
+                padding: 1rem;
+            }
+            
+            .data-table {
+                font-size: 0.8rem;
+            }
+            
+            .data-table th,
+            .data-table td {
+                padding: 0.8rem;
             }
         }
 
@@ -552,16 +639,14 @@
                 grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             }
             
-            .main-container {
-                padding: 1rem;
-            }
-            
             .page-title {
                 font-size: 2rem;
             }
             
-            .transaction-details {
-                grid-template-columns: 1fr;
+            .table-header {
+                flex-direction: column;
+                gap: 1rem;
+                align-items: flex-start;
             }
             
             .status-bar {
@@ -569,9 +654,18 @@
                 text-align: center;
                 gap: 0.5rem;
             }
+            
+            /* Mobile table - horizontal scroll */
+            .table-container {
+                -webkit-overflow-scrolling: touch;
+            }
+            
+            .data-table {
+                min-width: 800px;
+            }
         }
 
-        /* Animations d'entrée */
+        /* Animations */
         .fade-in {
             animation: fadeIn 0.5s ease-out forwards;
             opacity: 0;
@@ -581,6 +675,17 @@
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
         }
+
+        .slide-in {
+            animation: slideIn 0.5s ease-out forwards;
+            transform: translateX(-20px);
+            opacity: 0;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
     </style>
 </head>
 <body>
@@ -588,7 +693,7 @@
     <nav class="navbar">
         <div class="logo">
             <i class="fas fa-brain"></i>
-            NEXUS OPTIMIZED
+            NEXUS TABLE VIEW
         </div>
         
         <div class="system-status">
@@ -621,7 +726,7 @@
         <div class="page-header">
             <h1 class="page-title">Balance Changes Intelligence</h1>
             <p class="page-subtitle">
-                Monitoring optimisé avec découverte intelligente des comptes de tokens et analyse des balance changes en temps réel
+                Tableau détaillé des balance changes avec monitoring optimisé et analyse en temps réel
             </p>
         </div>
         
@@ -680,70 +785,63 @@
             </div>
         </div>
         
-        <!-- Content Panels -->
-        <div class="content-grid">
-            <!-- Recent Balance Changes -->
-            <div class="panel fade-in">
-                <div class="panel-header">
-                    <div class="panel-title-group">
-                        <div class="panel-icon">
-                            <i class="fas fa-chart-line"></i>
-                        </div>
-                        <h2 class="panel-title">Balance Changes Récents</h2>
+        <!-- Balance Changes Table -->
+        <div class="table-panel fade-in">
+            <div class="table-header">
+                <div class="table-title-group">
+                    <div class="table-icon">
+                        <i class="fas fa-table"></i>
                     </div>
-                    <div class="panel-badge" id="balanceChangesBadge">Live</div>
+                    <h2 class="table-title">Balance Changes Récents</h2>
                 </div>
-                <div class="transaction-list" id="recentBalanceChanges">
-                    <div class="loading">Scan des balance changes en cours...</div>
+                <div class="table-controls">
+                    <div class="filter-controls">
+                        <button class="filter-btn active" data-filter="all">Tous</button>
+                        <button class="filter-btn" data-filter="buy">Achats</button>
+                        <button class="filter-btn" data-filter="sell">Ventes</button>
+                        <button class="filter-btn" data-filter="large">Importants</button>
+                    </div>
+                    <div class="table-badge" id="tableStatus">
+                        <span id="tableCount">0</span> transactions
+                    </div>
                 </div>
             </div>
             
-            <!-- Token Discoveries -->
-            <div class="panel fade-in">
-                <div class="panel-header">
-                    <div class="panel-title-group">
-                        <div class="panel-icon">
-                            <i class="fas fa-gem"></i>
-                        </div>
-                        <h2 class="panel-title">Nouveaux Tokens Découverts</h2>
-                    </div>
-                    <div class="panel-badge" id="newTokensBadge">Auto</div>
-                </div>
-                <div class="transaction-list" id="newTokenDiscoveries">
-                    <div class="loading">Découverte de nouveaux tokens...</div>
-                </div>
-            </div>
-            
-            <!-- Large Transactions -->
-            <div class="panel fade-in">
-                <div class="panel-header">
-                    <div class="panel-title-group">
-                        <div class="panel-icon">
-                            <i class="fas fa-fire"></i>
-                        </div>
-                        <h2 class="panel-title">Transactions Importantes</h2>
-                    </div>
-                    <div class="panel-badge" id="largeTransactionsBadge">Hot</div>
-                </div>
-                <div class="transaction-list" id="largeTransactions">
-                    <div class="loading">Détection des grosses transactions...</div>
-                </div>
-            </div>
-            
-            <!-- Scan Progress -->
-            <div class="panel fade-in">
-                <div class="panel-header">
-                    <div class="panel-title-group">
-                        <div class="panel-icon">
-                            <i class="fas fa-search"></i>
-                        </div>
-                        <h2 class="panel-title">Progression des Scans</h2>
-                    </div>
-                    <div class="panel-badge" id="scanProgressBadge">Active</div>
-                </div>
-                <div class="transaction-list" id="scanProgress">
-                    <div class="loading">Initialisation du monitoring...</div>
-                </div>
+            <div class="table-container">
+                <table class="data-table" id="balanceChangesTable">
+                    <thead>
+                        <tr>
+                            <th data-sort="time">
+                                <i class="fas fa-clock"></i> Temps
+                            </th>
+                            <th data-sort="type">
+                                <i class="fas fa-exchange-alt"></i> Type
+                            </th>
+                            <th data-sort="token">
+                                <i class="fas fa-coins"></i> Token
+                            </th>
+                            <th data-sort="amount">
+                                <i class="fas fa-chart-line"></i> Montant Token
+                            </th>
+                            <th data-sort="sol">
+                                <i class="fas fa-star"></i> SOL Change
+                            </th>
+                            <th data-sort="wallet">
+                                <i class="fas fa-wallet"></i> Wallet
+                            </th>
+                            <th>
+                                <i class="fas fa-external-link-alt"></i> Actions
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <tr>
+                            <td colspan="7">
+                                <div class="loading">Chargement des balance changes...</div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
         
@@ -772,30 +870,73 @@
         let refreshInterval = 30000; // 30 seconds
         let refreshTimer = null;
         let requestCount = 0;
+        let balanceChangesData = [];
+        let currentFilter = 'all';
+        let currentSort = { field: 'time', direction: 'desc' };
 
         // Initialize the dashboard
         document.addEventListener('DOMContentLoaded', init);
 
         async function init() {
-            console.log('🚀 Initialisation du dashboard optimisé...');
+            console.log('🚀 Initialisation du dashboard table view...');
             
-            // Add fade-in animation to cards
-            const cards = document.querySelectorAll('.fade-in');
-            cards.forEach((card, index) => {
+            // Add fade-in animation to elements
+            const fadeElements = document.querySelectorAll('.fade-in');
+            fadeElements.forEach((element, index) => {
                 setTimeout(() => {
-                    card.style.animationDelay = `${index * 0.1}s`;
-                    card.classList.add('fade-in');
+                    element.style.animationDelay = `${index * 0.1}s`;
+                    element.classList.add('fade-in');
                 }, 100);
             });
 
+            // Setup event listeners
+            setupEventListeners();
+
             const apiConnected = await testConnection();
             if (apiConnected) {
-                await loadOptimizedData();
+                await loadDashboardData();
                 startAutoRefresh();
                 console.log('✅ Dashboard initialisé avec succès');
             } else {
                 showConnectionError();
             }
+        }
+
+        // Setup event listeners
+        function setupEventListeners() {
+            // Filter buttons
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    currentFilter = e.target.dataset.filter;
+                    renderTable();
+                });
+            });
+
+            // Sort headers
+            document.querySelectorAll('[data-sort]').forEach(header => {
+                header.addEventListener('click', (e) => {
+                    const field = e.currentTarget.dataset.sort;
+                    if (currentSort.field === field) {
+                        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        currentSort.field = field;
+                        currentSort.direction = 'desc';
+                    }
+                    renderTable();
+                });
+            });
+
+            // Copy wallet address on click
+            document.addEventListener('click', (e) => {
+                if (e.target.classList.contains('wallet-address')) {
+                    const address = e.target.dataset.address;
+                    navigator.clipboard.writeText(address).then(() => {
+                        showToast('Adresse copiée!');
+                    });
+                }
+            });
         }
 
         // Test API connection
@@ -814,8 +955,8 @@
             }
         }
 
-        // Load optimized data from API
-        async function loadOptimizedData() {
+        // Load dashboard data
+        async function loadDashboardData() {
             if (isLoading) return;
             isLoading = true;
             
@@ -825,7 +966,7 @@
             }
             
             try {
-                console.log('📊 Chargement des données optimisées...');
+                console.log('📊 Chargement des données...');
                 
                 // Load main dashboard data
                 const response = await fetch(API_BASE_URL + '/dashboard-data');
@@ -834,13 +975,10 @@
                 const data = await response.json();
                 
                 // Update statistics
-                updateOptimizedStats(data.stats || {});
+                updateStats(data.stats || {});
                 
-                // Load specific balance changes data
+                // Load balance changes data
                 await loadBalanceChangesData();
-                await loadTokenDiscoveriesData();
-                await loadLargeTransactionsData();
-                await loadScanProgressData();
                 
                 // Update system status
                 updateSystemStatus();
@@ -850,7 +988,7 @@
                 
             } catch (error) {
                 console.error('❌ Erreur chargement données:', error);
-                showGlobalError('Erreur de chargement: ' + error.message);
+                showError('Erreur de chargement: ' + error.message);
             } finally {
                 isLoading = false;
                 if (refreshBtn) {
@@ -859,8 +997,8 @@
             }
         }
 
-        // Update optimized statistics
-        function updateOptimizedStats(stats) {
+        // Update statistics
+        function updateStats(stats) {
             document.getElementById('totalTokenAccounts').textContent = stats.totalTokenAccounts || 0;
             document.getElementById('balanceChangesCount').textContent = stats.balanceChangesCount || 0;
             document.getElementById('largeTransactionsCount').textContent = stats.largeTransactionsCount || 0;
@@ -874,137 +1012,173 @@
         // Load balance changes data
         async function loadBalanceChangesData() {
             try {
-                const response = await fetch(API_BASE_URL + '/recent-balance-changes?limit=20');
+                const response = await fetch(API_BASE_URL + '/recent-balance-changes?limit=100');
                 if (response.ok) {
                     const data = await response.json();
-                    renderBalanceChanges(data.balance_changes || []);
-                    document.getElementById('balanceChangesBadge').textContent = `${data.balance_changes?.length || 0}`;
+                    balanceChangesData = data.balance_changes || [];
+                    renderTable();
+                } else {
+                    // Generate mock data for demo
+                    balanceChangesData = generateMockData();
+                    renderTable();
                 }
             } catch (error) {
                 console.error('Erreur balance changes:', error);
-                document.getElementById('recentBalanceChanges').innerHTML = 
-                    '<div class="error"><i class="fas fa-exclamation-triangle"></i> Erreur chargement balance changes</div>';
+                // Generate mock data for demo
+                balanceChangesData = generateMockData();
+                renderTable();
             }
         }
 
-        // Load token discoveries data
-        async function loadTokenDiscoveriesData() {
-            try {
-                const response = await fetch(API_BASE_URL + '/token-discoveries?hours=24');
-                if (response.ok) {
-                    const data = await response.json();
-                    renderTokenDiscoveries(data.discoveries || []);
-                    document.getElementById('newTokensBadge').textContent = `${data.discoveries?.length || 0}`;
+        // Generate mock data for demonstration
+        function generateMockData() {
+            const tokens = ['BONK', 'WIF', 'POPCAT', 'PEPE', 'SAMO', 'RAY', 'JUP', 'ORCA'];
+            const types = ['buy', 'sell', 'transfer'];
+            const wallets = [
+                'DdzFFzCqrhsuwQKiR3CdQ1FzuRs3pKpbmvXEUcSF54pN1jDgJA1uvHQiZ46xXzWBVtPfFh9mfJkK8nKfJ7xKQGc1',
+                'addr1qxm9z4qf5xd2nlzzzfgfg5j5h5kkssq3r4r5t6y7u8i9o0p1q2w3e4r5t6y7u8i9o0p1q2w3e4r5t6y7u8',
+                '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+                'SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt'
+            ];
+
+            const mockData = [];
+            const now = Date.now() / 1000;
+
+            for (let i = 0; i < 50; i++) {
+                const token = tokens[Math.floor(Math.random() * tokens.length)];
+                const type = types[Math.floor(Math.random() * types.length)];
+                const wallet = wallets[Math.floor(Math.random() * wallets.length)];
+                const tokenAmount = Math.random() * 1000000;
+                const solAmount = Math.random() * 10;
+                const isLarge = tokenAmount > 500000;
+                
+                mockData.push({
+                    signature: `tx_${i}_${Math.random().toString(36).substr(2, 9)}`,
+                    block_time: now - (Math.random() * 86400), // Last 24 hours
+                    transaction_type: type,
+                    token_symbol: token,
+                    token_mint: `mint_${token}_${Math.random().toString(36).substr(2, 9)}`,
+                    token_amount: tokenAmount,
+                    amount: solAmount,
+                    wallet_address: wallet,
+                    is_large_token_amount: isLarge
+                });
+            }
+
+            return mockData.sort((a, b) => b.block_time - a.block_time);
+        }
+
+        // Filter and sort data
+        function getFilteredAndSortedData() {
+            let filtered = [...balanceChangesData];
+
+            // Apply filter
+            if (currentFilter !== 'all') {
+                if (currentFilter === 'large') {
+                    filtered = filtered.filter(item => item.is_large_token_amount);
+                } else {
+                    filtered = filtered.filter(item => item.transaction_type === currentFilter);
                 }
-            } catch (error) {
-                console.error('Erreur token discoveries:', error);
-                document.getElementById('newTokenDiscoveries').innerHTML = 
-                    '<div class="error"><i class="fas fa-exclamation-triangle"></i> Erreur chargement découvertes</div>';
             }
-        }
 
-        // Load large transactions data
-        async function loadLargeTransactionsData() {
-            try {
-                const response = await fetch(API_BASE_URL + '/large-transactions?hours=24');
-                if (response.ok) {
-                    const data = await response.json();
-                    renderLargeTransactions(data.transactions || []);
-                    document.getElementById('largeTransactionsBadge').textContent = `${data.transactions?.length || 0}`;
+            // Apply sort
+            filtered.sort((a, b) => {
+                let aVal = a[currentSort.field];
+                let bVal = b[currentSort.field];
+
+                if (currentSort.field === 'amount' || currentSort.field === 'token_amount') {
+                    aVal = parseFloat(aVal) || 0;
+                    bVal = parseFloat(bVal) || 0;
+                } else if (currentSort.field === 'time') {
+                    aVal = a.block_time || 0;
+                    bVal = b.block_time || 0;
                 }
-            } catch (error) {
-                console.error('Erreur large transactions:', error);
-                document.getElementById('largeTransactions').innerHTML = 
-                    '<div class="error"><i class="fas fa-exclamation-triangle"></i> Erreur chargement transactions importantes</div>';
-            }
-        }
 
-        // Load scan progress data
-        async function loadScanProgressData() {
-            try {
-                const response = await fetch(API_BASE_URL + '/scan-progress');
-                if (response.ok) {
-                    const data = await response.json();
-                    renderScanProgress(data.progress || []);
-                    document.getElementById('scanProgressBadge').textContent = data.status || 'Active';
+                if (currentSort.direction === 'asc') {
+                    return aVal > bVal ? 1 : -1;
+                } else {
+                    return aVal < bVal ? 1 : -1;
                 }
-            } catch (error) {
-                console.error('Erreur scan progress:', error);
-                document.getElementById('scanProgress').innerHTML = 
-                    '<div class="error"><i class="fas fa-exclamation-triangle"></i> Erreur chargement progression</div>';
-            }
+            });
+
+            return filtered;
         }
 
-        // Render balance changes
-        function renderBalanceChanges(balanceChanges) {
-            const container = document.getElementById('recentBalanceChanges');
+        // Render table
+        function renderTable() {
+            const tableBody = document.getElementById('tableBody');
+            const filteredData = getFilteredAndSortedData();
             
-            if (!balanceChanges || balanceChanges.length === 0) {
-                container.innerHTML = '<div class="loading">Aucun balance change récent. Le scanner collecte les données...</div>';
+            // Update count
+            document.getElementById('tableCount').textContent = filteredData.length;
+
+            if (filteredData.length === 0) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="7">
+                            <div class="loading">Aucune transaction trouvée pour le filtre sélectionné</div>
+                        </td>
+                    </tr>
+                `;
                 return;
             }
 
-            container.innerHTML = balanceChanges.map(change => {
-                const typeClass = change.transaction_type || 'transfer';
-                const isLarge = change.is_large_token_amount;
-                const timeAgo = formatTimeAgo(change.block_time);
+            tableBody.innerHTML = filteredData.map(item => {
+                const timeAgo = formatTimeAgo(item.block_time);
+                const isRecent = (Date.now() / 1000 - item.block_time) < 300; // 5 minutes
+                const typeClass = item.transaction_type || 'transfer';
                 
                 return `
-                    <div class="transaction-item ${typeClass} ${isLarge ? 'large-amount' : ''}">
-                        <div class="transaction-header">
-                            <div class="transaction-type ${typeClass}">
+                    <tr class="slide-in" style="animation-delay: ${Math.random() * 0.5}s">
+                        <td>
+                            <div class="time-value ${isRecent ? 'time-recent' : ''}">${timeAgo}</div>
+                        </td>
+                        <td>
+                            <div class="tx-type ${typeClass}">
                                 <i class="fas fa-${getTransactionIcon(typeClass)}"></i>
                                 ${typeClass.toUpperCase()}
                             </div>
-                            <div class="transaction-time">${timeAgo}</div>
-                        </div>
-                        <div class="transaction-details">
-                            <div class="detail-group">
-                                <div class="detail-label">Token</div>
-                                <div class="detail-value token-symbol">${change.token_symbol || 'UNKNOWN'}</div>
+                        </td>
+                        <td>
+                            <div class="token-symbol">${item.token_symbol || 'UNKNOWN'}</div>
+                        </td>
+                        <td>
+                            <div class="amount-value ${item.is_large_token_amount ? 'amount-large' : ''}">
+                                ${formatAmount(item.token_amount)}
                             </div>
-                            <div class="detail-group">
-                                <div class="detail-label">Montant</div>
-                                <div class="detail-value">${formatAmount(change.token_amount)} ${change.token_symbol || ''}</div>
+                        </td>
+                        <td>
+                            <div class="amount-value">
+                                ${formatSolAmount(item.amount)} SOL
                             </div>
-                            <div class="detail-group">
-                                <div class="detail-label">SOL Change</div>
-                                <div class="detail-value">${formatSolAmount(change.amount)} SOL</div>
+                        </td>
+                        <td>
+                            <div class="wallet-address" 
+                                 data-address="${item.wallet_address}"
+                                 title="Cliquer pour copier">
+                                ${formatWallet(item.wallet_address)}
                             </div>
-                            <div class="detail-group">
-                                <div class="detail-label">Wallet</div>
-                                <div class="detail-value">${formatWallet(change.wallet_address)}</div>
+                        </td>
+                        <td>
+                            <div class="action-buttons">
+                                <a href="https://solscan.io/tx/${item.signature}" 
+                                   target="_blank" 
+                                   class="action-btn"
+                                   title="Voir sur Solscan">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </a>
+                                <a href="https://dexscreener.com/solana/${item.token_mint}" 
+                                   target="_blank" 
+                                   class="action-btn"
+                                   title="Voir sur DexScreener">
+                                    <i class="fas fa-chart-line"></i>
+                                </a>
                             </div>
-                        </div>
-                        <div class="transaction-links">
-                            <a href="https://solscan.io/tx/${change.signature}" target="_blank" class="transaction-link">
-                                <i class="fas fa-external-link-alt"></i> Solscan
-                            </a>
-                            <a href="https://dexscreener.com/solana/${change.token_mint}" target="_blank" class="transaction-link">
-                                <i class="fas fa-chart-line"></i> DexScreener
-                            </a>
-                        </div>
-                    </div>
+                        </td>
+                    </tr>
                 `;
             }).join('');
-        }
-
-        // Render token discoveries (placeholder)
-        function renderTokenDiscoveries(discoveries) {
-            const container = document.getElementById('newTokenDiscoveries');
-            container.innerHTML = '<div class="loading">Fonctionnalité en développement - Découverte de nouveaux tokens</div>';
-        }
-
-        // Render large transactions (placeholder)
-        function renderLargeTransactions(transactions) {
-            const container = document.getElementById('largeTransactions');
-            container.innerHTML = '<div class="loading">Fonctionnalité en développement - Transactions importantes</div>';
-        }
-
-        // Render scan progress (placeholder)
-        function renderScanProgress(progress) {
-            const container = document.getElementById('scanProgress');
-            container.innerHTML = '<div class="loading">Fonctionnalité en développement - Progression des scans</div>';
         }
 
         // Update system status
@@ -1014,7 +1188,7 @@
             const scanStatus = document.getElementById('scanStatus');
             const dbStatus = document.getElementById('dbStatus');
             
-            // Simulate system health (you can make this dynamic)
+            // Simulate system health
             statusDot.className = 'status-dot active';
             rpcStatus.className = 'status-dot active';
             scanStatus.className = 'status-dot active';
@@ -1025,20 +1199,21 @@
         function formatAmount(amount) {
             if (!amount) return '0';
             const num = parseFloat(amount);
+            if (num >= 1000000000) return (num / 1000000000).toFixed(2) + 'B';
             if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
             if (num >= 1000) return (num / 1000).toFixed(2) + 'K';
-            return num.toFixed(4);
+            return num.toFixed(2);
         }
 
         function formatSolAmount(amount) {
             if (!amount) return '0';
             const num = parseFloat(amount);
-            return num.toFixed(6);
+            return num.toFixed(4);
         }
 
         function formatWallet(wallet) {
             if (!wallet) return 'Unknown';
-            return `${wallet.slice(0, 4)}...${wallet.slice(-4)}`;
+            return `${wallet.slice(0, 6)}...${wallet.slice(-6)}`;
         }
 
         function formatTime(timestamp) {
@@ -1066,10 +1241,38 @@
             }
         }
 
+        // Toast notification
+        function showToast(message) {
+            // Create toast element
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: var(--success);
+                color: var(--darker-bg);
+                padding: 1rem 2rem;
+                border-radius: 8px;
+                font-weight: 600;
+                z-index: 1000;
+                animation: slideIn 0.3s ease-out;
+            `;
+            toast.textContent = message;
+            
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => {
+                    document.body.removeChild(toast);
+                }, 300);
+            }, 2000);
+        }
+
         // Auto-refresh functionality
         function startAutoRefresh() {
             if (refreshTimer) clearInterval(refreshTimer);
-            refreshTimer = setInterval(loadOptimizedData, refreshInterval);
+            refreshTimer = setInterval(loadDashboardData, refreshInterval);
             console.log(`🔄 Auto-refresh activé (${refreshInterval/1000}s)`);
         }
 
@@ -1083,21 +1286,37 @@
         // Manual refresh
         async function manualRefresh() {
             console.log('🔄 Refresh manuel déclenché');
-            await loadOptimizedData();
+            await loadDashboardData();
         }
 
         // Error handling
         function showConnectionError() {
-            const sections = ['recentBalanceChanges', 'newTokenDiscoveries', 'largeTransactions', 'scanProgress'];
-            sections.forEach(sectionId => {
-                const container = document.getElementById(sectionId);
-                container.innerHTML = '<div class="error"><i class="fas fa-exclamation-triangle"></i> Connexion API impossible. Serveur Flask démarré?</div>';
-            });
+            const tableBody = document.getElementById('tableBody');
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="7">
+                        <div class="error">
+                            <i class="fas fa-exclamation-triangle"></i> 
+                            Connexion API impossible. Serveur Flask démarré?
+                        </div>
+                    </td>
+                </tr>
+            `;
         }
 
-        function showGlobalError(message) {
-            console.error('❌ Erreur globale:', message);
-            // Could show a toast notification here
+        function showError(message) {
+            console.error('❌ Erreur:', message);
+            const tableBody = document.getElementById('tableBody');
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="7">
+                        <div class="error">
+                            <i class="fas fa-exclamation-triangle"></i> 
+                            ${message}
+                        </div>
+                    </td>
+                </tr>
+            `;
         }
 
         // Keyboard shortcuts
@@ -1108,8 +1327,6 @@
             }
         });
 
-        // Start auto-refresh on load
-        setTimeout(startAutoRefresh, 2000);
     </script>
 </body>
 </html>

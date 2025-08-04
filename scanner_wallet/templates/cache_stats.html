@@ -1,0 +1,205 @@
+<!-- templates/cache_stats.html -->
+{% extends "base.html" %}
+
+{% block title %}Statistiques Cache - Solana Analyzer{% endblock %}
+
+{% block content %}
+<div class="stats-page">
+    <div class="page-header">
+        <div class="header-content">
+            <h1><i class="fas fa-chart-bar"></i> Statistiques du Système</h1>
+            <p>Performance et utilisation du cache en temps réel</p>
+        </div>
+        
+        <div class="header-actions">
+            <button onclick="refreshStats()" class="btn-primary">
+                <i class="fas fa-sync-alt"></i>
+                Actualiser
+            </button>
+            
+            <a href="/export-ml-dataset" class="btn-secondary">
+                <i class="fas fa-download"></i>
+                Export ML
+            </a>
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <!-- Statistiques globales -->
+        <div class="stats-section">
+            <h2><i class="fas fa-globe"></i> Statistiques Globales</h2>
+            
+            <div class="stats-cards">
+                <div class="stat-card">
+                    <i class="fas fa-search"></i>
+                    <div class="stat-content">
+                        <div class="stat-value stat-total-analyses">0</div>
+                        <div class="stat-label">Analyses totales</div>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <i class="fas fa-shield-alt"></i>
+                    <div class="stat-content">
+                        <div class="stat-value stat-avg-risk">0/100</div>
+                        <div class="stat-label">Score moyen</div>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <i class="fas fa-exchange-alt"></i>
+                    <div class="stat-content">
+                        <div class="stat-value stat-total-requests">0</div>
+                        <div class="stat-label">Requêtes RPC</div>
+                    </div>
+                </div>
+                
+                <div class="stat-card">
+                    <i class="fas fa-users"></i>
+                    <div class="stat-content">
+                        <div class="stat-value stat-active-users">1</div>
+                        <div class="stat-label">Utilisateurs actifs</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cache Creator -->
+        {% if cache_stats %}
+        <div class="stats-section">
+            <h2><i class="fas fa-database"></i> Cache des Créateurs</h2>
+            
+            <div class="cache-overview">
+                <div class="cache-metric">
+                    <label>Entrées en cache:</label>
+                    <span class="value">{{ cache_stats.get('size', 0) }}</span>
+                </div>
+                
+                <div class="cache-metric">
+                    <label>Hits:</label>
+                    <span class="value success">{{ cache_stats.get('hits', 0) }}</span>
+                </div>
+                
+                <div class="cache-metric">
+                    <label>Misses:</label>
+                    <span class="value warning">{{ cache_stats.get('misses', 0) }}</span>
+                </div>
+                
+                <div class="cache-metric">
+                    <label>Taux de réussite:</label>
+                    <span class="value stat-cache-rate">
+                        {% set total = cache_stats.get('hits', 0) + cache_stats.get('misses', 0) %}
+                        {% if total > 0 %}
+                            {{ "%.1f"|format((cache_stats.get('hits', 0) / total) * 100) }}%
+                        {% else %}
+                            0%
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Cache Transactions -->
+        {% if transaction_stats %}
+        <div class="stats-section">
+            <h2><i class="fas fa-history"></i> Cache des Transactions</h2>
+            
+            <div class="cache-overview">
+                <div class="cache-metric">
+                    <label>Entrées en cache:</label>
+                    <span class="value">{{ transaction_stats.get('size', 0) }}</span>
+                </div>
+                
+                <div class="cache-metric">
+                    <label>Hits:</label>
+                    <span class="value success">{{ transaction_stats.get('hits', 0) }}</span>
+                </div>
+                
+                <div class="cache-metric">
+                    <label>Misses:</label>
+                    <span class="value warning">{{ transaction_stats.get('misses', 0) }}</span>
+                </div>
+                
+                <div class="cache-metric">
+                    <label>Taux de réussite:</label>
+                    <span class="value">
+                        {% set total_tx = transaction_stats.get('hits', 0) + transaction_stats.get('misses', 0) %}
+                        {% if total_tx > 0 %}
+                            {{ "%.1f"|format((transaction_stats.get('hits', 0) / total_tx) * 100) }}%
+                        {% else %}
+                            0%
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Système -->
+        <div class="stats-section">
+            <h2><i class="fas fa-server"></i> État du Système</h2>
+            
+            <div class="system-info">
+                <div class="system-metric">
+                    <label>Analyzer:</label>
+                    <span class="value {{ 'success' if analyzer_initialized else 'error' }}">
+                        {{ '✅ Opérationnel' if analyzer_initialized else '❌ Erreur' }}
+                    </span>
+                </div>
+                
+                <div class="system-metric">
+                    <label>QuickNode:</label>
+                    <span class="value">{{ quicknode_endpoint }}</span>
+                </div>
+                
+                <div class="system-metric">
+                    <label>Status:</label>
+                    <span class="system-status operational">Opérationnel</span>
+                </div>
+                
+                <div class="system-metric">
+                    <label>Dernière mise à jour:</label>
+                    <span class="value" id="lastUpdate">{{ moment().format('DD/MM/YYYY HH:mm:ss') if moment else 'Maintenant' }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function refreshStats() {
+    try {
+        const response = await fetch('/api/cache-stats');
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        // Mise à jour des métriques du cache
+        if (data.creator_cache) {
+            const total = data.creator_cache.hits + data.creator_cache.misses;
+            const hitRate = total > 0 ? ((data.creator_cache.hits / total) * 100).toFixed(1) : '0';
+            document.querySelector('.stat-cache-rate').textContent = hitRate + '%';
+        }
+        
+        // Mise à jour de l'horodatage
+        document.getElementById('lastUpdate').textContent = new Date().toLocaleString('fr-FR');
+        
+        if (window.analyzer) {
+            window.analyzer.showNotification('Statistiques actualisées', 'success');
+        }
+        
+    } catch (error) {
+        console.error('Erreur actualisation stats:', error);
+        if (window.analyzer) {
+            window.analyzer.showNotification('Erreur actualisation', 'error');
+        }
+    }
+}
+
+// Auto-refresh toutes les 30 secondes
+setInterval(refreshStats, 30000);
+</script>
+{% endblock %}
