@@ -1106,6 +1106,7 @@ class SolanaWalletMonitor:
         logger.error("❌ Tous les endpoints RPC ont échoué")
         return None
 
+
     def discover_token_accounts(self, wallet_address: str, force_full_scan: bool = False) -> Tuple[int, int]:
         """
         Découvre les comptes de tokens pour un wallet avec batching RPC optimisé
@@ -1128,7 +1129,270 @@ class SolanaWalletMonitor:
                 last_full_scan == 0
         )
 
-        if should_full_scan:
+        if 1==1:
+            logger.info(f"🔄 SCAN COMPLET pour {wallet_address[:8]}... (dernier scan: {time_since_last_scan//3600}h ago)")
+            scan_type = "full"
+        else:
+            logger.info(f"📝 Scan incrémental pour {wallet_address[:8]}... (dernier scan: {time_since_last_scan//60}min ago)")
+            scan_type = "incremental"
+
+        # SECTION 1: RÉCUPÉRATION DES COMPTES - LOGIQUE DIFFÉRENTE SELON LE TYPE DE SCAN
+        token_accounts_data = None
+        discovery_method = "unknown"
+
+        if scan_type == "incremental":
+            # OPTION 1: SCAN INCRÉMENTAL BASÉ SUR LA DB + VÉRIFICATION SÉLECTIVE
+            logger.info(f"📝 Mode incrémental: vérification des comptes existants + nouveaux...")
+            
+            # Récupérer les comptes existants de la DB
+            existing_accounts = self.load_token_accounts_from_db(wallet_address)
+            
+            if not existing_accounts:
+                logger.info(f"📝 Aucun compte existant, passage en mode complet...")
+                scan_type = "full"
+                should_full_scan = True
+            else:
+                # APPROCHE INCRÉMENTALE : vérifier seulement quelques comptes + nouveaux
+                return self._perform_incremental_scan(wallet_address, existing_accounts, batching_enabled)
+        
+        if scan_type == "full":
+            # SCAN COMPLET : récupérer TOUS les comptes
+            logger.info(f"🔄 Mode complet: récupération de tous les comptes...")
+            token_accounts_data = self._perform_full_scan(wallet_address, batching_enabled)
+            discovery_method = "full_scan"
+
+        # VALIDATION DES DONNÉES
+        if not token_accounts_data:
+            logger.warning(f"⚠️ Aucun compte de token trouvé pour {wallet_address[:8]}...")
+            return 0, 0
+
+        total_accounts = len(token_accounts_data)
+        logger.info(f"📊 Trouvé {total_accounts} comptes de tokens pour {wallet_address[:8]}... "
+                    f"(méthode: {discovery_method})")
+
+        # Le reste du code pour le traitement des données...
+        return self._process_and_save_accounts(wallet_address, token_accounts_data, scan_type, should_full_scan, current_time, scan_start_time)
+
+
+    def _perform_incremental_scan(self, wallet_address: str, existing_accounts: list, batching_enabled: bool) -> Tuple[int, int]:
+        """
+        Effectue un scan incrémental optimisé
+        """
+        scan_start_time = time.time()
+        
+        # STRATÉGIE 1: Vérifier seulement les comptes avec balance > 0 + échantillon des autres
+        high_balance_accounts = [acc for acc in existing_accounts if acc.get('balance', 0) > 0]
+        zero_balance_accounts = [acc for acc in existing_accounts if acc.get('balance', 0) == 0]
+        
+        # Échantillonner quelques comptes à balance zéro (10% max)
+        import random
+        sample_size = min(len(zero_balance_accounts), max(1, len(zero_balance_accounts) // 10))
+        sampled_zero_accounts = random.sample(zero_balance_accounts, sample_size) if zero_balance_accounts else []
+        
+        accounts_to_check = high_balance_accounts + sampled_zero_accounts
+        
+        logger.info(f"📝 Scan incrémental: vérification de {len(accounts_to_check)} comptes "
+                    f"({len(high_balance_accounts)} avec balance + {len(sampled_zero_accounts)} échantillon)")
+        
+        # Vérifier les comptes sélectionnés
+        updated_accounts = []
+        new_accounts = []
+        
+        for account in accounts_to_check:
+            try:
+                # Récupérer les données actuelles du compte
+                current_data = self._get_single_account_data(account['ata_pubkey'])
+                
+                if current_data:
+                    current_balance = current_data.get('balance', 0)
+                    stored_balance = account.get('balance', 0)
+                    
+                    # Vérifier si les données ont changé
+                    if abs(current_balance - stored_balance) > 0.0001:  # Seuil de changement
+                        updated_accounts.append(current_data)
+                        logger.debug(f"🔄 Compte mis à jour: {account['ata_pubkey'][:8]}... "
+                                    f"({stored_balance} → {current_balance})")
+            
+            except Exception as e:
+                logger.debug(f"⚠️ Erreur vérification compte {account['ata_pubkey'][:8]}...: {e}")
+                continue
+        
+        # STRATÉGIE 2: Détecter les NOUVEAUX comptes
+        # Récupérer TOUS les comptes (rapide) et comparer les pubkeys
+        try:
+            all_current_accounts = self._get_all_token_accounts_light(wallet_address)
+            existing_pubkeys = {acc['ata_pubkey'] for acc in existing_accounts}
+            
+            for account_data in all_current_accounts:
+                if account_data['ata_pubkey'] not in existing_pubkeys:
+                    new_accounts.append(account_data)
+                    logger.debug(f"🆕 Nouveau compte détecté: {account_data['ata_pubkey'][:8]}...")
+        
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur détection nouveaux comptes: {e}")
+            # Fallback vers scan complet
+            logger.info(f"🔄 Fallback vers scan complet...")
+            return self.discover_token_accounts(wallet_address, force_full_scan=True)
+        
+        # Sauvegarder les changements
+        all_accounts_to_save = updated_accounts + new_accounts
+        if all_accounts_to_save:
+            self.save_token_accounts_to_db(wallet_address, all_accounts_to_save, "incremental")
+        
+        total_scan_duration = time.time() - scan_start_time
+        
+        logger.info(f"✅ Scan incrémental terminé pour {wallet_address[:8]}...")
+        logger.info(f"   🔄 Comptes mis à jour: {len(updated_accounts)}")
+        logger.info(f"   🆕 Nouveaux comptes: {len(new_accounts)}")
+        logger.info(f"   ⏱️ Durée: {total_scan_duration:.2f}s")
+        logger.info(f"   💡 Comptes vérifiés: {len(accounts_to_check)}/{len(existing_accounts)}")
+        
+        return len(existing_accounts) + len(new_accounts), len(new_accounts)
+
+
+    def _get_all_token_accounts_light(self, wallet_address: str) -> list:
+        """
+        Récupère TOUS les comptes de tokens mais seulement les métadonnées de base (pubkey, mint)
+        Plus rapide car on ne parse pas toutes les données
+        """
+        try:
+            result = self.rate_limited_rpc_call(
+                "getTokenAccountsByOwner",
+                [
+                    wallet_address,
+                    {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+                    {"encoding": "base64"}  # Plus rapide que jsonParsed
+                ]
+            )
+            
+            if result and "result" in result:
+                accounts = []
+                for account in result["result"]["value"]:
+                    # Extraction légère des données
+                    accounts.append({
+                        'ata_pubkey': account.get("pubkey"),
+                        'owner': wallet_address,
+                        # On pourrait extraire le mint depuis les données base64 si nécessaire
+                    })
+                return accounts
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur récupération comptes légers: {e}")
+            raise
+        
+        return []
+
+
+    def _get_single_account_data(self, account_pubkey: str) -> dict:
+        """
+        Récupère les données d'un seul compte de token
+        """
+        try:
+            result = self.rate_limited_rpc_call(
+                "getAccountInfo",
+                [
+                    account_pubkey,
+                    {"encoding": "jsonParsed"}
+                ]
+            )
+            
+            if result and "result" in result and result["result"]["value"]:
+                account_data = result["result"]["value"]
+                parsed_data = account_data.get("data", {}).get("parsed", {})
+                token_info = parsed_data.get("info", {})
+                
+                if token_info:
+                    token_amount_info = token_info.get("tokenAmount", {})
+                    return {
+                        'ata_pubkey': account_pubkey,
+                        'token_mint': token_info.get("mint"),
+                        'balance': float(token_amount_info.get("uiAmount") or 0),
+                        'decimals': token_amount_info.get("decimals", 9),
+                    }
+            
+        except Exception as e:
+            logger.debug(f"⚠️ Erreur récupération compte {account_pubkey[:8]}...: {e}")
+        
+        return None
+
+
+    def _perform_full_scan(self, wallet_address: str, batching_enabled: bool) -> list:
+        """
+        Effectue un scan complet de tous les comptes
+        """
+        logger.info(f"🔄 Récupération complète de tous les comptes...")
+        
+        # Votre code existant pour récupérer TOUS les comptes
+        if batching_enabled:
+            # Méthode batch...
+            try:
+                result = self.rate_limited_rpc_call(
+                    "getTokenAccountsByOwner",
+                    [
+                        wallet_address,
+                        {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+                        {"encoding": "jsonParsed"}
+                    ]
+                )
+                
+                if result and "result" in result:
+                    return result["result"]["value"]
+            
+            except Exception as e:
+                logger.warning(f"⚠️ Batch failed: {e}")
+        
+        # Fallback classique
+        result = self.rate_limited_rpc_call(
+            "getTokenAccountsByOwner",
+            [
+                wallet_address,
+                {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+                {"encoding": "jsonParsed"}
+            ]
+        )
+        
+        if result and "result" in result:
+            return result["result"]["value"]
+        
+        return []
+
+
+    def _process_and_save_accounts(self, wallet_address: str, token_accounts_data: list, 
+                                scan_type: str, should_full_scan: bool, current_time: int, 
+                                scan_start_time: float) -> Tuple[int, int]:
+        """
+        Traite et sauvegarde les comptes (code existant)
+        """
+        # Votre code existant de traitement...
+        # (Section 2, 3, 4, 5 de votre code original)
+        
+        # Pour l'exemple, je retourne des valeurs par défaut
+        # Vous devez y mettre votre logique de traitement existante
+        return len(token_accounts_data), 0
+
+    def discover_token_accounts_old(self, wallet_address: str, force_full_scan: bool = False) -> Tuple[int, int]:
+        """
+        Découvre les comptes de tokens pour un wallet avec batching RPC optimisé
+        Retourne: (total_accounts, new_accounts)
+        """
+        scan_start_time = time.time()
+        batching_enabled = self.batch_manager is not None and Config.ENABLE_RPC_BATCHING
+
+        logger.info(f"🔍 Découverte des comptes de tokens pour {wallet_address[:8]}... "
+                    f"(Batching: {'✅ ON' if batching_enabled else '❌ OFF'})")
+
+        # Vérifier si un scan complet est nécessaire
+        last_full_scan = self.last_full_scan.get(wallet_address, 0)
+        current_time = int(time.time())
+        time_since_last_scan = current_time - last_full_scan
+
+        should_full_scan = (
+                force_full_scan or
+                time_since_last_scan > (Config.FULL_SCAN_INTERVAL_HOURS * 3600) or
+                last_full_scan == 0
+        )
+
+        if 1==0:
             logger.info(f"🔄 SCAN COMPLET pour {wallet_address[:8]}... (dernier scan: {time_since_last_scan//3600}h ago)")
             scan_type = "full"
         else:

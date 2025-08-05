@@ -21,6 +21,13 @@ Tant que le token est sur la bonding curve, il n'y a pas de pool de liquidité =
 gitleaks detect --source . --config .gitleaks.toml --verbose --no-git --log-level debug --log-opts '-p'
 git add . && git commit -m "add files" && git push origin main
 
+cd scanner_wallet
+source env_scan_wallet/Scripts/activate
+python run_monitor.py
+sqlite3 solana_wallet.db
+select wallet_address, updated_at_readable from scan_history where scan_type = 'incremental' order by updated_at_readable desc limit 15;
+select wallet_address, updated_at_readable from scan_history where scan_type = 'full' order by updated_at_readable desc limit 45;
+
 
 https://solscan.io/account/AVAZvHLR2PcWpDf8BXY4rVxNHYRBytycHkcB5z5QNXYm#balanceChanges
 https://solscan.io/account/DyvJoTQpQ2tCqKEGuL2ecWVGssm8Qci9ot49LUsmcmtG#balanceChanges

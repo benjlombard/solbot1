@@ -51,7 +51,7 @@ def get_wallet_addresses() -> List[str]:
 # Variables globales
 WALLET_ADDRESSES = get_wallet_addresses()
 WALLET_ADDRESS = WALLET_ADDRESSES[0] if WALLET_ADDRESSES else '4DdrfiDHpmx55i4SPssxVzS9ZaKLb8qr45NKY9Er9nNh'
-
+DB_NAME = 'solana_wallet.db'
 
 class Config:
     """Configuration principale du moniteur Solana optimisé v2.0"""
