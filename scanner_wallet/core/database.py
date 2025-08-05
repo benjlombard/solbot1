@@ -361,7 +361,7 @@ class DatabaseManager:
             
         except Exception as e:
             self.logger.error(f"Database VACUUM failed: {e}")
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """Retourne les statistiques de la base de données"""
         try:
@@ -398,7 +398,7 @@ class DatabaseManager:
                     
                     tables_stats = {}
                     tables = ['transactions', 'token_accounts', 'wallet_priorities', 
-                             'scan_history', 'wallet_activity_metrics', 'tokens']
+                            'scan_history', 'wallet_activity_metrics', 'tokens']
                     
                     for table in tables:
                         try:
@@ -418,7 +418,7 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Failed to get database stats: {e}")
             return {'error': str(e)}
-    
+
     def get_health_status(self) -> Dict[str, Any]:
         """Retourne le status de santé de la base de données"""
         health = {
@@ -564,7 +564,7 @@ class DatabaseManager:
             self.logger.error(f"Health check failed: {e}")
         
         return health
-    
+
     def backup_database(self, backup_path: Optional[str] = None) -> str:
         """Crée une sauvegarde manuelle de la base de données"""
         try:
@@ -588,7 +588,7 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Manual backup failed: {e}")
             raise DatabaseError(f"Backup failed: {e}")
-    
+
     def restore_database(self, backup_path: str, confirm: bool = False):
         """Restaure la base de données depuis une sauvegarde"""
         if not confirm:
@@ -631,7 +631,7 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Database restore failed: {e}")
             raise DatabaseError(f"Restore failed: {e}")
-    
+
     def optimize_database(self) -> Dict[str, Any]:
         """Optimise la base de données (VACUUM, ANALYZE, etc.)"""
         try:
@@ -673,7 +673,7 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"Database optimization failed: {e}")
             raise DatabaseError(f"Optimization failed: {e}")
-    
+
     def close(self):
         """Ferme proprement le gestionnaire de base de données"""
         try:
@@ -689,11 +689,11 @@ class DatabaseManager:
             
         except Exception as e:
             self.logger.error(f"Error closing DatabaseManager: {e}")
-    
+
     def __enter__(self):
         """Support du context manager"""
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Support du context manager"""
         self.close()
@@ -1377,4 +1377,31 @@ __all__ = [
             total_deleted = 0
             
             with self.get_connection() as conn:
-                cursor = conn.
+                cursor = conn.cursor()
+                
+                for table, timestamp_column, days_to_keep in cleanup_tasks:
+                    try:
+                        cutoff_timestamp = current_time - (days_to_keep * 24 * 3600)
+                        
+                        cursor.execute(f'''
+                            DELETE FROM {table} 
+                            WHERE {timestamp_column} < ?
+                        ''', (cutoff_timestamp,))
+                        
+                        deleted_count = cursor.rowcount
+                        total_deleted += deleted_count
+                        
+                        if deleted_count > 0:
+                            self.logger.info(f"Cleaned up {deleted_count} old records from {table}")
+                            
+                    except sqlite3.Error as e:
+                        self.logger.error(f"Cleanup failed for table {table}: {e}")
+                
+                conn.commit()
+            
+            self.stats['last_cleanup'] = current_time
+            if total_deleted > 0:
+                self.logger.info(f"Database cleanup completed: {total_deleted} total records deleted")
+                
+        except Exception as e:
+            self.logger.error(f"Database cleanup failed: {e}")
