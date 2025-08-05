@@ -15,8 +15,6 @@ from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 import threading
 import asyncio
-import threading
-from contextlib import contextmanager
 
 # Importer la configuration
 try:
@@ -79,41 +77,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-class ThreadSafeSQLiteManager:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self.lock = threading.RLock()
-    
-    @contextmanager
-    def get_connection(self, retry_count=3):
-        """Context manager pour obtenir une connexion avec retry automatique"""
-        for attempt in range(retry_count):
-            try:
-                with self.lock:
-                    conn = sqlite3.connect(
-                        self.db_path,
-                        timeout=30.0,
-                        check_same_thread=False
-                    )
-                    # Configuration pour améliorer la concurrence
-                    conn.execute("PRAGMA journal_mode=WAL")
-                    conn.execute("PRAGMA synchronous=NORMAL")
-                    conn.execute("PRAGMA busy_timeout=30000")
-                    yield conn
-                    conn.close()
-                    break
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e) and attempt < retry_count - 1:
-                    time.sleep(0.1 * (attempt + 1))
-                    continue
-                else:
-                    raise
-
-# 2. AJOUTER CETTE VARIABLE GLOBALE
-db_manager = None
-
-
 class SolanaWalletMonitor:
     def __init__(self, wallet_addresses: List[str], db_name: str):
         self.wallet_addresses = wallet_addresses
@@ -123,11 +86,6 @@ class SolanaWalletMonitor:
         self.request_count = 0
         self.last_full_scan = {}  # Trackage des derniers scans complets par wallet
         self.scan_cycle_id = None
-
-        global db_manager
-        db_manager = ThreadSafeSQLiteManager(db_name)
-
-
         self.init_database()
 
     def init_database(self):
@@ -222,177 +180,183 @@ class SolanaWalletMonitor:
 
     def get_random_wallet_to_scan(self) -> Optional[str]:
         """Sélectionne un wallet aléatoirement en tenant compte des priorités et cooldowns"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                current_time = int(time.time())
-                logger.debug("🎲 Sélection aléatoire du wallet...")
+            logger.debug("🎲 Sélection aléatoire du wallet...")
+            
+            # Récupérer tous les wallets éligibles
+            cursor.execute('''
+                SELECT 
+                    wallet_address, 
+                    priority_score,
+                    last_scan_time,
+                    (? - last_scan_time) as seconds_since_scan
+                FROM wallet_priorities
+                WHERE (? - last_scan_time) >= ?
+                ORDER BY wallet_address
+            ''', (current_time, current_time, Config.MIN_INTERVAL_BETWEEN_SCANS))
+            
+            eligible_wallets = cursor.fetchall()
+            
+            if not eligible_wallets:
+                logger.debug("⏸️ Aucun wallet éligible pour sélection aléatoire")
+                return None
+            
+            logger.debug(f"🎯 {len(eligible_wallets)} wallets éligibles pour sélection aléatoire")
+            
+            if Config.RANDOM_SELECTION_WEIGHT_BY_PRIORITY:
+                # Sélection pondérée par la priorité
+                weights = []
+                wallets = []
                 
-                # Récupérer tous les wallets éligibles
-                cursor.execute('''
-                    SELECT 
-                        wallet_address, 
-                        priority_score,
-                        last_scan_time,
-                        (? - last_scan_time) as seconds_since_scan
-                    FROM wallet_priorities
-                    WHERE (? - last_scan_time) >= ?
-                    ORDER BY wallet_address
-                ''', (current_time, current_time, Config.MIN_INTERVAL_BETWEEN_SCANS))
-                
-                eligible_wallets = cursor.fetchall()
-                
-                if not eligible_wallets:
-                    logger.debug("⏸️ Aucun wallet éligible pour sélection aléatoire")
-                    return None
-                
-                logger.debug(f"🎯 {len(eligible_wallets)} wallets éligibles pour sélection aléatoire")
-                
-                if Config.RANDOM_SELECTION_WEIGHT_BY_PRIORITY:
-                    # Sélection pondérée par la priorité
-                    weights = []
-                    wallets = []
+                for wallet, priority, last_scan, since_scan in eligible_wallets:
+                    # Calculer le poids basé sur la priorité et le temps écoulé
+                    base_weight = max(0.1, priority)  # Poids minimum de 0.1
                     
-                    for wallet, priority, last_scan, since_scan in eligible_wallets:
-                        # Calculer le poids basé sur la priorité et le temps écoulé
-                        base_weight = max(0.1, priority)  # Poids minimum de 0.1
-                        
-                        # Bonus pour le temps écoulé
-                        time_bonus = min(2.0, since_scan / 600)  # Bonus max de 2.0 après 10min
-                        
-                        final_weight = base_weight + time_bonus
-                        weights.append(final_weight)
-                        wallets.append(wallet)
-                        
-                        logger.debug(f"   📊 {wallet[:8]}... Poids: {final_weight:.2f} (priorité: {priority:.2f}, temps: {since_scan}s)")
+                    # Bonus pour le temps écoulé
+                    time_bonus = min(2.0, since_scan / 600)  # Bonus max de 2.0 après 10min
                     
-                    # Sélection pondérée
-                    import random
-                    selected_wallet = random.choices(wallets, weights=weights, k=1)[0]
+                    final_weight = base_weight + time_bonus
+                    weights.append(final_weight)
+                    wallets.append(wallet)
                     
-                else:
-                    # Sélection purement aléatoire
-                    import random
-                    selected_wallet = random.choice([row[0] for row in eligible_wallets])
+                    logger.debug(f"   📊 {wallet[:8]}... Poids: {final_weight:.2f} (priorité: {priority:.2f}, temps: {since_scan}s)")
                 
-                logger.info(f"🎲 Wallet sélectionné aléatoirement: {selected_wallet[:8]}...")
-                return selected_wallet
+                # Sélection pondérée
+                import random
+                selected_wallet = random.choices(wallets, weights=weights, k=1)[0]
+                
+            else:
+                # Sélection purement aléatoire
+                import random
+                selected_wallet = random.choice([row[0] for row in eligible_wallets])
+            
+            logger.info(f"🎲 Wallet sélectionné aléatoirement: {selected_wallet[:8]}...")
+            return selected_wallet
             
         except Exception as e:
             logger.error(f"❌ Erreur sélection aléatoire: {e}")
             return None
+        finally:
+            conn.close()
 
     def initialize_wallet_priorities(self):
         """Initialise les priorités pour tous les wallets configurés avec logs détaillés"""
         logger.info("🎯 INITIALISATION DES PRIORITÉS DYNAMIQUES")
         logger.info("-" * 60)
         
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        initialized_count = 0
+        
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                current_time = int(time.time())
-                initialized_count = 0
-                logger.info(f"📱 Traitement de {len(self.wallet_addresses)} wallets...")
+            logger.info(f"📱 Traitement de {len(self.wallet_addresses)} wallets...")
+            
+            for i, wallet_address in enumerate(self.wallet_addresses):
+                logger.info(f"\n📍 [{i+1}/{len(self.wallet_addresses)}] Initialisation: {wallet_address[:8]}...{wallet_address[-8:]}")
                 
-                for i, wallet_address in enumerate(self.wallet_addresses):
-                    logger.info(f"\n📍 [{i+1}/{len(self.wallet_addresses)}] Initialisation: {wallet_address[:8]}...{wallet_address[-8:]}")
-                    
-                    # Calculer des métriques initiales basées sur l'historique
-                    cursor.execute('''
-                        SELECT COUNT(*) as total_tx,
-                            COUNT(CASE WHEN block_time >= ? THEN 1 END) as recent_tx,
-                            COALESCE(SUM(ABS(amount)), 0) as total_volume,
-                            COUNT(CASE WHEN is_token_transaction = 1 THEN 1 END) as token_tx,
-                            MAX(block_time) as last_activity
-                        FROM transactions 
-                        WHERE wallet_address = ?
-                    ''', (current_time - 3600, wallet_address))  # Dernière heure
-                    
-                    result = cursor.fetchone()
-                    total_tx, recent_tx, total_volume, token_tx, last_activity = result or (0, 0, 0, 0, 0)
-                    
-                    # Compter les comptes de tokens existants
-                    cursor.execute('''
-                        SELECT COUNT(*) as total_accounts,
-                            COUNT(CASE WHEN first_seen >= ? THEN 1 END) as recent_accounts
-                        FROM token_accounts 
-                        WHERE wallet_address = ? AND is_active = 1
-                    ''', (current_time - 86400, wallet_address))  # Dernières 24h
-                    
-                    accounts_result = cursor.fetchone()
-                    total_accounts, recent_accounts = accounts_result or (0, 0)
-                    
-                    # Calculer un score initial intelligent
-                    base_score = 1.0
-                    
-                    # Bonus pour activité récente
-                    if recent_tx > 0:
-                        activity_bonus = min(recent_tx * 0.5, 3.0)
-                        base_score += activity_bonus
-                        logger.info(f"   📈 Bonus activité récente: +{activity_bonus:.2f} ({recent_tx} transactions)")
-                    
-                    # Bonus pour volume
-                    if total_volume > 5:
-                        volume_bonus = min(total_volume * 0.1, 2.0)
-                        base_score += volume_bonus
-                        logger.info(f"   💰 Bonus volume: +{volume_bonus:.2f} ({total_volume:.2f} SOL)")
-                    
-                    # Bonus pour nouveaux comptes de tokens
-                    if recent_accounts > 0:
-                        discovery_bonus = min(recent_accounts * 0.3, 1.5)
-                        base_score += discovery_bonus
-                        logger.info(f"   🆕 Bonus découvertes: +{discovery_bonus:.2f} ({recent_accounts} comptes)")
-                    
-                    # Bonus pour portefeuille actif (beaucoup de tokens)
-                    if total_accounts > 20:
-                        portfolio_bonus = min((total_accounts - 20) * 0.05, 1.0)
-                        base_score += portfolio_bonus
-                        logger.info(f"   📊 Bonus portefeuille: +{portfolio_bonus:.2f} ({total_accounts} comptes)")
-                    
-                    # Calcul de l'âge de la dernière activité
-                    time_since_activity = (current_time - last_activity) if last_activity else 999999
-                    activity_age_hours = time_since_activity / 3600
-                    
-                    # Insérer ou mettre à jour les priorités
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO wallet_priorities 
-                        (wallet_address, priority_score, activity_score, volume_score_1h, 
-                        new_tokens_score_1h, total_scans, last_activity_detected, updated_at, created_at)
-                        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
-                    ''', (wallet_address, base_score, float(recent_tx), float(total_volume), 
-                        recent_accounts, last_activity or 0, current_time, current_time))
-                    
-                    logger.info(f"   🎯 Score final calculé: {base_score:.2f}")
-                    logger.info(f"   ⏰ Dernière activité: {activity_age_hours:.1f}h ago" if last_activity else "   ⏰ Aucune activité historique")
-                    logger.info(f"   📊 Métriques: {total_tx} tx totales, {token_tx} token tx, {total_accounts} comptes")
-                    
-                    initialized_count += 1
-                
-                conn.commit()
-                
-                # Afficher un résumé de l'initialisation
-                logger.info(f"\n✅ INITIALISATION TERMINÉE")
-                logger.info(f"   📊 Wallets initialisés: {initialized_count}/{len(self.wallet_addresses)}")
-                
-                # Afficher le classement initial
+                # Calculer des métriques initiales basées sur l'historique
                 cursor.execute('''
-                    SELECT wallet_address, priority_score, activity_score, total_scans
-                    FROM wallet_priorities 
-                    ORDER BY priority_score DESC
-                ''')
+                    SELECT COUNT(*) as total_tx,
+                        COUNT(CASE WHEN block_time >= ? THEN 1 END) as recent_tx,
+                        COALESCE(SUM(ABS(amount)), 0) as total_volume,
+                        COUNT(CASE WHEN is_token_transaction = 1 THEN 1 END) as token_tx,
+                        MAX(block_time) as last_activity
+                    FROM transactions 
+                    WHERE wallet_address = ?
+                ''', (current_time - 3600, wallet_address))  # Dernière heure
                 
-                rankings = cursor.fetchall()
-                logger.info(f"\n🏆 CLASSEMENT INITIAL DES PRIORITÉS:")
-                for i, (wallet, score, activity, scans) in enumerate(rankings):
-                    medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
-                    logger.info(f"   {medal} {wallet[:8]}... Score: {score:.2f} | Activité: {activity:.1f} | Scans: {scans}")
+                result = cursor.fetchone()
+                total_tx, recent_tx, total_volume, token_tx, last_activity = result or (0, 0, 0, 0, 0)
                 
-                logger.info("✅ Système de priorités prêt")
+                # Compter les comptes de tokens existants
+                cursor.execute('''
+                    SELECT COUNT(*) as total_accounts,
+                        COUNT(CASE WHEN first_seen >= ? THEN 1 END) as recent_accounts
+                    FROM token_accounts 
+                    WHERE wallet_address = ? AND is_active = 1
+                ''', (current_time - 86400, wallet_address))  # Dernières 24h
+                
+                accounts_result = cursor.fetchone()
+                total_accounts, recent_accounts = accounts_result or (0, 0)
+                
+                # Calculer un score initial intelligent
+                base_score = 1.0
+                
+                # Bonus pour activité récente
+                if recent_tx > 0:
+                    activity_bonus = min(recent_tx * 0.5, 3.0)
+                    base_score += activity_bonus
+                    logger.info(f"   📈 Bonus activité récente: +{activity_bonus:.2f} ({recent_tx} transactions)")
+                
+                # Bonus pour volume
+                if total_volume > 5:
+                    volume_bonus = min(total_volume * 0.1, 2.0)
+                    base_score += volume_bonus
+                    logger.info(f"   💰 Bonus volume: +{volume_bonus:.2f} ({total_volume:.2f} SOL)")
+                
+                # Bonus pour nouveaux comptes de tokens
+                if recent_accounts > 0:
+                    discovery_bonus = min(recent_accounts * 0.3, 1.5)
+                    base_score += discovery_bonus
+                    logger.info(f"   🆕 Bonus découvertes: +{discovery_bonus:.2f} ({recent_accounts} comptes)")
+                
+                # Bonus pour portefeuille actif (beaucoup de tokens)
+                if total_accounts > 20:
+                    portfolio_bonus = min((total_accounts - 20) * 0.05, 1.0)
+                    base_score += portfolio_bonus
+                    logger.info(f"   📊 Bonus portefeuille: +{portfolio_bonus:.2f} ({total_accounts} comptes)")
+                
+                # Calcul de l'âge de la dernière activité
+                time_since_activity = (current_time - last_activity) if last_activity else 999999
+                activity_age_hours = time_since_activity / 3600
+                
+                # Insérer ou mettre à jour les priorités
+                cursor.execute('''
+                    INSERT OR REPLACE INTO wallet_priorities 
+                    (wallet_address, priority_score, activity_score, volume_score_1h, 
+                    new_tokens_score_1h, total_scans, last_activity_detected, updated_at, created_at)
+                    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+                ''', (wallet_address, base_score, float(recent_tx), float(total_volume), 
+                    recent_accounts, last_activity or 0, current_time, current_time))
+                
+                logger.info(f"   🎯 Score final calculé: {base_score:.2f}")
+                logger.info(f"   ⏰ Dernière activité: {activity_age_hours:.1f}h ago" if last_activity else "   ⏰ Aucune activité historique")
+                logger.info(f"   📊 Métriques: {total_tx} tx totales, {token_tx} token tx, {total_accounts} comptes")
+                
+                initialized_count += 1
+            
+            conn.commit()
+            
+            # Afficher un résumé de l'initialisation
+            logger.info(f"\n✅ INITIALISATION TERMINÉE")
+            logger.info(f"   📊 Wallets initialisés: {initialized_count}/{len(self.wallet_addresses)}")
+            
+            # Afficher le classement initial
+            cursor.execute('''
+                SELECT wallet_address, priority_score, activity_score, total_scans
+                FROM wallet_priorities 
+                ORDER BY priority_score DESC
+            ''')
+            
+            rankings = cursor.fetchall()
+            logger.info(f"\n🏆 CLASSEMENT INITIAL DES PRIORITÉS:")
+            for i, (wallet, score, activity, scans) in enumerate(rankings):
+                medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
+                logger.info(f"   {medal} {wallet[:8]}... Score: {score:.2f} | Activité: {activity:.1f} | Scans: {scans}")
+            
+            logger.info("✅ Système de priorités prêt")
             
         except Exception as e:
             logger.error(f"❌ Erreur lors de l'initialisation des priorités: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+        finally:
+            conn.close()
 
     def get_next_wallet_to_scan(self) -> Optional[str]:
         """Retourne le prochain wallet à scanner selon le mode configuré"""
@@ -406,280 +370,284 @@ class SolanaWalletMonitor:
 
     def get_priority_wallet_to_scan(self) -> Optional[str]:
         """Retourne le prochain wallet à scanner selon les priorités avec logs détaillés"""
-
-        
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        current_time = int(time.time())
         
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                current_time = int(time.time())
-                logger.debug("🔍 Recherche du wallet prioritaire...")
+            logger.debug("🔍 Recherche du wallet prioritaire...")
+            
+            # Requête pour trouver le wallet le plus prioritaire
+            cursor.execute('''
+                SELECT 
+                    wallet_address, 
+                    priority_score, 
+                    last_scan_time,
+                    total_scans,
+                    consecutive_empty_scans,
+                    (? - last_scan_time) as seconds_since_scan,
+                    CASE 
+                        WHEN priority_score >= 4.0 THEN 30   -- Haute priorité: 30s
+                        WHEN priority_score >= 2.0 THEN 90   -- Moyenne: 1.5min
+                        WHEN priority_score >= 1.0 THEN 180  -- Basse: 3min
+                        ELSE 300                             -- Très basse: 5min
+                    END as target_interval
+                FROM wallet_priorities
+                WHERE (? - last_scan_time) >= 
+                    CASE 
+                        WHEN priority_score >= 4.0 THEN 30
+                        WHEN priority_score >= 2.0 THEN 90
+                        WHEN priority_score >= 1.0 THEN 180
+                        ELSE 300
+                    END
+                ORDER BY priority_score DESC, last_scan_time ASC
+                LIMIT 1
+            ''', (current_time, current_time))
+            
+            result = cursor.fetchone()
+            
+            if result:
+                wallet, score, last_scan, total_scans, empty_scans, since_scan, target = result
                 
-                # Requête pour trouver le wallet le plus prioritaire
+                logger.debug(f"🎯 Wallet sélectionné: {wallet[:8]}...")
+                logger.debug(f"   Score: {score:.2f}")
+                logger.debug(f"   Temps depuis dernier scan: {since_scan//60}m{since_scan%60}s")
+                logger.debug(f"   Intervalle cible: {target}s")
+                logger.debug(f"   Scans effectués: {total_scans}")
+                logger.debug(f"   Scans vides consécutifs: {empty_scans}")
+                
+                return wallet
+            else:
+                logger.debug("⏸️ Aucun wallet nécessite un scan immédiat")
+                
+                # Afficher l'état de tous les wallets pour diagnostiquer
                 cursor.execute('''
-                    SELECT 
-                        wallet_address, 
-                        priority_score, 
-                        last_scan_time,
-                        total_scans,
-                        consecutive_empty_scans,
-                        (? - last_scan_time) as seconds_since_scan,
-                        CASE 
-                            WHEN priority_score >= 4.0 THEN 30   -- Haute priorité: 30s
-                            WHEN priority_score >= 2.0 THEN 90   -- Moyenne: 1.5min
-                            WHEN priority_score >= 1.0 THEN 180  -- Basse: 3min
-                            ELSE 300                             -- Très basse: 5min
-                        END as target_interval
-                    FROM wallet_priorities
-                    WHERE (? - last_scan_time) >= 
+                    SELECT wallet_address, priority_score, 
+                        (? - last_scan_time) as since_scan,
                         CASE 
                             WHEN priority_score >= 4.0 THEN 30
                             WHEN priority_score >= 2.0 THEN 90
                             WHEN priority_score >= 1.0 THEN 180
                             ELSE 300
-                        END
-                    ORDER BY priority_score DESC, last_scan_time ASC
-                    LIMIT 1
-                ''', (current_time, current_time))
+                        END as needed_interval
+                    FROM wallet_priorities
+                    ORDER BY priority_score DESC
+                ''', (current_time,))
                 
-                result = cursor.fetchone()
+                all_wallets = cursor.fetchall()
+                logger.debug("📊 État de tous les wallets:")
+                for wallet, score, since, needed in all_wallets:
+                    remaining = max(0, needed - since)
+                    status = "✅ PRÊT" if since >= needed else f"⏳ {remaining}s"
+                    logger.debug(f"   {wallet[:8]}... Score: {score:.2f} | Depuis: {since}s | {status}")
                 
-                if result:
-                    wallet, score, last_scan, total_scans, empty_scans, since_scan, target = result
-                    
-                    logger.debug(f"🎯 Wallet sélectionné: {wallet[:8]}...")
-                    logger.debug(f"   Score: {score:.2f}")
-                    logger.debug(f"   Temps depuis dernier scan: {since_scan//60}m{since_scan%60}s")
-                    logger.debug(f"   Intervalle cible: {target}s")
-                    logger.debug(f"   Scans effectués: {total_scans}")
-                    logger.debug(f"   Scans vides consécutifs: {empty_scans}")
-                    
-                    return wallet
-                else:
-                    logger.debug("⏸️ Aucun wallet nécessite un scan immédiat")
-                    
-                    # Afficher l'état de tous les wallets pour diagnostiquer
-                    cursor.execute('''
-                        SELECT wallet_address, priority_score, 
-                            (? - last_scan_time) as since_scan,
-                            CASE 
-                                WHEN priority_score >= 4.0 THEN 30
-                                WHEN priority_score >= 2.0 THEN 90
-                                WHEN priority_score >= 1.0 THEN 180
-                                ELSE 300
-                            END as needed_interval
-                        FROM wallet_priorities
-                        ORDER BY priority_score DESC
-                    ''', (current_time,))
-                    
-                    all_wallets = cursor.fetchall()
-                    logger.debug("📊 État de tous les wallets:")
-                    for wallet, score, since, needed in all_wallets:
-                        remaining = max(0, needed - since)
-                        status = "✅ PRÊT" if since >= needed else f"⏳ {remaining}s"
-                        logger.debug(f"   {wallet[:8]}... Score: {score:.2f} | Depuis: {since}s | {status}")
-                    
-                    return None
+                return None
             
         except Exception as e:
             logger.error(f"❌ Erreur sélection wallet: {e}")
             return None
-
+        finally:
+            conn.close()
 
     def update_wallet_priority(self, wallet_address: str, scan_duration: float, 
                             discoveries: int, transactions_found: int):
         """Met à jour la priorité d'un wallet après un scan avec logs détaillés"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                current_time = int(time.time())
-                logger.debug(f"📊 Mise à jour priorité pour {wallet_address[:8]}...")
-                
-                # Récupérer l'état actuel
-                cursor.execute('''
-                    SELECT priority_score, total_scans, consecutive_empty_scans, 
-                        activity_score, avg_scan_duration
-                    FROM wallet_priorities 
-                    WHERE wallet_address = ?
-                ''', (wallet_address,))
-                
-                current_data = cursor.fetchone()
-                if not current_data:
-                    logger.warning(f"⚠️ Wallet {wallet_address[:8]}... non trouvé dans les priorités")
-                    return
-                
-                old_score, total_scans, empty_scans, activity_score, avg_duration = current_data
-                
-                # Calculer les bonus/malus
-                activity_bonus = min(transactions_found * 0.3, 2.0)  # Max +2.0 pour activité
-                discovery_bonus = min(discoveries * 0.5, 1.5)        # Max +1.5 pour découvertes
-                
-                # Malus pour scan lent (>45s)
-                efficiency_penalty = max(0, (scan_duration - 45) * 0.02)  
-                
-                # Malus pour scans vides répétés
-                empty_penalty = min(empty_scans * 0.1, 1.0) if transactions_found == 0 else 0
-                
-                # Calcul du nouveau score
-                if transactions_found > 0 or discoveries > 0:
-                    # Activité détectée - augmenter la priorité
-                    new_score = old_score + activity_bonus + discovery_bonus - efficiency_penalty
-                    new_empty_scans = 0  # Reset des scans vides
-                    logger.debug(f"   📈 ACTIVITÉ DÉTECTÉE")
-                    logger.debug(f"      Bonus activité: +{activity_bonus:.2f}")
-                    logger.debug(f"      Bonus découvertes: +{discovery_bonus:.2f}")
-                    if efficiency_penalty > 0:
-                        logger.debug(f"      Malus lenteur: -{efficiency_penalty:.2f}")
-                else:
-                    # Aucune activité - diminuer progressivement la priorité
-                    decay_factor = 0.95  # Diminution de 5% par scan vide
-                    new_score = max(0.5, old_score * decay_factor - empty_penalty)
-                    new_empty_scans = empty_scans + 1
-                    logger.debug(f"   📉 SCAN VIDE")
-                    logger.debug(f"      Facteur de déclin: {decay_factor}")
-                    logger.debug(f"      Malus scans vides: -{empty_penalty:.2f}")
-                    logger.debug(f"      Scans vides consécutifs: {new_empty_scans}")
-                
-                # Limiter le score dans une plage raisonnable
-                new_score = max(0.1, min(10.0, new_score))
-                
-                # Calculer la nouvelle durée moyenne
-                if total_scans == 0:
-                    new_avg_duration = scan_duration
-                else:
-                    new_avg_duration = (avg_duration * total_scans + scan_duration) / (total_scans + 1)
-                
-                # Mettre à jour en base
-                cursor.execute('''
-                    UPDATE wallet_priorities 
-                    SET 
-                        last_scan_time = ?,
-                        total_scans = total_scans + 1,
-                        avg_scan_duration = ?,
-                        activity_score = activity_score * 0.8 + ?,
-                        priority_score = ?,
-                        consecutive_empty_scans = ?,
-                        updated_at = ?
-                    WHERE wallet_address = ?
-                ''', (current_time, new_avg_duration, float(transactions_found), 
-                    new_score, new_empty_scans, current_time, wallet_address))
-                
-                conn.commit()
-                
-                # Logs détaillés de la mise à jour
-                score_change = new_score - old_score
-                change_icon = "📈" if score_change > 0 else "📉" if score_change < 0 else "➡️"
-                
-                logger.info(f"   {change_icon} Priorité: {old_score:.2f} → {new_score:.2f} ({score_change:+.2f})")
-                logger.debug(f"   ⏱️ Durée moyenne: {new_avg_duration:.1f}s")
-                logger.debug(f"   📊 Total scans: {total_scans + 1}")
-                
-                # Déterminer la nouvelle catégorie de priorité
-                if new_score >= 4.0:
-                    category = "🔥 HAUTE (scan toutes les 30s)"
-                elif new_score >= 2.0:
-                    category = "🟡 MOYENNE (scan toutes les 90s)"
-                elif new_score >= 1.0:
-                    category = "🔵 BASSE (scan toutes les 3min)"
-                else:
-                    category = "⚪ TRÈS BASSE (scan toutes les 5min)"
-                
-                logger.info(f"   📋 Catégorie: {category}")
+            logger.debug(f"📊 Mise à jour priorité pour {wallet_address[:8]}...")
+            
+            # Récupérer l'état actuel
+            cursor.execute('''
+                SELECT priority_score, total_scans, consecutive_empty_scans, 
+                    activity_score, avg_scan_duration
+                FROM wallet_priorities 
+                WHERE wallet_address = ?
+            ''', (wallet_address,))
+            
+            current_data = cursor.fetchone()
+            if not current_data:
+                logger.warning(f"⚠️ Wallet {wallet_address[:8]}... non trouvé dans les priorités")
+                return
+            
+            old_score, total_scans, empty_scans, activity_score, avg_duration = current_data
+            
+            # Calculer les bonus/malus
+            activity_bonus = min(transactions_found * 0.3, 2.0)  # Max +2.0 pour activité
+            discovery_bonus = min(discoveries * 0.5, 1.5)        # Max +1.5 pour découvertes
+            
+            # Malus pour scan lent (>45s)
+            efficiency_penalty = max(0, (scan_duration - 45) * 0.02)  
+            
+            # Malus pour scans vides répétés
+            empty_penalty = min(empty_scans * 0.1, 1.0) if transactions_found == 0 else 0
+            
+            # Calcul du nouveau score
+            if transactions_found > 0 or discoveries > 0:
+                # Activité détectée - augmenter la priorité
+                new_score = old_score + activity_bonus + discovery_bonus - efficiency_penalty
+                new_empty_scans = 0  # Reset des scans vides
+                logger.debug(f"   📈 ACTIVITÉ DÉTECTÉE")
+                logger.debug(f"      Bonus activité: +{activity_bonus:.2f}")
+                logger.debug(f"      Bonus découvertes: +{discovery_bonus:.2f}")
+                if efficiency_penalty > 0:
+                    logger.debug(f"      Malus lenteur: -{efficiency_penalty:.2f}")
+            else:
+                # Aucune activité - diminuer progressivement la priorité
+                decay_factor = 0.95  # Diminution de 5% par scan vide
+                new_score = max(0.5, old_score * decay_factor - empty_penalty)
+                new_empty_scans = empty_scans + 1
+                logger.debug(f"   📉 SCAN VIDE")
+                logger.debug(f"      Facteur de déclin: {decay_factor}")
+                logger.debug(f"      Malus scans vides: -{empty_penalty:.2f}")
+                logger.debug(f"      Scans vides consécutifs: {new_empty_scans}")
+            
+            # Limiter le score dans une plage raisonnable
+            new_score = max(0.1, min(10.0, new_score))
+            
+            # Calculer la nouvelle durée moyenne
+            if total_scans == 0:
+                new_avg_duration = scan_duration
+            else:
+                new_avg_duration = (avg_duration * total_scans + scan_duration) / (total_scans + 1)
+            
+            # Mettre à jour en base
+            cursor.execute('''
+                UPDATE wallet_priorities 
+                SET 
+                    last_scan_time = ?,
+                    total_scans = total_scans + 1,
+                    avg_scan_duration = ?,
+                    activity_score = activity_score * 0.8 + ?,
+                    priority_score = ?,
+                    consecutive_empty_scans = ?,
+                    updated_at = ?
+                WHERE wallet_address = ?
+            ''', (current_time, new_avg_duration, float(transactions_found), 
+                new_score, new_empty_scans, current_time, wallet_address))
+            
+            conn.commit()
+            
+            # Logs détaillés de la mise à jour
+            score_change = new_score - old_score
+            change_icon = "📈" if score_change > 0 else "📉" if score_change < 0 else "➡️"
+            
+            logger.info(f"   {change_icon} Priorité: {old_score:.2f} → {new_score:.2f} ({score_change:+.2f})")
+            logger.debug(f"   ⏱️ Durée moyenne: {new_avg_duration:.1f}s")
+            logger.debug(f"   📊 Total scans: {total_scans + 1}")
+            
+            # Déterminer la nouvelle catégorie de priorité
+            if new_score >= 4.0:
+                category = "🔥 HAUTE (scan toutes les 30s)"
+            elif new_score >= 2.0:
+                category = "🟡 MOYENNE (scan toutes les 90s)"
+            elif new_score >= 1.0:
+                category = "🔵 BASSE (scan toutes les 3min)"
+            else:
+                category = "⚪ TRÈS BASSE (scan toutes les 5min)"
+            
+            logger.info(f"   📋 Catégorie: {category}")
             
         except Exception as e:
             logger.error(f"❌ Erreur mise à jour priorité: {e}")
-
+        finally:
+            conn.close()
 
     def record_scan_metrics(self, wallet_address: str, scan_duration: float, 
                         discoveries: int, transactions_found: int, rpc_requests: int):
-        """Enregistre les métriques détaillées d'un scan avec logs"""    
+        """Enregistre les métriques détaillées d'un scan avec logs"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        current_time = int(time.time())
         
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                current_time = int(time.time())
-                logger.debug(f"📝 Enregistrement métriques pour {wallet_address[:8]}...")
-                
-                # Calculer l'efficacité
-                if rpc_requests > 0:
-                    efficiency_score = ((discoveries + transactions_found) / rpc_requests) * 100
-                else:
-                    efficiency_score = 0
-                
-                # Calculer le volume estimé (placeholder - vous pouvez l'améliorer)
-                estimated_volume = transactions_found * 0.1  # Estimation basique
-                
-                cursor.execute('''
-                    INSERT INTO wallet_activity_metrics 
-                    (wallet_address, timestamp, period_minutes, scan_duration, discoveries_count, 
-                    balance_changes_count, rpc_requests_made, efficiency_score, volume_sol, 
-                    new_token_accounts, errors_count)
-                    VALUES (?, ?, 15, ?, ?, ?, ?, ?, ?, ?, 0)
-                ''', (wallet_address, current_time, scan_duration, discoveries, 
-                    transactions_found, rpc_requests, efficiency_score, estimated_volume, discoveries))
-                
-                conn.commit()
-                
-                logger.debug(f"   📊 Efficacité: {efficiency_score:.1f}%")
-                logger.debug(f"   🔢 RPC/découverte: {rpc_requests / max(discoveries + transactions_found, 1):.1f}")
-                
-                # Nettoyer les anciennes métriques (garder 7 jours)
-                week_ago = current_time - (7 * 24 * 3600)
-                cursor.execute('DELETE FROM wallet_activity_metrics WHERE timestamp < ?', (week_ago,))
-                deleted = cursor.rowcount
-                if deleted > 0:
-                    logger.debug(f"   🧹 Nettoyage: {deleted} anciennes métriques supprimées")
-                
-                conn.commit()
+            logger.debug(f"📝 Enregistrement métriques pour {wallet_address[:8]}...")
+            
+            # Calculer l'efficacité
+            if rpc_requests > 0:
+                efficiency_score = ((discoveries + transactions_found) / rpc_requests) * 100
+            else:
+                efficiency_score = 0
+            
+            # Calculer le volume estimé (placeholder - vous pouvez l'améliorer)
+            estimated_volume = transactions_found * 0.1  # Estimation basique
+            
+            cursor.execute('''
+                INSERT INTO wallet_activity_metrics 
+                (wallet_address, timestamp, period_minutes, scan_duration, discoveries_count, 
+                balance_changes_count, rpc_requests_made, efficiency_score, volume_sol, 
+                new_token_accounts, errors_count)
+                VALUES (?, ?, 15, ?, ?, ?, ?, ?, ?, ?, 0)
+            ''', (wallet_address, current_time, scan_duration, discoveries, 
+                transactions_found, rpc_requests, efficiency_score, estimated_volume, discoveries))
+            
+            conn.commit()
+            
+            logger.debug(f"   📊 Efficacité: {efficiency_score:.1f}%")
+            logger.debug(f"   🔢 RPC/découverte: {rpc_requests / max(discoveries + transactions_found, 1):.1f}")
+            
+            # Nettoyer les anciennes métriques (garder 7 jours)
+            week_ago = current_time - (7 * 24 * 3600)
+            cursor.execute('DELETE FROM wallet_activity_metrics WHERE timestamp < ?', (week_ago,))
+            deleted = cursor.rowcount
+            if deleted > 0:
+                logger.debug(f"   🧹 Nettoyage: {deleted} anciennes métriques supprimées")
+            
+            conn.commit()
             
         except Exception as e:
             logger.error(f"❌ Erreur enregistrement métriques: {e}")
-
+        finally:
+            conn.close()
 
     def get_wallet_priority_stats(self) -> Dict:
         """Retourne les statistiques actuelles des priorités pour le dashboard"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
         
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                # Statistiques générales
-                cursor.execute('''
-                    SELECT 
-                        COUNT(*) as total_wallets,
-                        AVG(priority_score) as avg_priority,
-                        MIN(priority_score) as min_priority,
-                        MAX(priority_score) as max_priority,
-                        COUNT(CASE WHEN priority_score >= 4.0 THEN 1 END) as high_priority,
-                        COUNT(CASE WHEN priority_score >= 2.0 AND priority_score < 4.0 THEN 1 END) as medium_priority,
-                        COUNT(CASE WHEN priority_score < 2.0 THEN 1 END) as low_priority
-                    FROM wallet_priorities
-                ''')
-                
-                stats = cursor.fetchone()
-                
-                # Activité récente
-                current_time = int(time.time())
-                cursor.execute('''
-                    SELECT COUNT(*) FROM wallet_priorities 
-                    WHERE last_scan_time >= ?
-                ''', (current_time - 300,))  # Dernières 5 minutes
-                
-                recent_scans = cursor.fetchone()[0]
-                
-                return {
-                    'total_wallets': stats[0],
-                    'avg_priority': round(stats[1], 2) if stats[1] else 0,
-                    'min_priority': stats[2] or 0,
-                    'max_priority': stats[3] or 0,
-                    'high_priority_count': stats[4],
-                    'medium_priority_count': stats[5],
-                    'low_priority_count': stats[6],
-                    'recent_scans_5min': recent_scans
-                }
+            # Statistiques générales
+            cursor.execute('''
+                SELECT 
+                    COUNT(*) as total_wallets,
+                    AVG(priority_score) as avg_priority,
+                    MIN(priority_score) as min_priority,
+                    MAX(priority_score) as max_priority,
+                    COUNT(CASE WHEN priority_score >= 4.0 THEN 1 END) as high_priority,
+                    COUNT(CASE WHEN priority_score >= 2.0 AND priority_score < 4.0 THEN 1 END) as medium_priority,
+                    COUNT(CASE WHEN priority_score < 2.0 THEN 1 END) as low_priority
+                FROM wallet_priorities
+            ''')
+            
+            stats = cursor.fetchone()
+            
+            # Activité récente
+            current_time = int(time.time())
+            cursor.execute('''
+                SELECT COUNT(*) FROM wallet_priorities 
+                WHERE last_scan_time >= ?
+            ''', (current_time - 300,))  # Dernières 5 minutes
+            
+            recent_scans = cursor.fetchone()[0]
+            
+            return {
+                'total_wallets': stats[0],
+                'avg_priority': round(stats[1], 2) if stats[1] else 0,
+                'min_priority': stats[2] or 0,
+                'max_priority': stats[3] or 0,
+                'high_priority_count': stats[4],
+                'medium_priority_count': stats[5],
+                'low_priority_count': stats[6],
+                'recent_scans_5min': recent_scans
+            }
             
         except Exception as e:
             logger.error(f"❌ Erreur statistiques priorités: {e}")
             return {}
+        finally:
+            conn.close()
 
     def update_database_schema(self, cursor):
         """Met à jour la structure de la base de données"""
@@ -950,179 +918,187 @@ class SolanaWalletMonitor:
 
     def load_token_accounts_from_db(self, wallet_address: str) -> List[Dict]:
         """Charge les comptes de tokens depuis la base de données"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT ata_pubkey, token_mint, balance, decimals, first_seen, 
-                        last_updated, last_scanned, is_active, scan_priority
-                    FROM token_accounts 
-                    WHERE wallet_address = ? AND is_active = 1
-                    ORDER BY scan_priority DESC, last_scanned ASC
-                ''', (wallet_address,))
-                
-                rows = cursor.fetchall()
-                accounts = []
-                
-                for row in rows:
-                    accounts.append({
-                        'ata_pubkey': row[0],
-                        'token_mint': row[1],
-                        'balance': row[2],
-                        'decimals': row[3],
-                        'first_seen': row[4],
-                        'last_updated': row[5],
-                        'last_scanned': row[6],
-                        'is_active': bool(row[7]),
-                        'scan_priority': row[8]
-                    })
-                
-                logger.debug(f"📂 Chargé {len(accounts)} comptes depuis la DB pour {wallet_address[:8]}...")
-                return accounts
+            cursor.execute('''
+                SELECT ata_pubkey, token_mint, balance, decimals, first_seen, 
+                       last_updated, last_scanned, is_active, scan_priority
+                FROM token_accounts 
+                WHERE wallet_address = ? AND is_active = 1
+                ORDER BY scan_priority DESC, last_scanned ASC
+            ''', (wallet_address,))
+            
+            rows = cursor.fetchall()
+            accounts = []
+            
+            for row in rows:
+                accounts.append({
+                    'ata_pubkey': row[0],
+                    'token_mint': row[1],
+                    'balance': row[2],
+                    'decimals': row[3],
+                    'first_seen': row[4],
+                    'last_updated': row[5],
+                    'last_scanned': row[6],
+                    'is_active': bool(row[7]),
+                    'scan_priority': row[8]
+                })
+            
+            logger.debug(f"📂 Chargé {len(accounts)} comptes depuis la DB pour {wallet_address[:8]}...")
+            return accounts
             
         except sqlite3.Error as e:
             logger.error(f"❌ Erreur lors du chargement des comptes: {e}")
             return []
+        finally:
+            conn.close()
 
     def save_token_accounts_to_db(self, wallet_address: str, accounts: List[Dict], scan_type: str) -> int:
         """Sauvegarde les comptes de tokens en base avec logique intelligente"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        new_count = 0
+        
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                current_time = int(time.time())
-                new_count = 0
-                for account in accounts:
-                    is_new = account.get('is_new', False)
-                    
-                    # Priorité plus élevée pour les nouveaux comptes
-                    scan_priority = 3 if is_new else 1
-                    
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO token_accounts
-                        (wallet_address, ata_pubkey, token_mint, balance, decimals,
-                        first_seen, last_updated, last_scanned, is_active, scan_priority)
-                        VALUES (?, ?, ?, ?, ?, 
-                                COALESCE((SELECT first_seen FROM token_accounts 
-                                        WHERE wallet_address = ? AND ata_pubkey = ?), ?),
-                                ?, ?, 1, ?)
-                    ''', (
-                        wallet_address, account['ata_pubkey'], account['token_mint'],
-                        account['balance'], account['decimals'],
-                        wallet_address, account['ata_pubkey'], current_time,  # Pour COALESCE
-                        current_time, current_time, scan_priority
-                    ))
-                    
-                    if is_new:
-                        new_count += 1
+            for account in accounts:
+                is_new = account.get('is_new', False)
                 
-                conn.commit()
-                logger.info(f"💾 Sauvegardé {len(accounts)} comptes ({new_count} nouveaux) pour {wallet_address[:8]}...")
-                return new_count
+                # Priorité plus élevée pour les nouveaux comptes
+                scan_priority = 3 if is_new else 1
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO token_accounts
+                    (wallet_address, ata_pubkey, token_mint, balance, decimals,
+                     first_seen, last_updated, last_scanned, is_active, scan_priority)
+                    VALUES (?, ?, ?, ?, ?, 
+                            COALESCE((SELECT first_seen FROM token_accounts 
+                                    WHERE wallet_address = ? AND ata_pubkey = ?), ?),
+                            ?, ?, 1, ?)
+                ''', (
+                    wallet_address, account['ata_pubkey'], account['token_mint'],
+                    account['balance'], account['decimals'],
+                    wallet_address, account['ata_pubkey'], current_time,  # Pour COALESCE
+                    current_time, current_time, scan_priority
+                ))
+                
+                if is_new:
+                    new_count += 1
+            
+            conn.commit()
+            logger.info(f"💾 Sauvegardé {len(accounts)} comptes ({new_count} nouveaux) pour {wallet_address[:8]}...")
+            return new_count
             
         except sqlite3.Error as e:
             logger.error(f"❌ Erreur lors de la sauvegarde des comptes: {e}")
             return 0
+        finally:
+            conn.close()
 
     def record_scan_history(self, wallet_address: str, scan_type: str, total_accounts: int, 
                           new_accounts: int, scan_duration: float):
         """Enregistre l'historique des scans"""
-
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
         
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO scan_history 
-                    (wallet_address, scan_type, total_accounts, new_accounts, scan_duration, completed_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (wallet_address, scan_type, total_accounts, new_accounts, scan_duration, int(time.time())))
-                
-                conn.commit()
-                logger.debug(f"📝 Historique de scan enregistré pour {wallet_address[:8]}...")
+            cursor.execute('''
+                INSERT INTO scan_history 
+                (wallet_address, scan_type, total_accounts, new_accounts, scan_duration, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (wallet_address, scan_type, total_accounts, new_accounts, scan_duration, int(time.time())))
+            
+            conn.commit()
+            logger.debug(f"📝 Historique de scan enregistré pour {wallet_address[:8]}...")
             
         except sqlite3.Error as e:
             logger.error(f"❌ Erreur lors de l'enregistrement de l'historique: {e}")
-
+        finally:
+            conn.close()
 
     def get_priority_accounts_for_scanning(self, wallet_address: str, limit: int = 100) -> List[Dict]:
         """Récupère les comptes prioritaires à scanner pour les balance changes - VERSION CORRIGÉE"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        current_time = int(time.time())
         
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                current_time = int(time.time())
+            # LOGIQUE CORRIGÉE: Plus agressive pour identifier les comptes à scanner
+            cursor.execute('''
+                SELECT ata_pubkey, token_mint, balance, decimals, scan_priority, last_scanned
+                FROM token_accounts 
+                WHERE wallet_address = ? AND is_active = 1
+                ORDER BY 
+                    CASE 
+                        WHEN last_scanned IS NULL THEN 0  -- Jamais scannés = priorité max
+                        WHEN scan_priority >= 3 THEN 1   -- Nouveaux comptes = haute priorité
+                        WHEN ? - last_scanned > 1800 THEN 2  -- Plus de 30min = priorité moyenne
+                        ELSE 3  -- Récents = basse priorité
+                    END ASC,
+                    scan_priority DESC,
+                    last_scanned ASC
+                LIMIT ?
+            ''', (wallet_address, current_time, limit))
+            
+            rows = cursor.fetchall()
+            accounts = []
+            
+            for row in rows:
+                last_scanned = row[5]
+                time_since_scan = (current_time - last_scanned) if last_scanned else 999999
                 
-                cursor.execute('''
-                    SELECT ata_pubkey, token_mint, balance, decimals, scan_priority, last_scanned
-                    FROM token_accounts 
-                    WHERE wallet_address = ? AND is_active = 1
-                    ORDER BY 
-                        CASE 
-                            WHEN last_scanned IS NULL THEN 0  -- Jamais scannés = priorité max
-                            WHEN scan_priority >= 3 THEN 1   -- Nouveaux comptes = haute priorité
-                            WHEN ? - last_scanned > 1800 THEN 2  -- Plus de 30min = priorité moyenne
-                            ELSE 3  -- Récents = basse priorité
-                        END ASC,
-                        scan_priority DESC,
-                        last_scanned ASC
-                    LIMIT ?
-                ''', (wallet_address, current_time, limit))
+                # CRITÈRES PLUS PERMISSIFS pour capturer plus de comptes
+                needs_scan = (
+                    last_scanned is None or  # Jamais scanné
+                    time_since_scan > 900 or  # Plus de 15 minutes (au lieu de 30)
+                    row[4] >= 3  # Priorité élevée (nouveaux comptes)
+                )
                 
-                rows = cursor.fetchall()
-                accounts = []
+                accounts.append({
+                    'ata_pubkey': row[0],
+                    'token_mint': row[1],
+                    'balance': row[2],
+                    'decimals': row[3],
+                    'scan_priority': row[4],
+                    'last_scanned': last_scanned,
+                    'needs_scan': needs_scan,
+                    'time_since_scan': time_since_scan
+                })
+            
+            priority_accounts = [acc for acc in accounts if acc['needs_scan']]
+            
+            # LOGS AMÉLIORÉS pour diagnostiquer
+            logger.info(f"🎯 {len(priority_accounts)} comptes prioritaires identifiés pour {wallet_address[:8]}... "
+                    f"(sur {len(accounts)} comptes actifs)")
+            
+            if len(priority_accounts) == 0 and len(accounts) > 0:
+                # Diagnostiquer pourquoi aucun compte n'est prioritaire
+                never_scanned = sum(1 for acc in accounts if acc['last_scanned'] is None)
+                recent_scanned = sum(1 for acc in accounts if acc['time_since_scan'] < 900)
+                old_scanned = sum(1 for acc in accounts if acc['time_since_scan'] >= 900)
                 
-                for row in rows:
-                    last_scanned = row[5]
-                    time_since_scan = (current_time - last_scanned) if last_scanned else 999999
-                    
-                    # CRITÈRES PLUS PERMISSIFS pour capturer plus de comptes
-                    needs_scan = (
-                        last_scanned is None or  # Jamais scanné
-                        time_since_scan > 900 or  # Plus de 15 minutes (au lieu de 30)
-                        row[4] >= 3  # Priorité élevée (nouveaux comptes)
-                    )
-                    
-                    accounts.append({
-                        'ata_pubkey': row[0],
-                        'token_mint': row[1],
-                        'balance': row[2],
-                        'decimals': row[3],
-                        'scan_priority': row[4],
-                        'last_scanned': last_scanned,
-                        'needs_scan': needs_scan,
-                        'time_since_scan': time_since_scan
-                    })
+                logger.info(f"🔍 Diagnostic priorités pour {wallet_address[:8]}...:")
+                logger.info(f"   - Jamais scannés: {never_scanned}")
+                logger.info(f"   - Scannés récemment (<15min): {recent_scanned}")
+                logger.info(f"   - Scannés anciennement (>15min): {old_scanned}")
                 
-                priority_accounts = [acc for acc in accounts if acc['needs_scan']]
-                
-                # LOGS AMÉLIORÉS pour diagnostiquer
-                logger.info(f"🎯 {len(priority_accounts)} comptes prioritaires identifiés pour {wallet_address[:8]}... "
-                        f"(sur {len(accounts)} comptes actifs)")
-                
-                if len(priority_accounts) == 0 and len(accounts) > 0:
-                    # Diagnostiquer pourquoi aucun compte n'est prioritaire
-                    never_scanned = sum(1 for acc in accounts if acc['last_scanned'] is None)
-                    recent_scanned = sum(1 for acc in accounts if acc['time_since_scan'] < 900)
-                    old_scanned = sum(1 for acc in accounts if acc['time_since_scan'] >= 900)
-                    
-                    logger.info(f"🔍 Diagnostic priorités pour {wallet_address[:8]}...:")
-                    logger.info(f"   - Jamais scannés: {never_scanned}")
-                    logger.info(f"   - Scannés récemment (<15min): {recent_scanned}")
-                    logger.info(f"   - Scannés anciennement (>15min): {old_scanned}")
-                    
-                    # FORCER au moins quelques comptes si aucun n'est prioritaire
-                    if len(accounts) > 0:
-                        forced_accounts = accounts[:min(5, len(accounts))]
-                        for acc in forced_accounts:
-                            acc['needs_scan'] = True
-                        priority_accounts = forced_accounts
-                        logger.info(f"🔧 FORÇAGE: {len(priority_accounts)} comptes forcés pour scan")
-                
-                return priority_accounts[:limit]
+                # FORCER au moins quelques comptes si aucun n'est prioritaire
+                if len(accounts) > 0:
+                    forced_accounts = accounts[:min(5, len(accounts))]
+                    for acc in forced_accounts:
+                        acc['needs_scan'] = True
+                    priority_accounts = forced_accounts
+                    logger.info(f"🔧 FORÇAGE: {len(priority_accounts)} comptes forcés pour scan")
+            
+            return priority_accounts[:limit]
             
         except sqlite3.Error as e:
             logger.error(f"❌ Erreur lors de la récupération des comptes prioritaires: {e}")
             return []
+        finally:
+            conn.close()
 
     def scan_balance_changes_for_accounts(self, wallet_address: str, priority_accounts: List[Dict]) -> List[Dict]:
         """Scanne les balance changes pour les comptes prioritaires"""
@@ -1196,36 +1172,38 @@ class SolanaWalletMonitor:
 
     def mark_account_as_scanned(self, wallet_address: str, ata_pubkey: str):
         """Marque un compte comme scanné récemment"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        current_time = int(time.time())
         
         try:
-
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                current_time = int(time.time())
-                cursor.execute('''
-                    UPDATE token_accounts 
-                    SET last_scanned = ?, scan_priority = CASE 
-                        WHEN scan_priority > 1 THEN scan_priority - 1 
-                        ELSE 1 
-                    END
-                    WHERE wallet_address = ? AND ata_pubkey = ?
-                ''', (current_time, wallet_address, ata_pubkey))
-                
-                conn.commit()
+            cursor.execute('''
+                UPDATE token_accounts 
+                SET last_scanned = ?, scan_priority = CASE 
+                    WHEN scan_priority > 1 THEN scan_priority - 1 
+                    ELSE 1 
+                END
+                WHERE wallet_address = ? AND ata_pubkey = ?
+            ''', (current_time, wallet_address, ata_pubkey))
+            
+            conn.commit()
             
         except sqlite3.Error as e:
             logger.error(f"❌ Erreur lors de la mise à jour du scan: {e}")
+        finally:
+            conn.close()
 
     def signature_exists_in_db(self, signature: str) -> bool:
         """Vérifie si une signature existe déjà dans la DB"""
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT 1 FROM transactions WHERE signature = ? LIMIT 1", (signature,))
-                return cursor.fetchone() is not None
-
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM transactions WHERE signature = ? LIMIT 1", (signature,))
+            exists = cursor.fetchone() is not None
+            conn.close()
+            return exists
         except Exception as e:
-            logger.error(f"Erreur vérification signature: {e}")
+            logger.error(f"Erreur lors de la vérification de signature: {e}")
             return False
 
     # [Le reste des méthodes reste identique - get_token_metadata, analyze_balance_change_transaction, etc.]
@@ -1445,31 +1423,44 @@ class SolanaWalletMonitor:
 
     def save_transaction_for_wallet(self, tx: Dict, wallet_address: str):
         """Sauvegarde une transaction pour un wallet spécifique"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+
         try:
-            with db_manager.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT OR IGNORE INTO transactions 
-                    (signature, wallet_address, slot, block_time, amount, fee, status, 
-                    token_mint, token_symbol, token_name, transaction_type, 
-                    token_amount, price_per_token, is_token_transaction, is_large_token_amount)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    tx["signature"], wallet_address, tx["slot"], tx["block_time"],
-                    tx["amount"], tx["fee"], tx["status"], tx.get("token_mint"),
-                    tx.get("token_symbol"), tx.get("token_name"), tx.get("transaction_type"),
-                    tx.get("token_amount"), tx.get("price_per_token"),
-                    tx.get("is_token_transaction", False), tx.get("is_large_token_amount", False)
-                ))
-                conn.commit()
+            cursor.execute('''
+                INSERT OR IGNORE INTO transactions 
+                (signature, wallet_address, slot, block_time, amount, fee, status, 
+                token_mint, token_symbol, token_name, transaction_type, 
+                token_amount, price_per_token, is_token_transaction, is_large_token_amount)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                tx["signature"],
+                wallet_address,
+                tx["slot"],
+                tx["block_time"],
+                tx["amount"],
+                tx["fee"],
+                tx["status"],
+                tx.get("token_mint"),
+                tx.get("token_symbol"),
+                tx.get("token_name"),
+                tx.get("transaction_type"),
+                tx.get("token_amount"),
+                tx.get("price_per_token"),
+                tx.get("is_token_transaction", False),
+                tx.get("is_large_token_amount", False)
+            ))
+            conn.commit()
 
-                if tx.get("is_token_transaction"):
-                    source = tx.get("source", "signature")
-                    logger.info(f"💾 Sauvegarde [{source.upper()}]: {tx.get('transaction_type', 'unknown').upper()} "
-                            f"{tx.get('token_amount', 0):,.4f} {tx.get('token_symbol', 'UNKNOWN')}")
-
-        except Exception as e:
-            logger.error(f"❌ Erreur sauvegarde transaction: {e}")
+            if tx.get("is_token_transaction"):
+                source = tx.get("source", "signature")
+                logger.info(f"💾 Sauvegarde [{source.upper()}]: {tx.get('transaction_type', 'unknown').upper()} "
+                           f"{tx.get('token_amount', 0):,.4f} {tx.get('token_symbol', 'UNKNOWN')} "
+                           f"({'🔥 GROSSE QUANTITÉ' if tx.get('is_large_token_amount') else 'normale'})")
+        except sqlite3.Error as e:
+            logger.error(f"❌ Erreur lors de la sauvegarde: {e}")
+        finally:
+            conn.close()
 
     def get_wallet_balance_for_address(self, wallet_address: str) -> float:
         """Récupère le solde SOL pour un wallet spécifique"""
@@ -1480,39 +1471,38 @@ class SolanaWalletMonitor:
 
     def update_wallet_stats(self):
         """Met à jour les statistiques pour tous les wallets"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
 
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
+        for wallet_address in self.wallet_addresses:
+            balance = self.get_wallet_balance_for_address(wallet_address)
 
-            for wallet_address in self.wallet_addresses:
-                balance = self.get_wallet_balance_for_address(wallet_address)
+            cursor.execute("SELECT COUNT(*) FROM transactions WHERE wallet_address = ?", (wallet_address,))
+            total_transactions = cursor.fetchone()[0]
 
-                cursor.execute("SELECT COUNT(*) FROM transactions WHERE wallet_address = ?", (wallet_address,))
-                total_transactions = cursor.fetchone()[0]
+            cursor.execute("SELECT SUM(ABS(amount)) FROM transactions WHERE amount != 0 AND wallet_address = ?", (wallet_address,))
+            result = cursor.fetchone()
+            total_volume = result[0] if result[0] else 0
 
-                cursor.execute("SELECT SUM(ABS(amount)) FROM transactions WHERE amount != 0 AND wallet_address = ?", (wallet_address,))
-                result = cursor.fetchone()
-                total_volume = result[0] if result[0] else 0
+            cursor.execute("SELECT SUM(amount) FROM transactions WHERE wallet_address = ?", (wallet_address,))
+            result = cursor.fetchone()
+            pnl = result[0] if result[0] else 0
 
-                cursor.execute("SELECT SUM(amount) FROM transactions WHERE wallet_address = ?", (wallet_address,))
-                result = cursor.fetchone()
-                pnl = result[0] if result[0] else 0
+            cursor.execute("SELECT MAX(ABS(amount)) FROM transactions WHERE wallet_address = ?", (wallet_address,))
+            result = cursor.fetchone()
+            largest_transaction = result[0] if result[0] else 0
 
-                cursor.execute("SELECT MAX(ABS(amount)) FROM transactions WHERE wallet_address = ?", (wallet_address,))
-                result = cursor.fetchone()
-                largest_transaction = result[0] if result[0] else 0
+            cursor.execute('''
+                INSERT INTO wallet_stats 
+                (wallet_address, balance_sol, total_transactions, total_volume, pnl, largest_transaction)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (wallet_address, balance, total_transactions, total_volume, pnl, largest_transaction))
 
-                cursor.execute('''
-                    INSERT INTO wallet_stats 
-                    (wallet_address, balance_sol, total_transactions, total_volume, pnl, largest_transaction)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (wallet_address, balance, total_transactions, total_volume, pnl, largest_transaction))
+            logger.info(f"📊 Stats {wallet_address[:8]}... - Balance: {balance:.4f} SOL, "
+                       f"Transactions: {total_transactions}, P&L: {pnl:.4f} SOL")
 
-                logger.info(f"📊 Stats {wallet_address[:8]}... - Balance: {balance:.4f} SOL, "
-                        f"Transactions: {total_transactions}, P&L: {pnl:.4f} SOL")
-
-            conn.commit()
-
+        conn.commit()
+        conn.close()
 
     def monitor_loop(self):
         """Boucle principale de monitoring avec priorités dynamiques intelligentes et logs détaillés"""
@@ -2109,53 +2099,54 @@ def selection_mode():
 def get_selection_stats():
     """API pour récupérer les statistiques de sélection des wallets"""
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            current_time = int(time.time())
-            
-            # Statistiques des dernières 24h
-            cursor.execute('''
-                SELECT 
-                    sh.wallet_address,
-                    COUNT(*) as scan_count,
-                    AVG(sh.scan_duration) as avg_duration,
-                    MAX(sh.completed_at) as last_scan,
-                    SUM(sh.activity_detected) as activity_count
-                FROM scan_history sh
-                WHERE sh.completed_at >= ?
-                GROUP BY sh.wallet_address
-                ORDER BY scan_count DESC
-            ''', (current_time - 86400,))
-            
-            selection_stats = []
-            for row in cursor.fetchall():
-                wallet = row[0]
-                selection_stats.append({
-                    'wallet_address': wallet,
-                    'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
-                    'scan_count_24h': row[1],
-                    'avg_duration': round(row[2], 1) if row[2] else 0,
-                    'last_scan': row[3],
-                    'activity_detections': row[4] or 0,
-                    'hours_since_scan': round((current_time - row[3]) / 3600, 1) if row[3] else 999
-                })
-            
-            # Statistiques globales
-            total_scans = sum(stat['scan_count_24h'] for stat in selection_stats)
-            most_scanned = max(selection_stats, key=lambda x: x['scan_count_24h']) if selection_stats else None
-            least_scanned = min(selection_stats, key=lambda x: x['scan_count_24h']) if selection_stats else None
-            
-            return jsonify({
-                'selection_mode': Config.WALLET_SELECTION_MODE,
-                'wallet_stats': selection_stats,
-                'global_stats': {
-                    'total_scans_24h': total_scans,
-                    'most_scanned_wallet': most_scanned['wallet_short'] if most_scanned else None,
-                    'least_scanned_wallet': least_scanned['wallet_short'] if least_scanned else None,
-                    'avg_scans_per_wallet': round(total_scans / len(selection_stats), 1) if selection_stats else 0
-                }
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
+        # Statistiques des dernières 24h
+        cursor.execute('''
+            SELECT 
+                sh.wallet_address,
+                COUNT(*) as scan_count,
+                AVG(sh.scan_duration) as avg_duration,
+                MAX(sh.completed_at) as last_scan,
+                SUM(sh.activity_detected) as activity_count
+            FROM scan_history sh
+            WHERE sh.completed_at >= ?
+            GROUP BY sh.wallet_address
+            ORDER BY scan_count DESC
+        ''', (current_time - 86400,))
+        
+        selection_stats = []
+        for row in cursor.fetchall():
+            wallet = row[0]
+            selection_stats.append({
+                'wallet_address': wallet,
+                'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
+                'scan_count_24h': row[1],
+                'avg_duration': round(row[2], 1) if row[2] else 0,
+                'last_scan': row[3],
+                'activity_detections': row[4] or 0,
+                'hours_since_scan': round((current_time - row[3]) / 3600, 1) if row[3] else 999
             })
-            
+        
+        # Statistiques globales
+        total_scans = sum(stat['scan_count_24h'] for stat in selection_stats)
+        most_scanned = max(selection_stats, key=lambda x: x['scan_count_24h']) if selection_stats else None
+        least_scanned = min(selection_stats, key=lambda x: x['scan_count_24h']) if selection_stats else None
+        
+        conn.close()
+        return jsonify({
+            'selection_mode': Config.WALLET_SELECTION_MODE,
+            'wallet_stats': selection_stats,
+            'global_stats': {
+                'total_scans_24h': total_scans,
+                'most_scanned_wallet': most_scanned['wallet_short'] if most_scanned else None,
+                'least_scanned_wallet': least_scanned['wallet_short'] if least_scanned else None,
+                'avg_scans_per_wallet': round(total_scans / len(selection_stats), 1) if selection_stats else 0
+            }
+        })
+        
     except Exception as e:
         logger.error(f"❌ Erreur statistiques sélection: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2174,78 +2165,79 @@ def health_check():
 def get_wallet_priorities():
     """API pour récupérer l'état actuel des priorités des wallets"""
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            current_time = int(time.time())
-            
-            cursor.execute('''
-                SELECT 
-                    wp.wallet_address,
-                    wp.priority_score,
-                    wp.last_scan_time,
-                    wp.total_scans,
-                    wp.consecutive_empty_scans,
-                    wp.activity_score,
-                    wp.avg_scan_duration,
-                    (? - wp.last_scan_time) as seconds_since_scan,
-                    CASE 
-                        WHEN wp.priority_score >= 4.0 THEN 'high'
-                        WHEN wp.priority_score >= 2.0 THEN 'medium'
-                        ELSE 'low'
-                    END as priority_category,
-                    CASE 
-                        WHEN wp.priority_score >= 4.0 THEN 30
-                        WHEN wp.priority_score >= 2.0 THEN 90
-                        ELSE 180
-                    END as scan_interval_seconds
-                FROM wallet_priorities wp
-                ORDER BY wp.priority_score DESC, wp.last_scan_time ASC
-            ''', (current_time,))
-            
-            priorities = []
-            for row in cursor.fetchall():
-                wallet_addr = row[0]
-                priorities.append({
-                    'wallet_address': wallet_addr,
-                    'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
-                    'priority_score': round(row[1], 2),
-                    'last_scan_time': row[2],
-                    'total_scans': row[3],
-                    'consecutive_empty_scans': row[4],
-                    'activity_score': round(row[5], 2),
-                    'avg_scan_duration': round(row[6], 1) if row[6] else 0,
-                    'seconds_since_scan': row[7],
-                    'priority_category': row[8],
-                    'scan_interval_seconds': row[9],
-                    'next_scan_in': max(0, row[9] - row[7]),
-                    'is_ready_for_scan': row[7] >= row[9]
-                })
-            
-            # Statistiques globales
-            cursor.execute('''
-                SELECT 
-                    COUNT(*) as total,
-                    AVG(priority_score) as avg_score,
-                    COUNT(CASE WHEN priority_score >= 4.0 THEN 1 END) as high_priority,
-                    COUNT(CASE WHEN priority_score >= 2.0 AND priority_score < 4.0 THEN 1 END) as medium_priority,
-                    COUNT(CASE WHEN priority_score < 2.0 THEN 1 END) as low_priority
-                FROM wallet_priorities
-            ''')
-            
-            stats_row = cursor.fetchone()
-            stats = {
-                'total_wallets': stats_row[0],
-                'average_priority': round(stats_row[1], 2) if stats_row[1] else 0,
-                'high_priority_wallets': stats_row[2],
-                'medium_priority_wallets': stats_row[3],
-                'low_priority_wallets': stats_row[4]
-            }
-            
-            return jsonify({
-                'priorities': priorities,
-                'stats': stats,
-                'timestamp': current_time
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
+        cursor.execute('''
+            SELECT 
+                wp.wallet_address,
+                wp.priority_score,
+                wp.last_scan_time,
+                wp.total_scans,
+                wp.consecutive_empty_scans,
+                wp.activity_score,
+                wp.avg_scan_duration,
+                (? - wp.last_scan_time) as seconds_since_scan,
+                CASE 
+                    WHEN wp.priority_score >= 4.0 THEN 'high'
+                    WHEN wp.priority_score >= 2.0 THEN 'medium'
+                    ELSE 'low'
+                END as priority_category,
+                CASE 
+                    WHEN wp.priority_score >= 4.0 THEN 30
+                    WHEN wp.priority_score >= 2.0 THEN 90
+                    ELSE 180
+                END as scan_interval_seconds
+            FROM wallet_priorities wp
+            ORDER BY wp.priority_score DESC, wp.last_scan_time ASC
+        ''', (current_time,))
+        
+        priorities = []
+        for row in cursor.fetchall():
+            wallet_addr = row[0]
+            priorities.append({
+                'wallet_address': wallet_addr,
+                'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
+                'priority_score': round(row[1], 2),
+                'last_scan_time': row[2],
+                'total_scans': row[3],
+                'consecutive_empty_scans': row[4],
+                'activity_score': round(row[5], 2),
+                'avg_scan_duration': round(row[6], 1) if row[6] else 0,
+                'seconds_since_scan': row[7],
+                'priority_category': row[8],
+                'scan_interval_seconds': row[9],
+                'next_scan_in': max(0, row[9] - row[7]),
+                'is_ready_for_scan': row[7] >= row[9]
             })
+        
+        # Statistiques globales
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total,
+                AVG(priority_score) as avg_score,
+                COUNT(CASE WHEN priority_score >= 4.0 THEN 1 END) as high_priority,
+                COUNT(CASE WHEN priority_score >= 2.0 AND priority_score < 4.0 THEN 1 END) as medium_priority,
+                COUNT(CASE WHEN priority_score < 2.0 THEN 1 END) as low_priority
+            FROM wallet_priorities
+        ''')
+        
+        stats_row = cursor.fetchone()
+        stats = {
+            'total_wallets': stats_row[0],
+            'average_priority': round(stats_row[1], 2) if stats_row[1] else 0,
+            'high_priority_wallets': stats_row[2],
+            'medium_priority_wallets': stats_row[3],
+            'low_priority_wallets': stats_row[4]
+        }
+        
+        conn.close()
+        return jsonify({
+            'priorities': priorities,
+            'stats': stats,
+            'timestamp': current_time
+        })
         
     except Exception as e:
         logger.error(f"Erreur récupération priorités: {e}")
@@ -2257,72 +2249,73 @@ def get_scan_efficiency():
     hours = request.args.get('hours', 24, type=int)
     
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            start_time = int(time.time()) - (hours * 3600)
-            
-            # Métriques par wallet
-            cursor.execute('''
-                SELECT 
-                    wam.wallet_address,
-                    COUNT(*) as scan_count,
-                    AVG(wam.scan_duration) as avg_duration,
-                    SUM(wam.discoveries_count) as total_discoveries,
-                    SUM(wam.balance_changes_count) as total_transactions,
-                    SUM(wam.rpc_requests_made) as total_rpc_requests,
-                    AVG(wam.efficiency_score) as avg_efficiency
-                FROM wallet_activity_metrics wam
-                WHERE wam.timestamp >= ?
-                GROUP BY wam.wallet_address
-                ORDER BY avg_efficiency DESC
-            ''', (start_time,))
-            
-            efficiency_data = []
-            for row in cursor.fetchall():
-                wallet_addr = row[0]
-                efficiency_data.append({
-                    'wallet_address': wallet_addr,
-                    'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
-                    'scan_count': row[1],
-                    'avg_duration': round(row[2], 1) if row[2] else 0,
-                    'total_discoveries': row[3],
-                    'total_transactions': row[4],
-                    'total_rpc_requests': row[5],
-                    'avg_efficiency': round(row[6], 1) if row[6] else 0,
-                    'discoveries_per_scan': round(row[3] / max(row[1], 1), 2),
-                    'transactions_per_scan': round(row[4] / max(row[1], 1), 2)
-                })
-            
-            # Tendances temporelles (par heure)
-            cursor.execute('''
-                SELECT 
-                    strftime('%H', datetime(timestamp, 'unixepoch')) as hour,
-                    COUNT(*) as scans,
-                    AVG(efficiency_score) as avg_efficiency,
-                    SUM(discoveries_count) as discoveries,
-                    SUM(balance_changes_count) as transactions
-                FROM wallet_activity_metrics
-                WHERE timestamp >= ?
-                GROUP BY hour
-                ORDER BY hour
-            ''', (start_time,))
-            
-            hourly_trends = []
-            for row in cursor.fetchall():
-                hourly_trends.append({
-                    'hour': row[0],
-                    'scans': row[1],
-                    'avg_efficiency': round(row[2], 1) if row[2] else 0,
-                    'discoveries': row[3],
-                    'transactions': row[4]
-                })
-
-            return jsonify({
-                'efficiency_by_wallet': efficiency_data,
-                'hourly_trends': hourly_trends,
-                'period_hours': hours
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        start_time = int(time.time()) - (hours * 3600)
+        
+        # Métriques par wallet
+        cursor.execute('''
+            SELECT 
+                wam.wallet_address,
+                COUNT(*) as scan_count,
+                AVG(wam.scan_duration) as avg_duration,
+                SUM(wam.discoveries_count) as total_discoveries,
+                SUM(wam.balance_changes_count) as total_transactions,
+                SUM(wam.rpc_requests_made) as total_rpc_requests,
+                AVG(wam.efficiency_score) as avg_efficiency
+            FROM wallet_activity_metrics wam
+            WHERE wam.timestamp >= ?
+            GROUP BY wam.wallet_address
+            ORDER BY avg_efficiency DESC
+        ''', (start_time,))
+        
+        efficiency_data = []
+        for row in cursor.fetchall():
+            wallet_addr = row[0]
+            efficiency_data.append({
+                'wallet_address': wallet_addr,
+                'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
+                'scan_count': row[1],
+                'avg_duration': round(row[2], 1) if row[2] else 0,
+                'total_discoveries': row[3],
+                'total_transactions': row[4],
+                'total_rpc_requests': row[5],
+                'avg_efficiency': round(row[6], 1) if row[6] else 0,
+                'discoveries_per_scan': round(row[3] / max(row[1], 1), 2),
+                'transactions_per_scan': round(row[4] / max(row[1], 1), 2)
             })
+        
+        # Tendances temporelles (par heure)
+        cursor.execute('''
+            SELECT 
+                strftime('%H', datetime(timestamp, 'unixepoch')) as hour,
+                COUNT(*) as scans,
+                AVG(efficiency_score) as avg_efficiency,
+                SUM(discoveries_count) as discoveries,
+                SUM(balance_changes_count) as transactions
+            FROM wallet_activity_metrics
+            WHERE timestamp >= ?
+            GROUP BY hour
+            ORDER BY hour
+        ''', (start_time,))
+        
+        hourly_trends = []
+        for row in cursor.fetchall():
+            hourly_trends.append({
+                'hour': row[0],
+                'scans': row[1],
+                'avg_efficiency': round(row[2], 1) if row[2] else 0,
+                'discoveries': row[3],
+                'transactions': row[4]
+            })
+        
+        conn.close()
+        return jsonify({
+            'efficiency_by_wallet': efficiency_data,
+            'hourly_trends': hourly_trends,
+            'period_hours': hours
+        })
         
     except Exception as e:
         logger.error(f"Erreur récupération efficacité: {e}")
@@ -2335,69 +2328,69 @@ def get_priority_history():
     hours = request.args.get('hours', 24, type=int)
     
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        start_time = int(time.time()) - (hours * 3600)
+        
+        if wallet != 'all':
+            cursor.execute('''
+                SELECT 
+                    sh.wallet_address,
+                    sh.completed_at,
+                    sh.priority_score_before,
+                    sh.priority_score_after,
+                    sh.activity_detected,
+                    sh.new_accounts,
+                    sh.scan_duration,
+                    sh.efficiency_score
+                FROM scan_history sh
+                WHERE sh.wallet_address = ? AND sh.completed_at >= ?
+                ORDER BY sh.completed_at DESC
+                LIMIT 50
+            ''', (wallet, start_time))
+        else:
+            cursor.execute('''
+                SELECT 
+                    sh.wallet_address,
+                    sh.completed_at,
+                    sh.priority_score_before,
+                    sh.priority_score_after,
+                    sh.activity_detected,
+                    sh.new_accounts,
+                    sh.scan_duration,
+                    sh.efficiency_score
+                FROM scan_history sh
+                WHERE sh.completed_at >= ?
+                ORDER BY sh.completed_at DESC
+                LIMIT 100
+            ''', (start_time,))
+        
+        history = []
+        for row in cursor.fetchall():
+            wallet_addr = row[0]
+            priority_change = (row[3] or 0) - (row[2] or 0)
             
-            start_time = int(time.time()) - (hours * 3600)
-            
-            if wallet != 'all':
-                cursor.execute('''
-                    SELECT 
-                        sh.wallet_address,
-                        sh.completed_at,
-                        sh.priority_score_before,
-                        sh.priority_score_after,
-                        sh.activity_detected,
-                        sh.new_accounts,
-                        sh.scan_duration,
-                        sh.efficiency_score
-                    FROM scan_history sh
-                    WHERE sh.wallet_address = ? AND sh.completed_at >= ?
-                    ORDER BY sh.completed_at DESC
-                    LIMIT 50
-                ''', (wallet, start_time))
-            else:
-                cursor.execute('''
-                    SELECT 
-                        sh.wallet_address,
-                        sh.completed_at,
-                        sh.priority_score_before,
-                        sh.priority_score_after,
-                        sh.activity_detected,
-                        sh.new_accounts,
-                        sh.scan_duration,
-                        sh.efficiency_score
-                    FROM scan_history sh
-                    WHERE sh.completed_at >= ?
-                    ORDER BY sh.completed_at DESC
-                    LIMIT 100
-                ''', (start_time,))
-            
-            history = []
-            for row in cursor.fetchall():
-                wallet_addr = row[0]
-                priority_change = (row[3] or 0) - (row[2] or 0)
-                
-                history.append({
-                    'wallet_address': wallet_addr,
-                    'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
-                    'timestamp': row[1],
-                    'priority_before': round(row[2], 2) if row[2] else 0,
-                    'priority_after': round(row[3], 2) if row[3] else 0,
-                    'priority_change': round(priority_change, 2),
-                    'activity_detected': bool(row[4]),
-                    'new_accounts': row[5] or 0,
-                    'scan_duration': round(row[6], 1) if row[6] else 0,
-                    'efficiency_score': round(row[7], 1) if row[7] else 0,
-                    'change_direction': 'up' if priority_change > 0 else 'down' if priority_change < 0 else 'stable'
-                })
-            
-            
-            return jsonify({
-                'history': history,
-                'wallet_filter': wallet,
-                'period_hours': hours
+            history.append({
+                'wallet_address': wallet_addr,
+                'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
+                'timestamp': row[1],
+                'priority_before': round(row[2], 2) if row[2] else 0,
+                'priority_after': round(row[3], 2) if row[3] else 0,
+                'priority_change': round(priority_change, 2),
+                'activity_detected': bool(row[4]),
+                'new_accounts': row[5] or 0,
+                'scan_duration': round(row[6], 1) if row[6] else 0,
+                'efficiency_score': round(row[7], 1) if row[7] else 0,
+                'change_direction': 'up' if priority_change > 0 else 'down' if priority_change < 0 else 'stable'
             })
+        
+        conn.close()
+        return jsonify({
+            'history': history,
+            'wallet_filter': wallet,
+            'period_hours': hours
+        })
         
     except Exception as e:
         logger.error(f"Erreur récupération historique priorité: {e}")
@@ -2407,106 +2400,107 @@ def get_priority_history():
 def get_next_scans():
     """API pour récupérer la planification des prochains scans"""
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            current_time = int(time.time())
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
+        cursor.execute('''
+            SELECT 
+                wp.wallet_address,
+                wp.priority_score,
+                wp.last_scan_time,
+                (? - wp.last_scan_time) as seconds_since_scan,
+                CASE 
+                    WHEN wp.priority_score >= 4.0 THEN 30
+                    WHEN wp.priority_score >= 2.0 THEN 90
+                    ELSE 180
+                END as scan_interval,
+                wp.consecutive_empty_scans,
+                wp.activity_score
+            FROM wallet_priorities wp
+            ORDER BY 
+                CASE 
+                    WHEN (? - wp.last_scan_time) >= 
+                        CASE 
+                            WHEN wp.priority_score >= 4.0 THEN 30
+                            WHEN wp.priority_score >= 2.0 THEN 90
+                            ELSE 180
+                        END 
+                    THEN wp.priority_score 
+                    ELSE 0 
+                END DESC,
+                wp.last_scan_time ASC
+        ''', (current_time, current_time))
+        
+        next_scans = []
+        ready_count = 0
+        
+        for i, row in enumerate(cursor.fetchall()):
+            wallet_addr = row[0]
+            priority_score = row[1]
+            last_scan = row[2]
+            since_scan = row[3]
+            interval = row[4]
+            empty_scans = row[5]
+            activity_score = row[6]
             
-            cursor.execute('''
-                SELECT 
-                    wp.wallet_address,
-                    wp.priority_score,
-                    wp.last_scan_time,
-                    (? - wp.last_scan_time) as seconds_since_scan,
-                    CASE 
-                        WHEN wp.priority_score >= 4.0 THEN 30
-                        WHEN wp.priority_score >= 2.0 THEN 90
-                        ELSE 180
-                    END as scan_interval,
-                    wp.consecutive_empty_scans,
-                    wp.activity_score
-                FROM wallet_priorities wp
-                ORDER BY 
-                    CASE 
-                        WHEN (? - wp.last_scan_time) >= 
-                            CASE 
-                                WHEN wp.priority_score >= 4.0 THEN 30
-                                WHEN wp.priority_score >= 2.0 THEN 90
-                                ELSE 180
-                            END 
-                        THEN wp.priority_score 
-                        ELSE 0 
-                    END DESC,
-                    wp.last_scan_time ASC
-            ''', (current_time, current_time))
+            time_until_next = max(0, interval - since_scan)
+            is_ready = since_scan >= interval
             
-            next_scans = []
-            ready_count = 0
+            if is_ready:
+                ready_count += 1
             
-            for i, row in enumerate(cursor.fetchall()):
-                wallet_addr = row[0]
-                priority_score = row[1]
-                last_scan = row[2]
-                since_scan = row[3]
-                interval = row[4]
-                empty_scans = row[5]
-                activity_score = row[6]
-                
-                time_until_next = max(0, interval - since_scan)
-                is_ready = since_scan >= interval
-                
-                if is_ready:
-                    ready_count += 1
-                
-                # Estimation du prochain scan
-                if is_ready:
-                    next_scan_eta = "Maintenant"
-                    eta_seconds = 0
+            # Estimation du prochain scan
+            if is_ready:
+                next_scan_eta = "Maintenant"
+                eta_seconds = 0
+            else:
+                eta_seconds = time_until_next
+                if eta_seconds < 60:
+                    next_scan_eta = f"{eta_seconds}s"
                 else:
-                    eta_seconds = time_until_next
-                    if eta_seconds < 60:
-                        next_scan_eta = f"{eta_seconds}s"
-                    else:
-                        next_scan_eta = f"{eta_seconds//60}m{eta_seconds%60}s"
-                
-                # Déterminer la priorité visuelle
-                if priority_score >= 4.0:
-                    priority_badge = {"level": "high", "color": "red", "label": "HAUTE"}
-                elif priority_score >= 2.0:
-                    priority_badge = {"level": "medium", "color": "orange", "label": "MOYENNE"}
-                else:
-                    priority_badge = {"level": "low", "color": "blue", "label": "BASSE"}
-                
-                next_scans.append({
-                    'queue_position': i + 1,
-                    'wallet_address': wallet_addr,
-                    'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
-                    'priority_score': round(priority_score, 2),
-                    'priority_badge': priority_badge,
-                    'is_ready_for_scan': is_ready,
-                    'seconds_since_scan': since_scan,
-                    'scan_interval_seconds': interval,
-                    'time_until_next_scan': eta_seconds,
-                    'next_scan_eta': next_scan_eta,
-                    'consecutive_empty_scans': empty_scans,
-                    'activity_score': round(activity_score, 1),
-                    'urgency_level': 'urgent' if is_ready and priority_score >= 3.0 else 'normal'
-                })
+                    next_scan_eta = f"{eta_seconds//60}m{eta_seconds%60}s"
             
-            # Statistiques de la queue
-            queue_stats = {
-                'total_wallets': len(next_scans),
-                'ready_for_scan': ready_count,
-                'high_priority_ready': sum(1 for scan in next_scans if scan['is_ready_for_scan'] and scan['priority_score'] >= 4.0),
-                'next_scan_wallet': next_scans[0]['wallet_short'] if next_scans and next_scans[0]['is_ready_for_scan'] else None,
-                'average_priority': round(sum(scan['priority_score'] for scan in next_scans) / len(next_scans), 2) if next_scans else 0
-            }
+            # Déterminer la priorité visuelle
+            if priority_score >= 4.0:
+                priority_badge = {"level": "high", "color": "red", "label": "HAUTE"}
+            elif priority_score >= 2.0:
+                priority_badge = {"level": "medium", "color": "orange", "label": "MOYENNE"}
+            else:
+                priority_badge = {"level": "low", "color": "blue", "label": "BASSE"}
             
-            return jsonify({
-                'next_scans': next_scans,
-                'queue_stats': queue_stats,
-                'timestamp': current_time
+            next_scans.append({
+                'queue_position': i + 1,
+                'wallet_address': wallet_addr,
+                'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
+                'priority_score': round(priority_score, 2),
+                'priority_badge': priority_badge,
+                'is_ready_for_scan': is_ready,
+                'seconds_since_scan': since_scan,
+                'scan_interval_seconds': interval,
+                'time_until_next_scan': eta_seconds,
+                'next_scan_eta': next_scan_eta,
+                'consecutive_empty_scans': empty_scans,
+                'activity_score': round(activity_score, 1),
+                'urgency_level': 'urgent' if is_ready and priority_score >= 3.0 else 'normal'
             })
-            
+        
+        # Statistiques de la queue
+        queue_stats = {
+            'total_wallets': len(next_scans),
+            'ready_for_scan': ready_count,
+            'high_priority_ready': sum(1 for scan in next_scans if scan['is_ready_for_scan'] and scan['priority_score'] >= 4.0),
+            'next_scan_wallet': next_scans[0]['wallet_short'] if next_scans and next_scans[0]['is_ready_for_scan'] else None,
+            'average_priority': round(sum(scan['priority_score'] for scan in next_scans) / len(next_scans), 2) if next_scans else 0
+        }
+        
+        conn.close()
+        return jsonify({
+            'next_scans': next_scans,
+            'queue_stats': queue_stats,
+            'timestamp': current_time
+        })
+        
     except Exception as e:
         logger.error(f"Erreur récupération prochains scans: {e}")
         return jsonify({'error': str(e)}), 500
@@ -2515,145 +2509,145 @@ def get_next_scans():
 def get_priority_analytics():
     """API pour récupérer des analytics avancées sur le système de priorités"""
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            current_time = int(time.time())
-            
-            # Performance par tranche de priorité
-            cursor.execute('''
-                SELECT 
-                    CASE 
-                        WHEN wp.priority_score >= 4.0 THEN 'high'
-                        WHEN wp.priority_score >= 2.0 THEN 'medium'
-                        ELSE 'low'
-                    END as priority_tier,
-                    COUNT(*) as wallet_count,
-                    AVG(wp.priority_score) as avg_score,
-                    AVG(wp.avg_scan_duration) as avg_duration,
-                    AVG(wp.activity_score) as avg_activity,
-                    SUM(wp.total_scans) as total_scans_performed
-                FROM wallet_priorities wp
-                GROUP BY priority_tier
-                ORDER BY 
-                    CASE priority_tier 
-                        WHEN 'high' THEN 1 
-                        WHEN 'medium' THEN 2 
-                        ELSE 3 
-                    END
-            ''')
-            
-            tier_performance = []
-            for row in cursor.fetchall():
-                tier_performance.append({
-                    'tier': row[0],
-                    'wallet_count': row[1],
-                    'avg_priority_score': round(row[2], 2) if row[2] else 0,
-                    'avg_scan_duration': round(row[3], 1) if row[3] else 0,
-                    'avg_activity_score': round(row[4], 1) if row[4] else 0,
-                    'total_scans': row[5] or 0
-                })
-            
-            # Évolution des priorités sur les dernières 24h
-            cursor.execute('''
-                SELECT 
-                    strftime('%H', datetime(sh.completed_at, 'unixepoch')) as hour,
-                    AVG(sh.priority_score_after) as avg_priority,
-                    COUNT(*) as scan_count,
-                    SUM(sh.activity_detected) as activity_detections,
-                    AVG(sh.efficiency_score) as avg_efficiency
-                FROM scan_history sh
-                WHERE sh.completed_at >= ?
-                GROUP BY hour
-                ORDER BY hour
-            ''', (current_time - 86400,))
-            
-            hourly_evolution = []
-            for row in cursor.fetchall():
-                hourly_evolution.append({
-                    'hour': row[0],
-                    'avg_priority': round(row[1], 2) if row[1] else 0,
-                    'scan_count': row[2],
-                    'activity_detections': row[3] or 0,
-                    'avg_efficiency': round(row[4], 1) if row[4] else 0
-                })
-            
-            # Top wallets par découvertes
-            cursor.execute('''
-                SELECT 
-                    wam.wallet_address,
-                    SUM(wam.discoveries_count) as total_discoveries,
-                    SUM(wam.balance_changes_count) as total_transactions,
-                    COUNT(*) as scan_count,
-                    AVG(wam.efficiency_score) as avg_efficiency,
-                    wp.priority_score
-                FROM wallet_activity_metrics wam
-                JOIN wallet_priorities wp ON wam.wallet_address = wp.wallet_address
-                WHERE wam.timestamp >= ?
-                GROUP BY wam.wallet_address
-                ORDER BY total_discoveries DESC, total_transactions DESC
-                LIMIT 10
-            ''', (current_time - 86400,))
-            
-            top_performers = []
-            for row in cursor.fetchall():
-                wallet_addr = row[0]
-                top_performers.append({
-                    'wallet_address': wallet_addr,
-                    'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
-                    'total_discoveries': row[1] or 0,
-                    'total_transactions': row[2] or 0,
-                    'scan_count': row[3],
-                    'avg_efficiency': round(row[4], 1) if row[4] else 0,
-                    'current_priority': round(row[5], 2) if row[5] else 0
-                })
-            
-            # Métriques système globales
-            cursor.execute('''
-                SELECT 
-                    COUNT(DISTINCT wp.wallet_address) as total_wallets,
-                    AVG(wp.priority_score) as system_avg_priority,
-                    MAX(wp.priority_score) as max_priority,
-                    MIN(wp.priority_score) as min_priority,
-                    SUM(wp.total_scans) as total_scans_ever,
-                    AVG(wp.avg_scan_duration) as system_avg_duration
-                FROM wallet_priorities wp
-            ''')
-            
-            system_row = cursor.fetchone()
-            system_metrics = {
-                'total_wallets': system_row[0],
-                'system_avg_priority': round(system_row[1], 2) if system_row[1] else 0,
-                'max_priority': round(system_row[2], 2) if system_row[2] else 0,
-                'min_priority': round(system_row[3], 2) if system_row[3] else 0,
-                'total_scans_performed': system_row[4] or 0,
-                'system_avg_duration': round(system_row[5], 1) if system_row[5] else 0
-            }
-            
-            # Calcul de l'efficacité système
-            cursor.execute('''
-                SELECT 
-                    SUM(wam.discoveries_count + wam.balance_changes_count) as total_findings,
-                    SUM(wam.rpc_requests_made) as total_rpc_requests
-                FROM wallet_activity_metrics wam
-                WHERE wam.timestamp >= ?
-            ''', (current_time - 86400,))
-            
-            efficiency_row = cursor.fetchone()
-            if efficiency_row and efficiency_row[1] and efficiency_row[1] > 0:
-                system_efficiency = round((efficiency_row[0] / efficiency_row[1]) * 100, 1)
-            else:
-                system_efficiency = 0
-            
-            system_metrics['system_efficiency_24h'] = system_efficiency
-            
-            
-            return jsonify({
-                'tier_performance': tier_performance,
-                'hourly_evolution': hourly_evolution,
-                'top_performers': top_performers,
-                'system_metrics': system_metrics,
-                'generated_at': current_time
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
+        # Performance par tranche de priorité
+        cursor.execute('''
+            SELECT 
+                CASE 
+                    WHEN wp.priority_score >= 4.0 THEN 'high'
+                    WHEN wp.priority_score >= 2.0 THEN 'medium'
+                    ELSE 'low'
+                END as priority_tier,
+                COUNT(*) as wallet_count,
+                AVG(wp.priority_score) as avg_score,
+                AVG(wp.avg_scan_duration) as avg_duration,
+                AVG(wp.activity_score) as avg_activity,
+                SUM(wp.total_scans) as total_scans_performed
+            FROM wallet_priorities wp
+            GROUP BY priority_tier
+            ORDER BY 
+                CASE priority_tier 
+                    WHEN 'high' THEN 1 
+                    WHEN 'medium' THEN 2 
+                    ELSE 3 
+                END
+        ''')
+        
+        tier_performance = []
+        for row in cursor.fetchall():
+            tier_performance.append({
+                'tier': row[0],
+                'wallet_count': row[1],
+                'avg_priority_score': round(row[2], 2) if row[2] else 0,
+                'avg_scan_duration': round(row[3], 1) if row[3] else 0,
+                'avg_activity_score': round(row[4], 1) if row[4] else 0,
+                'total_scans': row[5] or 0
             })
+        
+        # Évolution des priorités sur les dernières 24h
+        cursor.execute('''
+            SELECT 
+                strftime('%H', datetime(sh.completed_at, 'unixepoch')) as hour,
+                AVG(sh.priority_score_after) as avg_priority,
+                COUNT(*) as scan_count,
+                SUM(sh.activity_detected) as activity_detections,
+                AVG(sh.efficiency_score) as avg_efficiency
+            FROM scan_history sh
+            WHERE sh.completed_at >= ?
+            GROUP BY hour
+            ORDER BY hour
+        ''', (current_time - 86400,))
+        
+        hourly_evolution = []
+        for row in cursor.fetchall():
+            hourly_evolution.append({
+                'hour': row[0],
+                'avg_priority': round(row[1], 2) if row[1] else 0,
+                'scan_count': row[2],
+                'activity_detections': row[3] or 0,
+                'avg_efficiency': round(row[4], 1) if row[4] else 0
+            })
+        
+        # Top wallets par découvertes
+        cursor.execute('''
+            SELECT 
+                wam.wallet_address,
+                SUM(wam.discoveries_count) as total_discoveries,
+                SUM(wam.balance_changes_count) as total_transactions,
+                COUNT(*) as scan_count,
+                AVG(wam.efficiency_score) as avg_efficiency,
+                wp.priority_score
+            FROM wallet_activity_metrics wam
+            JOIN wallet_priorities wp ON wam.wallet_address = wp.wallet_address
+            WHERE wam.timestamp >= ?
+            GROUP BY wam.wallet_address
+            ORDER BY total_discoveries DESC, total_transactions DESC
+            LIMIT 10
+        ''', (current_time - 86400,))
+        
+        top_performers = []
+        for row in cursor.fetchall():
+            wallet_addr = row[0]
+            top_performers.append({
+                'wallet_address': wallet_addr,
+                'wallet_short': f"{wallet_addr[:6]}...{wallet_addr[-6:]}",
+                'total_discoveries': row[1] or 0,
+                'total_transactions': row[2] or 0,
+                'scan_count': row[3],
+                'avg_efficiency': round(row[4], 1) if row[4] else 0,
+                'current_priority': round(row[5], 2) if row[5] else 0
+            })
+        
+        # Métriques système globales
+        cursor.execute('''
+            SELECT 
+                COUNT(DISTINCT wp.wallet_address) as total_wallets,
+                AVG(wp.priority_score) as system_avg_priority,
+                MAX(wp.priority_score) as max_priority,
+                MIN(wp.priority_score) as min_priority,
+                SUM(wp.total_scans) as total_scans_ever,
+                AVG(wp.avg_scan_duration) as system_avg_duration
+            FROM wallet_priorities wp
+        ''')
+        
+        system_row = cursor.fetchone()
+        system_metrics = {
+            'total_wallets': system_row[0],
+            'system_avg_priority': round(system_row[1], 2) if system_row[1] else 0,
+            'max_priority': round(system_row[2], 2) if system_row[2] else 0,
+            'min_priority': round(system_row[3], 2) if system_row[3] else 0,
+            'total_scans_performed': system_row[4] or 0,
+            'system_avg_duration': round(system_row[5], 1) if system_row[5] else 0
+        }
+        
+        # Calcul de l'efficacité système
+        cursor.execute('''
+            SELECT 
+                SUM(wam.discoveries_count + wam.balance_changes_count) as total_findings,
+                SUM(wam.rpc_requests_made) as total_rpc_requests
+            FROM wallet_activity_metrics wam
+            WHERE wam.timestamp >= ?
+        ''', (current_time - 86400,))
+        
+        efficiency_row = cursor.fetchone()
+        if efficiency_row and efficiency_row[1] and efficiency_row[1] > 0:
+            system_efficiency = round((efficiency_row[0] / efficiency_row[1]) * 100, 1)
+        else:
+            system_efficiency = 0
+        
+        system_metrics['system_efficiency_24h'] = system_efficiency
+        
+        conn.close()
+        return jsonify({
+            'tier_performance': tier_performance,
+            'hourly_evolution': hourly_evolution,
+            'top_performers': top_performers,
+            'system_metrics': system_metrics,
+            'generated_at': current_time
+        })
         
     except Exception as e:
         logger.error(f"Erreur récupération analytics priorité: {e}")
@@ -2674,48 +2668,49 @@ def manual_priority_update():
         if not (0.1 <= new_priority <= 10.0):
             return jsonify({'error': 'priority_score must be between 0.1 and 10.0'}), 400
         
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            current_time = int(time.time())
-            
-            # Vérifier que le wallet existe
-            cursor.execute('SELECT priority_score FROM wallet_priorities WHERE wallet_address = ?', 
-                        (wallet_address,))
-            result = cursor.fetchone()
-            
-            if not result:
-                return jsonify({'error': 'Wallet not found in priorities'}), 404
-            
-            old_priority = result[0]
-            
-            # Mettre à jour la priorité
-            cursor.execute('''
-                UPDATE wallet_priorities 
-                SET priority_score = ?, updated_at = ?
-                WHERE wallet_address = ?
-            ''', (new_priority, current_time, wallet_address))
-            
-            # Enregistrer l'action manuelle dans l'historique
-            cursor.execute('''
-                INSERT INTO scan_history 
-                (wallet_address, scan_type, total_accounts, new_accounts, scan_duration, 
-                completed_at, priority_score_before, priority_score_after, notes)
-                VALUES (?, 'manual_priority_update', 0, 0, 0, ?, ?, ?, ?)
-            ''', (wallet_address, current_time, old_priority, new_priority, f"Manual: {reason}"))
-            
-            conn.commit()
-            
-            logger.info(f"🔧 Priorité mise à jour manuellement: {wallet_address[:8]}... "
-                    f"{old_priority:.2f} → {new_priority:.2f} (Raison: {reason})")
-            
-            return jsonify({
-                'success': True,
-                'wallet_address': wallet_address,
-                'old_priority': round(old_priority, 2),
-                'new_priority': round(new_priority, 2),
-                'reason': reason,
-                'updated_at': current_time
-            })
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
+        # Vérifier que le wallet existe
+        cursor.execute('SELECT priority_score FROM wallet_priorities WHERE wallet_address = ?', 
+                      (wallet_address,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return jsonify({'error': 'Wallet not found in priorities'}), 404
+        
+        old_priority = result[0]
+        
+        # Mettre à jour la priorité
+        cursor.execute('''
+            UPDATE wallet_priorities 
+            SET priority_score = ?, updated_at = ?
+            WHERE wallet_address = ?
+        ''', (new_priority, current_time, wallet_address))
+        
+        # Enregistrer l'action manuelle dans l'historique
+        cursor.execute('''
+            INSERT INTO scan_history 
+            (wallet_address, scan_type, total_accounts, new_accounts, scan_duration, 
+             completed_at, priority_score_before, priority_score_after, notes)
+            VALUES (?, 'manual_priority_update', 0, 0, 0, ?, ?, ?, ?)
+        ''', (wallet_address, current_time, old_priority, new_priority, f"Manual: {reason}"))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"🔧 Priorité mise à jour manuellement: {wallet_address[:8]}... "
+                   f"{old_priority:.2f} → {new_priority:.2f} (Raison: {reason})")
+        
+        return jsonify({
+            'success': True,
+            'wallet_address': wallet_address,
+            'old_priority': round(old_priority, 2),
+            'new_priority': round(new_priority, 2),
+            'reason': reason,
+            'updated_at': current_time
+        })
         
     except Exception as e:
         logger.error(f"Erreur mise à jour manuelle priorité: {e}")
@@ -2728,50 +2723,50 @@ def get_token_discoveries():
     hours = request.args.get('hours', 24, type=int)
     
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Calculer le timestamp de début
-            current_time = int(time.time())
-            start_time = current_time - (hours * 3600)
-            
-            # CORRECTION: Utiliser les colonnes qui existent vraiment
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Calculer le timestamp de début
+        current_time = int(time.time())
+        start_time = current_time - (hours * 3600)
+        
+        # CORRECTION: Utiliser les colonnes qui existent vraiment
+        cursor.execute('''
+            SELECT ta.token_mint, ta.first_seen, ta.balance, ta.wallet_address,
+                   COUNT(t.signature) as transaction_count
+            FROM token_accounts ta
+            LEFT JOIN transactions t ON ta.token_mint = t.token_mint 
+                AND t.wallet_address = ta.wallet_address
+            WHERE ta.first_seen >= ?
+            GROUP BY ta.token_mint, ta.first_seen, ta.balance, ta.wallet_address
+            ORDER BY ta.first_seen DESC
+            LIMIT 20
+        ''', (start_time,))
+        
+        discoveries = []
+        for row in cursor.fetchall():
+            # Récupérer le symbol depuis les transactions si disponible
             cursor.execute('''
-                SELECT ta.token_mint, ta.first_seen, ta.balance, ta.wallet_address,
-                    COUNT(t.signature) as transaction_count
-                FROM token_accounts ta
-                LEFT JOIN transactions t ON ta.token_mint = t.token_mint 
-                    AND t.wallet_address = ta.wallet_address
-                WHERE ta.first_seen >= ?
-                GROUP BY ta.token_mint, ta.first_seen, ta.balance, ta.wallet_address
-                ORDER BY ta.first_seen DESC
-                LIMIT 20
-            ''', (start_time,))
+                SELECT token_symbol FROM transactions 
+                WHERE token_mint = ? AND token_symbol IS NOT NULL 
+                LIMIT 1
+            ''', (row[0],))
+            symbol_result = cursor.fetchone()
+            symbol = symbol_result[0] if symbol_result else f"TOKEN_{row[0][:6]}"
             
-            discoveries = []
-            for row in cursor.fetchall():
-                # Récupérer le symbol depuis les transactions si disponible
-                cursor.execute('''
-                    SELECT token_symbol FROM transactions 
-                    WHERE token_mint = ? AND token_symbol IS NOT NULL 
-                    LIMIT 1
-                ''', (row[0],))
-                symbol_result = cursor.fetchone()
-                symbol = symbol_result[0] if symbol_result else f"TOKEN_{row[0][:6]}"
-                
-                discoveries.append({
-                    'token_mint': row[0],
-                    'symbol': symbol,
-                    'discovered_at': row[1],
-                    'balance': row[2],
-                    'wallet_address': row[3],
-                    'wallet_short': f"{row[3][:4]}...{row[3][-4:]}" if row[3] else 'Unknown',
-                    'transaction_count': row[4],
-                    'age_hours': (current_time - row[1]) / 3600 if row[1] else 0
-                })
-            
-            
-            return jsonify({'discoveries': discoveries})
+            discoveries.append({
+                'token_mint': row[0],
+                'symbol': symbol,
+                'discovered_at': row[1],
+                'balance': row[2],
+                'wallet_address': row[3],
+                'wallet_short': f"{row[3][:4]}...{row[3][-4:]}" if row[3] else 'Unknown',
+                'transaction_count': row[4],
+                'age_hours': (current_time - row[1]) / 3600 if row[1] else 0
+            })
+        
+        conn.close()
+        return jsonify({'discoveries': discoveries})
         
     except Exception as e:
         logger.error(f"Erreur récupération token discoveries: {e}")
@@ -2783,39 +2778,40 @@ def get_large_transactions():
     hours = request.args.get('hours', 24, type=int)
     
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Calculer le timestamp de début
-            current_time = int(time.time())
-            start_time = current_time - (hours * 3600)
-            
-            cursor.execute('''
-                SELECT signature, wallet_address, token_mint, token_symbol, token_name,
-                    transaction_type, token_amount, amount, block_time, is_large_token_amount
-                FROM transactions 
-                WHERE is_large_token_amount = 1 
-                AND block_time >= ?
-                ORDER BY block_time DESC 
-                LIMIT 20
-            ''', (start_time,))
-            
-            transactions = []
-            for row in cursor.fetchall():
-                transactions.append({
-                    'signature': row[0],
-                    'wallet_address': row[1],
-                    'token_mint': row[2],
-                    'token_symbol': row[3],
-                    'token_name': row[4],
-                    'transaction_type': row[5],
-                    'token_amount': row[6],
-                    'amount': row[7],
-                    'block_time': row[8],
-                    'is_large_token_amount': bool(row[9])
-                })
-
-            return jsonify({'transactions': transactions})
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Calculer le timestamp de début
+        current_time = int(time.time())
+        start_time = current_time - (hours * 3600)
+        
+        cursor.execute('''
+            SELECT signature, wallet_address, token_mint, token_symbol, token_name,
+                   transaction_type, token_amount, amount, block_time, is_large_token_amount
+            FROM transactions 
+            WHERE is_large_token_amount = 1 
+            AND block_time >= ?
+            ORDER BY block_time DESC 
+            LIMIT 20
+        ''', (start_time,))
+        
+        transactions = []
+        for row in cursor.fetchall():
+            transactions.append({
+                'signature': row[0],
+                'wallet_address': row[1],
+                'token_mint': row[2],
+                'token_symbol': row[3],
+                'token_name': row[4],
+                'transaction_type': row[5],
+                'token_amount': row[6],
+                'amount': row[7],
+                'block_time': row[8],
+                'is_large_token_amount': bool(row[9])
+            })
+        
+        conn.close()
+        return jsonify({'transactions': transactions})
         
     except Exception as e:
         logger.error(f"Erreur récupération large transactions: {e}")
@@ -2825,41 +2821,42 @@ def get_large_transactions():
 def debug_token_accounts(wallet_address):
     """Debug: Voir les comptes de tokens d'un wallet"""
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT ata_pubkey, token_mint, balance, decimals, 
-                    first_seen, last_updated, last_scanned, 
-                    is_active, scan_priority
-                FROM token_accounts 
-                WHERE wallet_address = ?
-                ORDER BY scan_priority DESC, last_scanned ASC
-                LIMIT 20
-            ''', (wallet_address,))
-            
-            accounts = []
-            current_time = int(time.time())
-            
-            for row in cursor.fetchall():
-                accounts.append({
-                    'ata_pubkey': row[0][:8] + "..." + row[0][-8:],
-                    'token_mint': row[1][:8] + "..." + row[1][-8:],
-                    'balance': row[2],
-                    'decimals': row[3],
-                    'first_seen': row[4],
-                    'last_updated': row[5],
-                    'last_scanned': row[6],
-                    'is_active': bool(row[7]),
-                    'scan_priority': row[8],
-                    'minutes_since_scan': round((current_time - row[6]) / 60, 1) if row[6] else "Never"
-                })
-            
-            return jsonify({
-                'wallet_address': wallet_address,
-                'total_accounts': len(accounts),
-                'accounts': accounts
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT ata_pubkey, token_mint, balance, decimals, 
+                   first_seen, last_updated, last_scanned, 
+                   is_active, scan_priority
+            FROM token_accounts 
+            WHERE wallet_address = ?
+            ORDER BY scan_priority DESC, last_scanned ASC
+            LIMIT 20
+        ''', (wallet_address,))
+        
+        accounts = []
+        current_time = int(time.time())
+        
+        for row in cursor.fetchall():
+            accounts.append({
+                'ata_pubkey': row[0][:8] + "..." + row[0][-8:],
+                'token_mint': row[1][:8] + "..." + row[1][-8:],
+                'balance': row[2],
+                'decimals': row[3],
+                'first_seen': row[4],
+                'last_updated': row[5],
+                'last_scanned': row[6],
+                'is_active': bool(row[7]),
+                'scan_priority': row[8],
+                'minutes_since_scan': round((current_time - row[6]) / 60, 1) if row[6] else "Never"
             })
+        
+        conn.close()
+        return jsonify({
+            'wallet_address': wallet_address,
+            'total_accounts': len(accounts),
+            'accounts': accounts
+        })
         
     except Exception as e:
         logger.error(f"Erreur debug token accounts: {e}")
@@ -2869,67 +2866,68 @@ def debug_token_accounts(wallet_address):
 def get_scan_progress():
     """API pour récupérer la progression des scans - VERSION CORRIGÉE"""
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Récupérer l'historique récent des scans
-            cursor.execute('''
-                SELECT wallet_address, scan_type, total_accounts, new_accounts, 
-                    scan_duration, completed_at
-                FROM scan_history 
-                ORDER BY completed_at DESC 
-                LIMIT 10
-            ''')
-            
-            progress = []
-            for row in cursor.fetchall():
-                progress.append({
-                    'wallet_address': row[0],
-                    'wallet_short': f"{row[0][:4]}...{row[0][-4:]}" if row[0] else 'Unknown',
-                    'scan_type': row[1],
-                    'total_accounts': row[2],
-                    'new_accounts': row[3],
-                    'scan_duration': round(row[4], 2) if row[4] else 0,
-                    'completed_at': row[5],
-                    'age_minutes': round((int(time.time()) - row[5]) / 60, 1) if row[5] else 0
-                })
-            
-            # Calculer le statut global
-            if progress:
-                recent_scan = progress[0]
-                if recent_scan['age_minutes'] < 5:
-                    status = "Active"
-                elif recent_scan['age_minutes'] < 60:
-                    status = "Recent"
-                else:
-                    status = "Idle"
-            else:
-                status = "Unknown"
-            
-            # Ajouter des statistiques globales
-            cursor.execute('''
-                SELECT 
-                    COUNT(DISTINCT wallet_address) as total_wallets,
-                    SUM(total_accounts) as total_accounts,
-                    SUM(new_accounts) as total_new_accounts,
-                    AVG(scan_duration) as avg_duration
-                FROM scan_history 
-                WHERE completed_at >= ?
-            ''', (int(time.time()) - 86400,))  # Dernières 24h
-            
-            stats_row = cursor.fetchone()
-            global_stats = {
-                'total_wallets_scanned': stats_row[0] or 0,
-                'total_accounts_processed': stats_row[1] or 0,
-                'total_new_accounts_found': stats_row[2] or 0,
-                'average_scan_duration': round(stats_row[3], 2) if stats_row[3] else 0
-            }
-            
-            return jsonify({
-                'progress': progress,
-                'status': status,
-                'global_stats': global_stats
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Récupérer l'historique récent des scans
+        cursor.execute('''
+            SELECT wallet_address, scan_type, total_accounts, new_accounts, 
+                   scan_duration, completed_at
+            FROM scan_history 
+            ORDER BY completed_at DESC 
+            LIMIT 10
+        ''')
+        
+        progress = []
+        for row in cursor.fetchall():
+            progress.append({
+                'wallet_address': row[0],
+                'wallet_short': f"{row[0][:4]}...{row[0][-4:]}" if row[0] else 'Unknown',
+                'scan_type': row[1],
+                'total_accounts': row[2],
+                'new_accounts': row[3],
+                'scan_duration': round(row[4], 2) if row[4] else 0,
+                'completed_at': row[5],
+                'age_minutes': round((int(time.time()) - row[5]) / 60, 1) if row[5] else 0
             })
+        
+        # Calculer le statut global
+        if progress:
+            recent_scan = progress[0]
+            if recent_scan['age_minutes'] < 5:
+                status = "Active"
+            elif recent_scan['age_minutes'] < 60:
+                status = "Recent"
+            else:
+                status = "Idle"
+        else:
+            status = "Unknown"
+        
+        # Ajouter des statistiques globales
+        cursor.execute('''
+            SELECT 
+                COUNT(DISTINCT wallet_address) as total_wallets,
+                SUM(total_accounts) as total_accounts,
+                SUM(new_accounts) as total_new_accounts,
+                AVG(scan_duration) as avg_duration
+            FROM scan_history 
+            WHERE completed_at >= ?
+        ''', (int(time.time()) - 86400,))  # Dernières 24h
+        
+        stats_row = cursor.fetchone()
+        global_stats = {
+            'total_wallets_scanned': stats_row[0] or 0,
+            'total_accounts_processed': stats_row[1] or 0,
+            'total_new_accounts_found': stats_row[2] or 0,
+            'average_scan_duration': round(stats_row[3], 2) if stats_row[3] else 0
+        }
+        
+        conn.close()
+        return jsonify({
+            'progress': progress,
+            'status': status,
+            'global_stats': global_stats
+        })
         
     except Exception as e:
         logger.error(f"Erreur récupération scan progress: {e}")
@@ -2943,55 +2941,56 @@ def get_scan_progress():
 def get_wallet_summary():
     """API pour récupérer un résumé détaillé par wallet"""
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        wallets_summary = []
+        
+        for wallet_address in WALLET_ADDRESSES:
+            # Stats des comptes de tokens
+            cursor.execute('''
+                SELECT COUNT(*) as total_accounts,
+                       COUNT(CASE WHEN scan_priority >= 3 THEN 1 END) as new_accounts
+                FROM token_accounts 
+                WHERE wallet_address = ? AND is_active = 1
+            ''', (wallet_address,))
+            accounts_stats = cursor.fetchone()
             
-            wallets_summary = []
+            # Stats des transactions
+            cursor.execute('''
+                SELECT COUNT(*) as total_transactions,
+                       COUNT(CASE WHEN is_token_transaction = 1 THEN 1 END) as token_transactions,
+                       COUNT(CASE WHEN is_large_token_amount = 1 THEN 1 END) as large_transactions
+                FROM transactions 
+                WHERE wallet_address = ?
+            ''', (wallet_address,))
+            tx_stats = cursor.fetchone()
             
-            for wallet_address in WALLET_ADDRESSES:
-                # Stats des comptes de tokens
-                cursor.execute('''
-                    SELECT COUNT(*) as total_accounts,
-                        COUNT(CASE WHEN scan_priority >= 3 THEN 1 END) as new_accounts
-                    FROM token_accounts 
-                    WHERE wallet_address = ? AND is_active = 1
-                ''', (wallet_address,))
-                accounts_stats = cursor.fetchone()
-                
-                # Stats des transactions
-                cursor.execute('''
-                    SELECT COUNT(*) as total_transactions,
-                        COUNT(CASE WHEN is_token_transaction = 1 THEN 1 END) as token_transactions,
-                        COUNT(CASE WHEN is_large_token_amount = 1 THEN 1 END) as large_transactions
-                    FROM transactions 
-                    WHERE wallet_address = ?
-                ''', (wallet_address,))
-                tx_stats = cursor.fetchone()
-                
-                # Balance SOL
-                cursor.execute('''
-                    SELECT balance_sol FROM wallet_stats 
-                    WHERE wallet_address = ? 
-                    ORDER BY updated_at DESC LIMIT 1
-                ''', (wallet_address,))
-                balance_result = cursor.fetchone()
-                balance = balance_result[0] if balance_result else 0.0
-                
-                wallets_summary.append({
-                    'wallet_address': wallet_address,
-                    'short_address': f"{wallet_address[:8]}...{wallet_address[-8:]}",
-                    'balance_sol': balance,
-                    'total_accounts': accounts_stats[0] if accounts_stats else 0,
-                    'new_accounts': accounts_stats[1] if accounts_stats else 0,
-                    'total_transactions': tx_stats[0] if tx_stats else 0,
-                    'token_transactions': tx_stats[1] if tx_stats else 0,
-                    'large_transactions': tx_stats[2] if tx_stats else 0
-                })
+            # Balance SOL
+            cursor.execute('''
+                SELECT balance_sol FROM wallet_stats 
+                WHERE wallet_address = ? 
+                ORDER BY updated_at DESC LIMIT 1
+            ''', (wallet_address,))
+            balance_result = cursor.fetchone()
+            balance = balance_result[0] if balance_result else 0.0
             
-            return jsonify({
-                'wallets': wallets_summary,
-                'total_wallets': len(wallets_summary)
+            wallets_summary.append({
+                'wallet_address': wallet_address,
+                'short_address': f"{wallet_address[:8]}...{wallet_address[-8:]}",
+                'balance_sol': balance,
+                'total_accounts': accounts_stats[0] if accounts_stats else 0,
+                'new_accounts': accounts_stats[1] if accounts_stats else 0,
+                'total_transactions': tx_stats[0] if tx_stats else 0,
+                'token_transactions': tx_stats[1] if tx_stats else 0,
+                'large_transactions': tx_stats[2] if tx_stats else 0
             })
+        
+        conn.close()
+        return jsonify({
+            'wallets': wallets_summary,
+            'total_wallets': len(wallets_summary)
+        })
         
     except Exception as e:
         logger.error(f"Erreur récupération wallet summary: {e}")
@@ -3002,62 +3001,66 @@ def get_wallet_summary():
 def get_dashboard_data():
     """Données principales pour le dashboard - VERSION AMÉLIORÉE"""
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Stats générales MULTI-WALLETS
-            cursor.execute("SELECT COUNT(DISTINCT token_mint) FROM transactions WHERE is_token_transaction = 1")
-            total_tokens = cursor.fetchone()[0] or 0
-            
-            cursor.execute("SELECT COUNT(*) FROM token_accounts WHERE is_active = 1")
-            total_token_accounts = cursor.fetchone()[0] or 0
-            
-            cursor.execute("""
-                SELECT COUNT(*) FROM transactions 
-                WHERE is_token_transaction = 1 AND block_time >= ?
-            """, (int(time.time()) - 3600,))
-            balance_changes_1h = cursor.fetchone()[0] or 0
-            
-            cursor.execute("""
-                SELECT COUNT(*) FROM transactions 
-                WHERE is_large_token_amount = 1 AND block_time >= ?
-            """, (int(time.time()) - 86400,))
-            large_transactions_24h = cursor.fetchone()[0] or 0
-            
-            # Dernier scan
-            cursor.execute("SELECT MAX(completed_at) FROM scan_history")
-            last_scan_result = cursor.fetchone()
-            last_scan_time = last_scan_result[0] if last_scan_result[0] else 0
-            
-            # Tokens les plus actifs
-            cursor.execute("""
-                SELECT t.token_symbol, t.token_mint, t.wallet_address, 
-                       COUNT(*) as tx_count,
-                       SUM(CASE WHEN transaction_type = 'buy' THEN token_amount ELSE 0 END) as total_bought,
-                       AVG(price_per_token) as avg_price,
-                       MAX(block_time) as last_activity
-                FROM transactions t
-                WHERE is_token_transaction = 1 AND block_time >= ?
-                GROUP BY token_mint, token_symbol, wallet_address
-                HAVING tx_count >= 1
-                ORDER BY tx_count DESC, last_activity DESC
-                LIMIT 20
-            """, (int(time.time()) - 86400,))
-            
-            top_tokens_data = cursor.fetchall()
-            top_tokens = []
-            for row in top_tokens_data:
-                top_tokens.append({
-                    'symbol': row[0] or 'UNKNOWN',
-                    'address': row[1],
-                    'wallet_address': row[2],
-                    'wallet_short': f"{row[2][:4]}...{row[2][-4:]}" if row[2] else 'Unknown',
-                    'price': row[5] or 0,
-                    'volume': row[3] or 0,
-                    'total_bought': row[4] or 0,
-                    'last_activity': row[6] or 0,
-                    'score': min(100, (row[3] * 10) + (row[4] * 0.01))
-                })
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        # Stats générales MULTI-WALLETS
+        cursor.execute("SELECT COUNT(DISTINCT token_mint) FROM transactions WHERE is_token_transaction = 1")
+        total_tokens = cursor.fetchone()[0] or 0
+        
+        cursor.execute("SELECT COUNT(*) FROM token_accounts WHERE is_active = 1")
+        total_token_accounts = cursor.fetchone()[0] or 0
+        
+        cursor.execute("""
+            SELECT COUNT(*) FROM transactions 
+            WHERE is_token_transaction = 1 AND block_time >= ?
+        """, (int(time.time()) - 3600,))  # Dernière heure
+        balance_changes_1h = cursor.fetchone()[0] or 0
+        
+        cursor.execute("""
+            SELECT COUNT(*) FROM transactions 
+            WHERE is_large_token_amount = 1 AND block_time >= ?
+        """, (int(time.time()) - 86400,))  # Dernières 24h
+        large_transactions_24h = cursor.fetchone()[0] or 0
+        
+        # Dernier scan
+        cursor.execute("""
+            SELECT MAX(completed_at) FROM scan_history
+        """)
+        last_scan_result = cursor.fetchone()
+        last_scan_time = last_scan_result[0] if last_scan_result[0] else 0
+        
+        # Tokens les plus actifs par wallet (AMÉLIORATION)
+        cursor.execute("""
+            SELECT t.token_symbol, t.token_mint, t.wallet_address, 
+                   COUNT(*) as tx_count,
+                   SUM(CASE WHEN transaction_type = 'buy' THEN token_amount ELSE 0 END) as total_bought,
+                   AVG(price_per_token) as avg_price,
+                   MAX(block_time) as last_activity
+            FROM transactions t
+            WHERE is_token_transaction = 1 AND block_time >= ?
+            GROUP BY token_mint, token_symbol, wallet_address
+            HAVING tx_count >= 1
+            ORDER BY tx_count DESC, last_activity DESC
+            LIMIT 20
+        """, (int(time.time()) - 86400,))
+        
+        top_tokens_data = cursor.fetchall()
+        top_tokens = []
+        for row in top_tokens_data:
+            top_tokens.append({
+                'symbol': row[0] or 'UNKNOWN',
+                'address': row[1],
+                'wallet_address': row[2],
+                'wallet_short': f"{row[2][:4]}...{row[2][-4:]}" if row[2] else 'Unknown',
+                'price': row[5] or 0,
+                'volume': row[3] or 0,
+                'total_bought': row[4] or 0,
+                'last_activity': row[6] or 0,
+                'score': min(100, (row[3] * 10) + (row[4] * 0.01))
+            })
+        
+        conn.close()
         
         return jsonify({
             'stats': {
@@ -3068,16 +3071,27 @@ def get_dashboard_data():
                 'totalTokens': total_tokens
             },
             'topTokens': top_tokens[:8],
-            'newGems': [t for t in top_tokens if t['last_activity'] > (int(time.time()) - 7200)][:5],
+            'newGems': [t for t in top_tokens if t['last_activity'] > (int(time.time()) - 7200)][:5],  # 2h
             'volumeAlerts': [t for t in top_tokens if t['volume'] > 5][:5],
             'activeTokensList': top_tokens
         })
         
     except Exception as e:
         logger.error(f"Erreur dashboard data: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({
-            'stats': {'totalTokenAccounts': 0, 'balanceChangesCount': 0, 'largeTransactionsCount': 0, 'lastScanTime': 0, 'totalTokens': 0},
-            'topTokens': [], 'newGems': [], 'volumeAlerts': [], 'activeTokensList': []
+            'stats': {
+                'totalTokenAccounts': 0,
+                'balanceChangesCount': 0, 
+                'largeTransactionsCount': 0,
+                'lastScanTime': 0,
+                'totalTokens': 0
+            },
+            'topTokens': [],
+            'newGems': [],
+            'volumeAlerts': [],
+            'activeTokensList': []
         }), 500
 
 @app.route('/api/recent-balance-changes')
@@ -3086,35 +3100,35 @@ def get_recent_balance_changes():
     limit = request.args.get('limit', 20, type=int)
     
     try:
-        with db_manager.get_connection() as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT signature, wallet_address, token_mint, token_symbol, token_name,
-                    transaction_type, token_amount, amount, block_time, is_large_token_amount
-                FROM transactions 
-                WHERE is_token_transaction = 1 
-                ORDER BY block_time DESC 
-                LIMIT ?
-            ''', (limit,))
-            
-            balance_changes = []
-            for row in cursor.fetchall():
-                balance_changes.append({
-                    'signature': row[0],
-                    'wallet_address': row[1],
-                    'token_mint': row[2],
-                    'token_symbol': row[3],
-                    'token_name': row[4],
-                    'transaction_type': row[5],
-                    'token_amount': row[6],
-                    'amount': row[7],
-                    'block_time': row[8],
-                    'is_large_token_amount': bool(row[9])
-                })
-            
-
-            return jsonify({'balance_changes': balance_changes})
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT signature, wallet_address, token_mint, token_symbol, token_name,
+                   transaction_type, token_amount, amount, block_time, is_large_token_amount
+            FROM transactions 
+            WHERE is_token_transaction = 1 
+            ORDER BY block_time DESC 
+            LIMIT ?
+        ''', (limit,))
+        
+        balance_changes = []
+        for row in cursor.fetchall():
+            balance_changes.append({
+                'signature': row[0],
+                'wallet_address': row[1],
+                'token_mint': row[2],
+                'token_symbol': row[3],
+                'token_name': row[4],
+                'transaction_type': row[5],
+                'token_amount': row[6],
+                'amount': row[7],
+                'block_time': row[8],
+                'is_large_token_amount': bool(row[9])
+            })
+        
+        conn.close()
+        return jsonify({'balance_changes': balance_changes})
         
     except Exception as e:
         logger.error(f"Erreur récupération balance changes: {e}")
