@@ -1,276 +1,419 @@
-
 #!/usr/bin/env python3
 """
-FastAPI application for Solana wallet analytics.
-
-This module sets up the main FastAPI application with all routes,
-middleware, error handling, and configuration.
+Application Flask principale pour le Solana Wallet Monitor
+Point d'entrée avec tous les blueprints et middleware configurés
 """
 
 import logging
 import sys
 import os
 from pathlib import Path
+import time
+from datetime import datetime
 
-# Add parent directory to Python path to find 'core' module
+# Ajouter le répertoire parent au Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 
 # Créer le répertoire logs s'il n'existe pas
 log_dir = Path('logs')
 log_dir.mkdir(exist_ok=True)
 
-from core.config import settings
+from flask import Flask, jsonify, request, g
+import traceback
 
-# Configure logging
+# Imports de configuration
+try:
+    from core.config import get_config, init_config
+    from core.logger import get_logger, setup_logger
+    from core.database import get_database_manager
+except ImportError as e:
+    logging.warning(f"Config/core imports not available: {e}")
+    # Fallbacks pour développement
+    def get_config():
+        class Config:
+            class Flask:
+                host = "0.0.0.0"
+                port = 5000
+                debug = True
+                cors_enabled = True
+                cors_origins = ['*']
+            flask = Flask()
+            class Environment:
+                value = "DEVELOPMENT"
+            environment = Environment()
+        return Config()
+    
+    def get_logger(name):
+        return logging.getLogger(name)
+
+# Configuration du logging de base
 logging.basicConfig(
-    level=getattr(logging, settings.logging.level.value),
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('logs/app.log') if settings.logging.file_path else logging.NullHandler()
+        logging.FileHandler('logs/app.log')
     ]
 )
 
 logger = logging.getLogger(__name__)
 
-
-import traceback
-from contextlib import asynccontextmanager
-from typing import Dict, Any
-
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.exception_handlers import http_exception_handler
-
+# Imports des blueprints
 try:
-    from routes.analytics import router as analytics_router
-except ImportError:
-    logger.warning("Analytics routes not available")
-    analytics_router = None
-
-from core.exceptions import (
-    RPCError as SolanaRPCError,
-    TransactionError as DataProcessingError,
-    WalletValidationError as ValidationError,
-    RPCRateLimitError as RateLimitError
-)
-
-
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager for startup and shutdown events.
-    """
-    # Startup
-    logger.info("Starting Solana Wallet Analytics API")
-    logger.info(f"Environment: {settings.environment.value}")
-    logger.info(f"Debug mode: {settings.flask.debug}")
-    logger.info(f"Log level: {settings.logging.level.value}")
+    from api.routes.dashboard import dashboard_bp
+    from api.routes.admin import admin_bp  
+    from api.routes.batching import batching_bp
+    from api.middleware.auth import init_auth
+    from api.middleware.cors import init_cors
+except ImportError as e:
+    logger.error(f"Erreur imports blueprints: {e}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
+    # Créer des blueprints factices pour éviter les erreurs
+    from flask import Blueprint
+    dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/dashboard')
+    admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin') 
+    batching_bp = Blueprint('batching', __name__, url_prefix='/api/batching')
     
+    @dashboard_bp.route('/health')
+    def dashboard_health():
+        return jsonify({"status": "fallback", "message": "Dashboard routes not loaded"})
+    
+    @admin_bp.route('/health')
+    def admin_health():
+        return jsonify({"status": "fallback", "message": "Admin routes not loaded"})
+    
+    @batching_bp.route('/health')
+    def batching_health():
+        return jsonify({"status": "fallback", "message": "Batching routes not loaded"})
+    
+    def init_auth(app, config=None):
+        logger.warning("Auth middleware not available")
+        return None
+    
+    def init_cors(app, config=None):
+        logger.warning("CORS middleware not available") 
+        return None
+
+def create_app():
+    """Factory pour créer l'application Flask"""
+    
+    # Initialisation de la configuration
     try:
-        # Initialize any required services here
-        # For example, database connections, external service clients, etc.
-        yield
-    finally:
-        # Shutdown
-        logger.info("Shutting down Solana Wallet Analytics API")
+        config = get_config()
+        logger.info(f"🚀 Démarrage Solana Wallet Monitor - Environnement: {config.environment.value}")
+    except Exception as e:
+        logger.error(f"Erreur chargement config: {e}")
+        config = get_config()  # Fallback
 
-
-# Create FastAPI application
-app = FastAPI(
-    title="Solana Wallet Analytics API",
-    description="API for analyzing Solana wallet transactions and providing analytics insights",
-    version="1.0.0",
-    docs_url="/docs" if settings.flask.debug else None,
-    redoc_url="/redoc" if settings.flask.debug else None,
-    openapi_url="/openapi.json" if settings.flask.debug else None,
-    lifespan=lifespan
-)
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.flask.cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
-)
-
-
-# Request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """
-    Log all incoming requests and their responses.
-    """
-    start_time = time.time()
+    # Création de l'application Flask
+    app = Flask(__name__)
     
-    # Log request
-    logger.info(f"Request: {request.method} {request.url}")
-    if request.method in ["POST", "PUT", "PATCH"]:
+    # Configuration Flask
+    app.config.update({
+        'SECRET_KEY': 'dev-secret-key-change-in-production',
+        'JSON_SORT_KEYS': False,
+        'JSONIFY_PRETTYPRINT_REGULAR': config.flask.debug if hasattr(config, 'flask') else True
+    })
+
+    # Variables globales pour statistiques
+    app.stats = {
+        'start_time': time.time(),
+        'total_requests': 0,
+        'errors': 0
+    }
+
+    # ============= MIDDLEWARE ET HANDLERS =============
+    
+    @app.before_request
+    def before_request():
+        """Middleware avant chaque requête"""
+        g.request_start_time = time.time()
+        app.stats['total_requests'] += 1
+        
+        # Log des requêtes importantes
+        if request.path.startswith('/api/'):
+            logger.debug(f"🌐 {request.method} {request.path} - IP: {request.remote_addr}")
+
+    @app.after_request 
+    def after_request(response):
+        """Middleware après chaque requête"""
+        
+        # Ajouter headers de sécurité
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+        
+        # Headers informatifs
+        if hasattr(g, 'request_start_time'):
+            duration = round((time.time() - g.request_start_time) * 1000, 2)
+            response.headers['X-Response-Time'] = f"{duration}ms"
+        
+        response.headers['X-API-Version'] = '1.0.0'
+        
+        return response
+
+    @app.errorhandler(404)
+    def not_found(error):
+        """Handler 404 personnalisé"""
+        return jsonify({
+            'error': 'Not Found',
+            'message': 'The requested endpoint does not exist',
+            'timestamp': int(time.time())
+        }), 404
+
+    @app.errorhandler(500)
+    def internal_error(error):
+        """Handler 500 personnalisé"""
+        app.stats['errors'] += 1
+        logger.error(f"Erreur 500: {error}")
+        
+        return jsonify({
+            'error': 'Internal Server Error',
+            'message': 'An unexpected error occurred',
+            'timestamp': int(time.time())
+        }), 500
+
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        """Handler général des exceptions"""
+        app.stats['errors'] += 1
+        logger.error(f"Exception non gérée: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        return jsonify({
+            'error': 'Unexpected Error',
+            'message': str(e),
+            'timestamp': int(time.time())
+        }), 500
+
+    # ============= ROUTES PRINCIPALES =============
+
+    @app.route('/')
+    def root():
+        """Page d'accueil de l'API"""
+        uptime = time.time() - app.stats['start_time']
+        
+        return jsonify({
+            'name': 'Solana Wallet Monitor API',
+            'version': '2.0.0',
+            'status': 'running',
+            'uptime_seconds': round(uptime, 2),
+            'environment': getattr(getattr(config, 'environment', None), 'value', 'unknown'),
+            'endpoints': {
+                'dashboard': '/api/dashboard/',
+                'admin': '/api/admin/health',
+                'batching': '/api/batching/status',
+                'health': '/health',
+                'stats': '/stats'
+            },
+            'documentation': {
+                'dashboard': 'Interface principale de visualisation',
+                'admin': 'Administration et monitoring système', 
+                'batching': 'Contrôle du système de batching RPC'
+            }
+        })
+
+    @app.route('/health')
+    def health_check():
+        """Health check global de l'application"""
         try:
-            body = await request.body()
-            if body:
-                logger.debug(f"Request body: {body.decode()[:500]}...")
-        except Exception:
-            pass
-    
-    response = await call_next(request)
-    
-    # Log response
-    process_time = time.time() - start_time
-    logger.info(
-        f"Response: {response.status_code} - "
-        f"Time: {process_time:.3f}s - "
-        f"Path: {request.url.path}"
-    )
-    
-    return response
-
-
-# Custom exception handlers
-@app.exception_handler(SolanaRPCError)
-async def solana_rpc_exception_handler(request: Request, exc: SolanaRPCError):
-    """Handle Solana RPC specific errors."""
-    logger.error(f"Solana RPC Error: {exc}")
-    return JSONResponse(
-        status_code=503,
-        content={
-            "error": "Solana RPC Service Error",
-            "message": str(exc),
-            "type": "solana_rpc_error",
-            "details": exc.details if hasattr(exc, 'details') else None
-        }
-    )
-
-
-@app.exception_handler(DataProcessingError)
-async def data_processing_exception_handler(request: Request, exc: DataProcessingError):
-    """Handle data processing errors."""
-    logger.error(f"Data Processing Error: {exc}")
-    return JSONResponse(
-        status_code=422,
-        content={
-            "error": "Data Processing Error",
-            "message": str(exc),
-            "type": "data_processing_error",
-            "details": exc.details if hasattr(exc, 'details') else None
-        }
-    )
-
-
-@app.exception_handler(ValidationError)
-async def validation_exception_handler(request: Request, exc: ValidationError):
-    """Handle validation errors."""
-    logger.error(f"Validation Error: {exc}")
-    return JSONResponse(
-        status_code=400,
-        content={
-            "error": "Validation Error",
-            "message": str(exc),
-            "type": "validation_error",
-            "details": exc.details if hasattr(exc, 'details') else None
-        }
-    )
-
-
-@app.exception_handler(RateLimitError)
-async def rate_limit_exception_handler(request: Request, exc: RateLimitError):
-    """Handle rate limit errors."""
-    logger.warning(f"Rate Limit Error: {exc}")
-    return JSONResponse(
-        status_code=429,
-        content={
-            "error": "Rate Limit Exceeded",
-            "message": str(exc),
-            "type": "rate_limit_error",
-            "retry_after": exc.retry_after if hasattr(exc, 'retry_after') else None
-        }
-    )
-
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    """Handle all other unhandled exceptions."""
-    logger.error(f"Unhandled exception: {exc}")
-    logger.error(traceback.format_exc())
-    
-    if settings.flask.debug:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Internal Server Error",
-                "message": str(exc),
-                "type": "internal_error",
-                "traceback": traceback.format_exc()
+            checks = {
+                'api': {'status': 'ok', 'message': 'API running'},
+                'config': {'status': 'ok', 'message': 'Configuration loaded'},
+                'database': {'status': 'unknown', 'message': 'Not checked'},
+                'routes': {'status': 'ok', 'message': f'{len(app.blueprints)} blueprints registered'}
             }
-        )
-    else:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Internal Server Error",
-                "message": "An unexpected error occurred",
-                "type": "internal_error"
-            }
-        )
+            
+            # Test base de données si disponible
+            try:
+                db_manager = get_database_manager()
+                with db_manager.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    result = cursor.fetchone()
+                    if result:
+                        checks['database'] = {'status': 'ok', 'message': 'Database connected'}
+            except Exception as db_e:
+                checks['database'] = {'status': 'error', 'message': f'Database error: {str(db_e)}'}
 
+            # Déterminer le statut global
+            all_ok = all(check['status'] == 'ok' for check in checks.values())
+            has_errors = any(check['status'] == 'error' for check in checks.values())
+            
+            overall_status = 'healthy' if all_ok else 'critical' if has_errors else 'degraded'
+            
+            return jsonify({
+                'status': overall_status,
+                'timestamp': int(time.time()),
+                'uptime_seconds': round(time.time() - app.stats['start_time'], 2),
+                'version': '2.0.0',
+                'checks': checks,
+                'statistics': {
+                    'total_requests': app.stats['total_requests'],
+                    'total_errors': app.stats['errors'],
+                    'error_rate': round((app.stats['errors'] / max(app.stats['total_requests'], 1)) * 100, 2)
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return jsonify({
+                'status': 'critical',
+                'timestamp': int(time.time()),
+                'error': str(e)
+            }), 500
 
-# Health check endpoint
-@app.get("/health")
-async def health_check():
-    """
-    Health check endpoint to verify the API is running.
-    """
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-        "version": "1.0.0",
-        "environment": settings.environment.value
-    }
+    @app.route('/stats')
+    def app_stats():
+        """Statistiques de l'application"""
+        uptime = time.time() - app.stats['start_time']
+        
+        return jsonify({
+            'application': {
+                'name': 'Solana Wallet Monitor',
+                'version': '2.0.0',
+                'uptime_seconds': round(uptime, 2),
+                'uptime_human': f"{int(uptime // 3600)}h {int((uptime % 3600) // 60)}m"
+            },
+            'requests': {
+                'total': app.stats['total_requests'],
+                'errors': app.stats['errors'],
+                'success_rate': round(((app.stats['total_requests'] - app.stats['errors']) / max(app.stats['total_requests'], 1)) * 100, 2),
+                'requests_per_minute': round(app.stats['total_requests'] / (uptime / 60), 2) if uptime > 0 else 0
+            },
+            'routes': {
+                'registered_blueprints': len(app.blueprints),
+                'blueprint_names': list(app.blueprints.keys())
+            },
+            'environment': getattr(getattr(config, 'environment', None), 'value', 'unknown'),
+            'timestamp': int(time.time())
+        })
 
+    # ============= ENREGISTREMENT DES BLUEPRINTS =============
 
-@app.get("/")
-async def root():
-    """
-    Root endpoint with API information.
-    """
-    return {
-        "name": "Solana Wallet Analytics API",
-        "version": "1.0.0",
-        "description": "API for analyzing Solana wallet transactions and providing analytics insights",
-        "docs_url": "/docs" if settings.flask.debug else None,
-        "health_check": "/health"
-    }
+    # Blueprint Dashboard (interface principale)
+    app.register_blueprint(dashboard_bp)
+    logger.info("✅ Dashboard routes enregistrées: /api/dashboard/*")
 
+    # Blueprint Admin (gestion système)
+    app.register_blueprint(admin_bp)
+    logger.info("✅ Admin routes enregistrées: /api/admin/*")
 
-# Include routers
-if analytics_router:
-    app.include_router(
-        analytics_router,
-        prefix="/api/v1/analytics",
-        tags=["analytics"]
-    )
+    # Blueprint Batching (contrôle RPC)
+    app.register_blueprint(batching_bp) 
+    logger.info("✅ Batching routes enregistrées: /api/batching/*")
 
+    # ============= INITIALISATION MIDDLEWARE =============
 
-# Add additional imports at the top
-import time
-from datetime import datetime
+    # Middleware d'authentification (si configuré)
+    try:
+        if hasattr(config, 'auth') and getattr(config.auth, 'enabled', False):
+            auth_middleware = init_auth(app)
+            if auth_middleware:
+                logger.info("🔐 Middleware d'authentification activé")
+        else:
+            logger.info("🔓 Authentification désactivée")
+    except Exception as e:
+        logger.warning(f"Authentification non configurée: {e}")
 
+    # Middleware CORS (si configuré) 
+    try:
+        if hasattr(config, 'flask') and getattr(config.flask, 'cors_enabled', True):
+            cors_middleware = init_cors(app)
+            if cors_middleware:
+                logger.info("🌐 Middleware CORS activé")
+        else:
+            logger.info("🚫 CORS désactivé")
+    except Exception as e:
+        logger.warning(f"CORS non configuré: {e}")
+
+    # ============= ROUTES DE DEBUG (développement) =============
+    
+    if hasattr(config, 'flask') and getattr(config.flask, 'debug', False):
+        
+        @app.route('/debug/routes')
+        def debug_routes():
+            """Liste toutes les routes (debug uniquement)"""
+            routes = []
+            for rule in app.url_map.iter_rules():
+                routes.append({
+                    'endpoint': rule.endpoint,
+                    'methods': list(rule.methods),
+                    'path': str(rule.rule)
+                })
+            
+            return jsonify({
+                'total_routes': len(routes),
+                'routes': sorted(routes, key=lambda x: x['path'])
+            })
+
+        @app.route('/debug/config')  
+        def debug_config():
+            """Configuration (masquée, debug uniquement)"""
+            try:
+                return jsonify({
+                    'environment': config.environment.value,
+                    'flask': {
+                        'host': config.flask.host,
+                        'port': config.flask.port,
+                        'debug': config.flask.debug,
+                        'cors_enabled': config.flask.cors_enabled
+                    },
+                    'blueprints_loaded': list(app.blueprints.keys()),
+                    'note': 'Configuration sensible masquée'
+                })
+            except Exception as e:
+                return jsonify({'error': str(e)})
+
+        logger.info("🐛 Routes de debug activées (/debug/*)")
+
+    # ============= FINALISATION =============
+    
+    logger.info(f"🎯 Application Flask créée avec {len(app.blueprints)} blueprints")
+    logger.info(f"📊 Total des routes: {len(list(app.url_map.iter_rules()))}")
+    
+    return app
+
+# ============= POINT D'ENTRÉE PRINCIPAL =============
+
+# Création de l'instance d'application
+app = create_app()
 
 if __name__ == "__main__":
-    import uvicorn
+    """Démarrage de l'application en mode development"""
     
-    # Run the application
-    uvicorn.run(
-        "api.app:app",
-        host=settings.flask.host,
-        port=settings.flask.port,
-        reload=False,
-        log_level=settings.logging.level.value.lower(),
-        access_log=True
-    )
+    try:
+        # Récupération de la configuration
+        config = get_config()
+        
+        # Configuration du serveur
+        host = getattr(getattr(config, 'flask', None), 'host', '127.0.0.1')
+        port = getattr(getattr(config, 'flask', None), 'port', 5000)
+        debug = getattr(getattr(config, 'flask', None), 'debug', True)
+        
+        logger.info("=" * 60)
+        logger.info("🚀 DÉMARRAGE SOLANA WALLET MONITOR")
+        logger.info("=" * 60)
+        logger.info(f"🌐 Serveur: http://{host}:{port}")
+        logger.info(f"🔧 Mode debug: {'Activé' if debug else 'Désactivé'}")
+        logger.info(f"📍 Endpoints principaux:")
+        logger.info(f"   • Dashboard: http://{host}:{port}/api/dashboard/")
+        logger.info(f"   • Admin: http://{host}:{port}/api/admin/health")
+        logger.info(f"   • Health: http://{host}:{port}/health")
+        logger.info("=" * 60)
+        
+        # Démarrer le serveur
+        app.run(
+            host=host,
+            port=port,
+            debug=debug,
+            threaded=True,
+            use_reloader=debug
+        )
+        
+    except KeyboardInterrupt:
+        logger.info("🛑 Arrêt de l'application par l'utilisateur")
+    except Exception as e:
+        logger.error(f"💥 Erreur critique au démarrage: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        sys.exit(1)
