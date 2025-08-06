@@ -767,3 +767,406 @@ class RPCClient:
                     headers=self._get_headers(endpoint_config),
                     timeout=5.0
                 )
+
+                response_time = (time.time() - start_time) * 1000  # En millisecondes
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    
+                    # Mettre à jour les métriques
+                    metrics = self.endpoints_metrics[url]
+                    metrics.update_success(response_time)
+                    
+                    health_results[url] = {
+                        'status': 'healthy',
+                        'response_time_ms': round(response_time, 0),
+                        'method': 'getHealth'
+                    }
+                    
+                    logger.debug(f"✅ Health check OK pour {url[:50]}... ({response_time:.0f}ms)")
+                else:
+                    raise requests.RequestException(f"HTTP {response.status_code}")
+                    
+            except Exception as e:
+                health_results[url] = {
+                    'status': 'unhealthy',
+                    'error': str(e),
+                    'method': 'getHealth'
+                }
+                
+                # Mettre à jour les métriques d'échec
+                metrics = self.endpoints_metrics[url]
+                metrics.update_failure()
+                
+                logger.warning(f"❌ Health check failed pour {url[:50]}...: {e}")
+        
+        # Analyser les résultats globaux
+        healthy_count = sum(1 for result in health_results.values() if result['status'] == 'healthy')
+        total_count = len(health_results)
+        
+        overall_status = 'healthy' if healthy_count == total_count else \
+                        'degraded' if healthy_count > 0 else 'critical'
+        
+        return {
+            'overall_status': overall_status,
+            'healthy_endpoints': healthy_count,
+            'total_endpoints': total_count,
+            'endpoints': health_results,
+            'timestamp': time.time()
+        }
+    
+    def get_best_endpoints(self, count: int = 3) -> List[Dict]:
+        """Retourne les meilleurs endpoints selon leurs métriques"""
+        with self._lock:
+            endpoint_scores = []
+            
+            for endpoint_config in self.endpoints:
+                url = endpoint_config['url']
+                metrics = self.endpoints_metrics[url]
+                
+                # Score composite
+                score = metrics.health_score
+                
+                # Bonus pour endpoints premium
+                if endpoint_config['type'] == 'premium':
+                    score += 20
+                
+                endpoint_scores.append({
+                    'endpoint': endpoint_config,
+                    'metrics': metrics,
+                    'score': score
+                })
+            
+            # Trier par score décroissant
+            endpoint_scores.sort(key=lambda x: x['score'], reverse=True)
+            
+            return [{
+                'url': item['endpoint']['url'],
+                'type': item['endpoint']['type'],
+                'health_score': round(item['metrics'].health_score, 1),
+                'success_rate': round(item['metrics'].success_rate, 1),
+                'avg_response_time': round(item['metrics'].avg_response_time, 0)
+            } for item in endpoint_scores[:count]]
+    
+    def reset_statistics(self):
+        """Remet à zéro les statistiques de session"""
+        with self._lock:
+            self.total_requests = 0
+            self.total_failures = 0
+            
+            # Reset des métriques par endpoint
+            for metrics in self.endpoints_metrics.values():
+                metrics.total_requests = 0
+                metrics.successful_requests = 0
+                metrics.failed_requests = 0
+                metrics.consecutive_errors = 0
+                metrics.rate_limit_hits = 0
+                metrics.is_available = True
+                metrics.response_times.clear()
+            
+            # Reset des stats de session
+            self.session_stats = {
+                'start_time': time.time(),
+                'requests_by_method': defaultdict(int),
+                'errors_by_type': defaultdict(int),
+                'cache_hits': 0,
+                'cache_misses': 0,
+                'endpoint_switches': 0
+            }
+            
+            # Reset du cache
+            self.request_cache.clear()
+            
+            logger.info("📊 Statistiques RPC réinitialisées")
+    
+    def close(self):
+        """Ferme le client RPC et nettoie les ressources"""
+        try:
+            # Nettoyage final du cache
+            self.request_cache.clear()
+            
+            # Log des statistiques finales
+            uptime = time.time() - self.session_stats['start_time']
+            success_rate = ((self.total_requests - self.total_failures) / max(self.total_requests, 1)) * 100
+            
+            logger.info(f"🔌 Fermeture client RPC:")
+            logger.info(f"   ⏱️ Uptime: {uptime / 60:.1f} minutes")
+            logger.info(f"   🔢 Requêtes totales: {self.total_requests}")
+            logger.info(f"   ✅ Taux de succès: {success_rate:.1f}%")
+            logger.info(f"   🔄 Changements d'endpoint: {self.session_stats['endpoint_switches']}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Erreur lors de la fermeture: {e}")
+
+
+class EndpointRateLimiter:
+    """Rate limiter spécifique pour un endpoint RPC"""
+    
+    def __init__(self, max_rps: float = 5.0):
+        self.max_rps = max_rps
+        self.requests = deque()  # Timestamps des requêtes
+        self.lock = Lock()
+        
+    def can_proceed(self) -> bool:
+        """Vérifie si on peut faire une requête maintenant"""
+        with self.lock:
+            now = time.time()
+            
+            # Nettoyer les anciennes requêtes (plus de 1 seconde)
+            while self.requests and now - self.requests[0] > 1.0:
+                self.requests.popleft()
+            
+            # Vérifier si on peut ajouter une nouvelle requête
+            return len(self.requests) < self.max_rps
+    
+    def record_request(self):
+        """Enregistre une requête"""
+        with self.lock:
+            self.requests.append(time.time())
+    
+    def get_wait_time(self) -> float:
+        """Retourne le temps d'attente avant la prochaine requête"""
+        with self.lock:
+            if not self.requests:
+                return 0.0
+                
+            oldest_request = self.requests[0]
+            wait_time = 1.0 - (time.time() - oldest_request)
+            return max(0.0, wait_time)
+    
+    def get_current_rps(self) -> float:
+        """Retourne le RPS actuel"""
+        with self.lock:
+            now = time.time()
+            
+            # Compter les requêtes de la dernière seconde
+            recent_requests = sum(1 for req_time in self.requests if now - req_time <= 1.0)
+            return float(recent_requests)
+
+
+# Factory functions et utilitaires globaux
+
+def create_rpc_client(config=None) -> RPCClient:
+    """
+    Factory function pour créer un client RPC configuré
+    
+    Args:
+        config: Configuration optionnelle (utilise get_config() par défaut)
+    
+    Returns:
+        Instance RPCClient configurée
+    """
+    try:
+        return RPCClient(config)
+    except Exception as e:
+        logger.error(f"❌ Erreur création client RPC: {e}")
+        raise
+
+def get_default_rpc_client() -> RPCClient:
+    """
+    Retourne l'instance par défaut du client RPC (singleton)
+    
+    Returns:
+        Instance RPCClient globale
+    """
+    global _default_rpc_client
+    
+    if _default_rpc_client is None:
+        _default_rpc_client = create_rpc_client()
+        logger.info("🔌 Client RPC par défaut créé")
+    
+    return _default_rpc_client
+
+def test_rpc_connectivity(endpoints: List[str] = None) -> Dict[str, Any]:
+    """
+    Teste la connectivité des endpoints RPC
+    
+    Args:
+        endpoints: Liste d'endpoints à tester (utilise la config par défaut si None)
+    
+    Returns:
+        Résultats des tests de connectivité
+    """
+    if endpoints is None:
+        endpoints = DEFAULT_RPC_ENDPOINTS
+    
+    results = {}
+    
+    for endpoint in endpoints:
+        start_time = time.time()
+        
+        try:
+            response = requests.post(
+                endpoint,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getHealth",
+                    "params": []
+                },
+                timeout=5.0,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            response_time = (time.time() - start_time) * 1000
+            
+            if response.status_code == 200:
+                results[endpoint] = {
+                    'status': 'success',
+                    'response_time_ms': round(response_time, 0),
+                    'available': True
+                }
+            else:
+                results[endpoint] = {
+                    'status': 'http_error',
+                    'status_code': response.status_code,
+                    'available': False
+                }
+                
+        except requests.exceptions.Timeout:
+            results[endpoint] = {
+                'status': 'timeout',
+                'available': False
+            }
+        except requests.exceptions.ConnectionError:
+            results[endpoint] = {
+                'status': 'connection_error',
+                'available': False
+            }
+        except Exception as e:
+            results[endpoint] = {
+                'status': 'error',
+                'error': str(e),
+                'available': False
+            }
+    
+    # Statistiques globales
+    total_endpoints = len(results)
+    available_endpoints = sum(1 for r in results.values() if r.get('available', False))
+    
+    return {
+        'endpoints': results,
+        'summary': {
+            'total': total_endpoints,
+            'available': available_endpoints,
+            'availability_percentage': round((available_endpoints / total_endpoints) * 100, 1) if total_endpoints > 0 else 0
+        }
+    }
+
+
+# Variables globales pour le singleton
+_default_rpc_client: Optional[RPCClient] = None
+
+
+# Context manager pour l'utilisation temporaire d'un client
+@contextmanager
+def rpc_client_context(config=None):
+    """
+    Context manager pour utiliser un client RPC temporaire
+    
+    Args:
+        config: Configuration optionnelle
+        
+    Usage:
+        with rpc_client_context() as client:
+            result = client.call('getBalance', [wallet_address])
+    """
+    client = None
+    try:
+        client = create_rpc_client(config)
+        yield client
+    finally:
+        if client:
+            client.close()
+
+
+# Fonction utilitaire pour les appels RPC simples
+def quick_rpc_call(method: str, params: List = None, config=None, timeout: float = 15.0) -> Optional[Dict]:
+    """
+    Effectue un appel RPC rapide sans créer de client persistant
+    
+    Args:
+        method: Méthode RPC à appeler
+        params: Paramètres de la méthode
+        config: Configuration optionnelle
+        timeout: Timeout en secondes
+        
+    Returns:
+        Résultat de l'appel RPC ou None si échec
+    """
+    try:
+        with rpc_client_context(config) as client:
+            # Ajuster le timeout si nécessaire
+            if hasattr(client.config, 'rpc'):
+                original_timeout = getattr(client.config.rpc, 'timeout', None)
+                if original_timeout != timeout:
+                    setattr(client.config.rpc, 'timeout', timeout)
+            
+            return client.call(method, params or [])
+            
+    except Exception as e:
+        logger.error(f"❌ Quick RPC call failed for {method}: {e}")
+        return None
+
+
+if __name__ == "__main__":
+    # Script de test pour le module RPC client
+    import json
+    
+    print("🧪 Test du client RPC Solana")
+    print("=" * 50)
+    
+    # Test 1: Connectivité des endpoints
+    print("\n📡 Test de connectivité des endpoints...")
+    connectivity_results = test_rpc_connectivity()
+    
+    print(f"Endpoints disponibles: {connectivity_results['summary']['available']}/{connectivity_results['summary']['total']}")
+    print(f"Taux de disponibilité: {connectivity_results['summary']['availability_percentage']}%")
+    
+    for endpoint, result in connectivity_results['endpoints'].items():
+        status_icon = "✅" if result.get('available', False) else "❌"
+        endpoint_short = endpoint[:50] + "..." if len(endpoint) > 50 else endpoint
+        print(f"  {status_icon} {endpoint_short}: {result['status']}")
+    
+    # Test 2: Création du client RPC
+    print("\n🔌 Test création client RPC...")
+    try:
+        client = create_rpc_client()
+        print(f"✅ Client créé avec {len(client.endpoints)} endpoints")
+        
+        # Test 3: Health check
+        print("\n🏥 Test health check...")
+        health_results = client.health_check()
+        print(f"Statut global: {health_results['overall_status']}")
+        print(f"Endpoints sains: {health_results['healthy_endpoints']}/{health_results['total_endpoints']}")
+        
+        # Test 4: Appel RPC simple
+        print("\n📞 Test appel RPC simple...")
+        
+        # Test avec getHealth (méthode simple)
+        result = client.call("getHealth", [])
+        if result:
+            print("✅ Appel getHealth réussi")
+        else:
+            print("❌ Appel getHealth échoué")
+        
+        # Test 5: Statistiques
+        print("\n📊 Statistiques du client...")
+        stats = client.get_stats()
+        print(f"Requêtes totales: {stats['total_requests']}")
+        print(f"Taux de succès: {stats['success_rate']}%")
+        print(f"Endpoint actuel: {stats['current_endpoint']}")
+        
+        # Test 6: Meilleurs endpoints
+        print("\n🏆 Meilleurs endpoints...")
+        best_endpoints = client.get_best_endpoints(3)
+        for i, endpoint in enumerate(best_endpoints, 1):
+            print(f"  {i}. {endpoint['url'][:40]}... (Score: {endpoint['health_score']})")
+        
+        client.close()
+        print("\n✅ Tests terminés avec succès!")
+        
+    except Exception as e:
+        print(f"\n❌ Erreur lors des tests: {e}")
+        import traceback
+        traceback.print_exc()
