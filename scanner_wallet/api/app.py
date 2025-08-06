@@ -9,6 +9,32 @@ middleware, error handling, and configuration.
 
 import logging
 import sys
+import os
+from pathlib import Path
+
+# Add parent directory to Python path to find 'core' module
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+# Créer le répertoire logs s'il n'existe pas
+log_dir = Path('logs')
+log_dir.mkdir(exist_ok=True)
+
+from core.config import settings
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.logging.level.value),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('logs/app.log') if settings.logging.file_path else logging.NullHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+
 import traceback
 from contextlib import asynccontextmanager
 from typing import Dict, Any
@@ -18,26 +44,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exception_handlers import http_exception_handler
 
-from api.routes import analytics
-from core.config import settings
+try:
+    from routes.analytics import router as analytics_router
+except ImportError:
+    logger.warning("Analytics routes not available")
+    analytics_router = None
+
 from core.exceptions import (
-    SolanaRPCError,
-    DataProcessingError,
-    ValidationError,
-    RateLimitError
+    RPCError as SolanaRPCError,
+    TransactionError as DataProcessingError,
+    WalletValidationError as ValidationError,
+    RPCRateLimitError as RateLimitError
 )
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('logs/app.log') if settings.LOG_TO_FILE else logging.NullHandler()
-    ]
-)
 
-logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -47,9 +67,9 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info("Starting Solana Wallet Analytics API")
-    logger.info(f"Environment: {settings.ENVIRONMENT}")
-    logger.info(f"Debug mode: {settings.DEBUG}")
-    logger.info(f"Log level: {settings.LOG_LEVEL}")
+    logger.info(f"Environment: {settings.environment.value}")
+    logger.info(f"Debug mode: {settings.flask.debug}")
+    logger.info(f"Log level: {settings.logging.level.value}")
     
     try:
         # Initialize any required services here
@@ -65,16 +85,16 @@ app = FastAPI(
     title="Solana Wallet Analytics API",
     description="API for analyzing Solana wallet transactions and providing analytics insights",
     version="1.0.0",
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
-    openapi_url="/openapi.json" if settings.DEBUG else None,
+    docs_url="/docs" if settings.flask.debug else None,
+    redoc_url="/redoc" if settings.flask.debug else None,
+    openapi_url="/openapi.json" if settings.flask.debug else None,
     lifespan=lifespan
 )
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=settings.flask.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
@@ -179,7 +199,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception: {exc}")
     logger.error(traceback.format_exc())
     
-    if settings.DEBUG:
+    if settings.flask.debug:
         return JSONResponse(
             status_code=500,
             content={
@@ -210,7 +230,7 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "version": "1.0.0",
-        "environment": settings.ENVIRONMENT
+        "environment": settings.environment.value
     }
 
 
@@ -223,17 +243,18 @@ async def root():
         "name": "Solana Wallet Analytics API",
         "version": "1.0.0",
         "description": "API for analyzing Solana wallet transactions and providing analytics insights",
-        "docs_url": "/docs" if settings.DEBUG else None,
+        "docs_url": "/docs" if settings.flask.debug else None,
         "health_check": "/health"
     }
 
 
 # Include routers
-app.include_router(
-    analytics.router,
-    prefix="/api/v1/analytics",
-    tags=["analytics"]
-)
+if analytics_router:
+    app.include_router(
+        analytics_router,
+        prefix="/api/v1/analytics",
+        tags=["analytics"]
+    )
 
 
 # Add additional imports at the top
@@ -247,9 +268,9 @@ if __name__ == "__main__":
     # Run the application
     uvicorn.run(
         "api.app:app",
-        host=settings.API_HOST,
-        port=settings.API_PORT,
-        reload=settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower(),
+        host=settings.flask.host,
+        port=settings.flask.port,
+        reload=False,
+        log_level=settings.logging.level.value.lower(),
         access_log=True
     )

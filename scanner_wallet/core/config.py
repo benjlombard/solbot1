@@ -7,6 +7,7 @@ Système de configuration hiérarchique avec validation, environnements multiple
 
 import os
 import json
+import threading
 from typing import List, Dict, Any, Optional, Union, Tuple
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -716,9 +717,13 @@ def load_config_from_env_file(env_file_path: str = ".env"):
                    key = key.strip()
                    value = value.strip()
                    
+                   # NOUVEAU : Supprimer les commentaires inline
+                   if '#' in value:
+                     value = value.split('#')[0].strip()
+
                    # Supprimer les guillemets optionnels
                    if value.startswith('"') and value.endswith('"'):
-                       value = value[1:-1]
+                     value = value[1:-1]
                    elif value.startswith("'") and value.endswith("'"):
                        value = value[1:-1]
                    
@@ -1401,3 +1406,5 @@ if __name__ == "__main__":
    export_to_env_file(config, "test_config.env")
    
    print("\n✅ Tests de configuration terminés")
+
+settings = get_config()
