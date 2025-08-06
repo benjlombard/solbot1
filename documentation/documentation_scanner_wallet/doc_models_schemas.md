@@ -1,261 +1,280 @@
+# Documentation - Schémas de Validation API Solana Wallet Monitor
 
-# 📘 Solana Wallet Monitor – Documentation des Schémas API
+## Vue d'ensemble
 
-## ✨ Introduction
+Ce module fournit un système complet de validation de données pour l'API du Solana Wallet Monitor. Il définit des schémas de validation pour toutes les requêtes et réponses API, avec des contrôles métier spécialisés pour les adresses Solana, tokens, et transactions.
 
-Ce module définit les **schémas de validation, de requêtes et de réponses** pour une API de monitoring de wallets sur Solana.
+## Patterns de Validation
 
-Fonctionnalités incluses :
+### Expressions Régulières
+- **SOLANA_ADDRESS_PATTERN**: `^[1-9A-HJ-NP-Za-km-z]{44}$` - Validation des adresses Solana (Base58, 44 caractères)
+- **SOLANA_SIGNATURE_PATTERN**: `^[1-9A-HJ-NP-Za-km-z]{88}$` - Validation des signatures de transaction (Base58, 88 caractères)
+- **TOKEN_SYMBOL_PATTERN**: `^[A-Z][A-Z0-9_]{0,10}$` - Validation des symboles de token (majuscules, max 10 chars)
 
-- Validation des formats d'adresse, signature et symboles
-- Définition des structures de requêtes et réponses API
-- Filtres avancés pour wallets et transactions
-- Utilitaires pour la pagination, nettoyage et contrôle métier
-
----
-
-## 🔐 Patterns de validation
-
-```python
-SOLANA_ADDRESS_PATTERN = r'^[1-9A-HJ-NP-Za-km-z]{44}$'
-SOLANA_SIGNATURE_PATTERN = r'^[1-9A-HJ-NP-Za-km-z]{88}$'
-TOKEN_SYMBOL_PATTERN = r'^[A-Z][A-Z0-9_]{0,10}$'
-```
-
----
-
-## ⚠️ ValidationError & ValidationResult
+## Classes de Base
 
 ### ValidationError
-
-Exception personnalisée pour erreurs de validation.
-
-```python
-ValidationError(message: str, field: Optional[str] = None)
-```
+Exception personnalisée pour les erreurs de validation.
+- **Attributs**: `message` (str), `field` (str, optionnel)
 
 ### ValidationResult
+Conteneur pour les résultats de validation.
+- **Attributs**:
+  - `is_valid` (bool): État de validation
+  - `errors` (List[str]): Liste des erreurs
+  - `warnings` (List[str]): Liste des avertissements
+- **Méthodes**:
+  - `add_error(message, field=None)`: Ajoute une erreur et invalide le résultat
+  - `add_warning(message, field=None)`: Ajoute un avertissement
 
-Conteneur de validation :
-
-- `is_valid: bool`
-- `errors: List[str]`
-- `warnings: List[str]`
-
-Méthodes :
-
-```python
-add_error(message: str, field: Optional[str] = None)
-add_warning(message: str, field: Optional[str] = None)
-```
-
----
-
-## 📤 Schémas de requêtes API
+## Schémas de Requêtes API
 
 ### WalletPriorityUpdateRequest
-
-Met à jour le score de priorité d’un wallet.
-
-| Champ            | Type           | Description                              |
-|------------------|----------------|------------------------------------------|
-| `wallet_address` | `str`          | Adresse Solana                           |
-| `priority_score` | `float`        | Score entre 0.1 et 10.0                  |
-| `reason`         | `Optional[str]`| Raison optionnelle (max 255 caractères)  |
+Mise à jour de la priorité d'un wallet.
+- **Champs**:
+  - `wallet_address` (str): Adresse du wallet (format Solana requis)
+  - `priority_score` (float): Score de priorité (0.1 à 10.0)
+  - `reason` (str, optionnel): Raison de la mise à jour (max 255 caractères)
+- **Validations**:
+  - Adresse Solana valide
+  - Score dans la plage autorisée
+  - Longueur de la raison respectée
 
 ### BatchingConfigRequest
-
-Configuration du batching des requêtes.
-
-| Champ                      | Type                 | Description                                |
-|---------------------------|----------------------|--------------------------------------------|
-| `enabled`                 | `Optional[bool]`     | Active/désactive le batching               |
-| `batch_sizes`             | `Optional[Dict]`     | Méthodes valides : `getMultipleAccounts`, etc. |
-| `min_delay_between_batches` | `Optional[float]` | 0 à 10 secondes                            |
-| `max_concurrent_batches`  | `Optional[int]`      | 1 à 10                                     |
-| `batch_timeout`           | `Optional[int]`      | 5 à 120 secondes                           |
-| `adaptive_sizing`         | `Optional[bool]`     | Active l'adaptation automatique            |
+Configuration du système de batching.
+- **Champs**:
+  - `enabled` (bool, optionnel): Activation du batching
+  - `batch_sizes` (Dict[str, int], optionnel): Tailles par méthode
+  - `min_delay_between_batches` (float, optionnel): Délai minimum (0-10s)
+  - `max_concurrent_batches` (int, optionnel): Concurrence max (1-10)
+  - `batch_timeout` (int, optionnel): Timeout (5-120s)
+  - `adaptive_sizing` (bool, optionnel): Taille adaptative
+- **Méthodes de batch supportées**: `getMultipleAccounts`, `token_metadata`, `signatures_batch`, `transactions_batch`
+- **Validations**: Tailles (1-100), délais, concurrence, timeouts dans les plages autorisées
 
 ### SelectionModeRequest
-
-Change le mode de sélection des wallets.
-
-| Champ                  | Type            | Description                                |
-|------------------------|-----------------|--------------------------------------------|
-| `mode`                 | `str`           | `priority` ou `random`                     |
-| `weighted_by_priority` | `Optional[bool]`| Pondération par priorité                   |
-| `min_interval`         | `Optional[int]` | Intervalle min. entre sélections (10–3600s)|
+Configuration du mode de sélection des wallets.
+- **Champs**:
+  - `mode` (str): Mode de sélection ('priority' ou 'random')
+  - `weighted_by_priority` (bool, optionnel): Pondération par priorité
+  - `min_interval` (int, optionnel): Intervalle minimum (10-3600s)
+- **Validations**: Mode valide, intervalle dans la plage
 
 ### DatabaseCleanupRequest
-
-Nettoyage de tables de base de données.
-
-| Champ     | Type             | Description                                  |
-|-----------|------------------|----------------------------------------------|
-| `days`    | `int`            | Nombre de jours de conservation (1–365)     |
-| `tables`  | `Optional[List]` | Tables autorisées : `scan_history`, etc.     |
-| `dry_run` | `bool`           | Simulation sans suppression réelle           |
-| `confirm` | `bool`           | Requiert confirmation si `dry_run` est False |
+Configuration du nettoyage de base de données.
+- **Champs**:
+  - `days` (int): Nombre de jours à conserver (1-365, défaut: 30)
+  - `tables` (List[str], optionnel): Tables à nettoyer
+  - `dry_run` (bool): Mode simulation (défaut: False)
+  - `confirm` (bool): Confirmation requise (défaut: False)
+- **Tables autorisées**: `scan_history`, `wallet_activity_metrics`, `system_logs`
+- **Sécurité**: Confirmation obligatoire pour opérations réelles
 
 ### TokenMetadataRequest
+Requête de métadonnées de token.
+- **Champs**:
+  - `mint_address` (str): Adresse de mint du token
+  - `force_refresh` (bool): Forcer le rafraîchissement (défaut: False)
+  - `include_price` (bool): Inclure le prix (défaut: True)
+- **Validations**: Format d'adresse Solana valide
 
-Requête pour récupérer les métadonnées d’un token.
-
-| Champ           | Type    | Description                                  |
-|------------------|---------|----------------------------------------------|
-| `mint_address`   | `str`   | Adresse mint (44 caractères, base58)         |
-| `force_refresh`  | `bool`  | Forcer la mise à jour                        |
-| `include_price`  | `bool`  | Inclure les données de prix dans la réponse  |
-
----
-
-## 📥 Schémas de réponses API
+## Schémas de Réponses API
 
 ### ApiResponse
-
-Réponse standardisée.
-
-```python
-ApiResponse(
-    success: bool,
-    message: str,
-    data: Optional[Any],
-    timestamp: int,
-    errors: Optional[List[str]],
-    warnings: Optional[List[str]]
-)
-```
+Réponse API standardisée.
+- **Champs**:
+  - `success` (bool): Statut de succès
+  - `message` (str): Message descriptif
+  - `data` (Any, optionnel): Données de réponse
+  - `timestamp` (int): Timestamp Unix (auto-généré)
+  - `errors` (List[str], optionnel): Liste des erreurs
+  - `warnings` (List[str], optionnel): Liste des avertissements
+- **Méthode**: `to_dict()` pour sérialisation JSON
 
 ### PaginatedResponse
-
-Réponse paginée.
-
-| Champ         | Type       |
-|---------------|------------|
-| `items`       | `List[Any]`|
-| `total_count` | `int`      |
-| `page`        | `int`      |
-| `page_size`   | `int`      |
-| `has_next`    | `bool`     |
-| `has_previous`| `bool`     |
-| `total_pages` | `int` (calculé automatiquement) |
+Réponse paginée avec métadonnées.
+- **Champs**:
+  - `items` (List[Any]): Éléments de la page
+  - `total_count` (int): Nombre total d'éléments
+  - `page` (int): Page courante (défaut: 1)
+  - `page_size` (int): Taille de page (défaut: 20)
+  - `has_next` (bool): Existence page suivante
+  - `has_previous` (bool): Existence page précédente
+- **Propriété calculée**: `total_pages` - Nombre total de pages
+- **Méthode**: `to_dict()` avec métadonnées de pagination
 
 ### HealthCheckResponse
+Réponse de vérification de santé du système.
+- **Champs**:
+  - `status` (str): État général ('healthy', 'degraded', 'critical')
+  - `timestamp` (int): Timestamp de vérification
+  - `version` (str): Version du système
+  - `uptime_seconds` (int): Temps de fonctionnement
+  - `checks` (Dict[str, Any]): Résultats des vérifications
+  - `system_stats` (Dict[str, Any], optionnel): Statistiques système
+- **Méthode**: `to_dict()` pour sérialisation
 
-Statut global de l’API (health check).
-
-| Champ             | Type             | Description                              |
-|-------------------|------------------|------------------------------------------|
-| `status`          | `str`            | `healthy`, `degraded`, `critical`        |
-| `timestamp`       | `int`            | Timestamp Unix                           |
-| `version`         | `str`            | Version de l’API                         |
-| `uptime_seconds`  | `int`            | Uptime depuis démarrage                  |
-| `checks`          | `Dict`           | Détails par service                      |
-| `system_stats`    | `Optional[Dict]` | Statistiques système optionnelles        |
-
----
-
-## 🔍 Filtres et Recherche
+## Schémas de Filtrage
 
 ### WalletFilterParams
-
-| Champ                | Type            | Description                                  |
-|----------------------|-----------------|----------------------------------------------|
-| `priority_min/max`   | `Optional[float]` | Valeurs entre 0.1 et 10.0                  |
-| `priority_category`  | `Optional[str]`  | `high`, `medium`, `low`                     |
-| `has_recent_activity`| `Optional[bool]` | Activité récente                            |
-| `min_balance`        | `Optional[float]`| Balance minimale                             |
-| `scan_status`        | `Optional[str]`  | `ready`, `recent`, `overdue`                |
+Paramètres de filtrage pour les wallets.
+- **Champs**:
+  - `priority_min/max` (float, optionnel): Plage de priorité (0.1-10.0)
+  - `priority_category` (str, optionnel): Catégorie ('high', 'medium', 'low')
+  - `has_recent_activity` (bool, optionnel): Activité récente
+  - `min_balance` (float, optionnel): Balance minimum (≥0)
+  - `scan_status` (str, optionnel): Statut ('ready', 'recent', 'overdue')
+- **Validations**: Cohérence des plages, valeurs positives, énumérations valides
 
 ### TransactionFilterParams
-
-| Champ              | Type             | Description                             |
-|--------------------|------------------|-----------------------------------------|
-| `wallet_address`   | `Optional[str]`  | Adresse du wallet                       |
-| `token_mint`       | `Optional[str]`  | Adresse mint                            |
-| `transaction_type` | `Optional[str]`  | `buy`, `sell`, `swap`, etc.             |
-| `min_amount`       | `Optional[float]`| Montant minimum                         |
-| `max_amount`       | `Optional[float]`| Montant maximum                         |
-| `start_time`       | `Optional[int]`  | Timestamp début                         |
-| `end_time`         | `Optional[int]`  | Timestamp fin                           |
-| `is_large_amount`  | `Optional[bool]` | Montant élevé ?                         |
-| `status`           | `Optional[str]`  | `success`, `failed`, `pending`, etc.    |
+Paramètres de filtrage pour les transactions.
+- **Champs**:
+  - `wallet_address` (str, optionnel): Adresse du wallet
+  - `token_mint` (str, optionnel): Mint du token
+  - `transaction_type` (str, optionnel): Type de transaction
+  - `min/max_amount` (float, optionnel): Plage de montant
+  - `start/end_time` (int, optionnel): Plage temporelle
+  - `is_large_amount` (bool, optionnel): Gros montant
+  - `status` (str, optionnel): Statut de transaction
+- **Types supportés**: 'buy', 'sell', 'transfer', 'transfer_in', 'transfer_out', 'swap', 'stake', 'unstake', 'other'
+- **Statuts supportés**: 'success', 'failed', 'pending', 'timeout', 'cancelled'
 
 ### PaginationParams
+Paramètres de pagination standardisés.
+- **Champs**:
+  - `page` (int): Numéro de page (≥1, défaut: 1)
+  - `page_size` (int): Taille de page (1-1000, défaut: 20)
+  - `sort_by` (str, optionnel): Champ de tri
+  - `sort_order` (str): Ordre de tri ('asc', 'desc', défaut: 'desc')
+- **Propriété calculée**: `offset` - Offset pour base de données
+- **Validations**: Page positive, taille dans la plage, ordre valide
 
-| Champ         | Type           | Description                        |
-|---------------|----------------|------------------------------------|
-| `page`        | `int`          | Page ≥ 1                           |
-| `page_size`   | `int`          | Taille de page (1 à 1000)          |
-| `sort_by`     | `Optional[str]`| Clé de tri                         |
-| `sort_order`  | `str`          | `asc` ou `desc`                    |
-
----
-
-## ✅ Validations Métiers
+## Validations Métier Spécialisées
 
 ### WalletValidation
+Validation spécialisée pour les wallets Solana.
 
-```python
-validate_address(address: str) -> ValidationResult
-validate_priority_score(score: float) -> ValidationResult
-```
+#### validate_address(address: str)
+- **Validations**:
+  - Présence de l'adresse
+  - Longueur exacte de 44 caractères
+  - Format Base58 valide
+  - Décodage Base58 (si bibliothèque disponible)
+  - Longueur décodée de 32 bytes
+
+#### validate_priority_score(score: float)
+- **Validations**: Score dans la plage 0.1-10.0
+- **Avertissements**:
+  - Score < 0.5: risque d'être ignoré
+  - Score > 8.0: risque de sur-scan
 
 ### TokenValidation
+Validation spécialisée pour les tokens.
 
-```python
-validate_mint_address(mint: str) -> ValidationResult
-validate_token_symbol(symbol: str) -> ValidationResult
-validate_decimals(decimals: int) -> ValidationResult
-```
+#### validate_mint_address(mint: str)
+- **Validations**: Identiques aux adresses de wallet
+- **Usage**: Validation des adresses de mint de tokens
+
+#### validate_token_symbol(symbol: str)
+- **Validations**:
+  - Présence du symbole
+  - Longueur ≤ 10 caractères
+  - Format: lettres majuscules, chiffres, underscore seulement
+  - Doit commencer par une lettre
+
+#### validate_decimals(decimals: int)
+- **Validations**: Plage 0-18 décimales
+- **Avertissement**: Plus de 12 décimales considéré comme inhabituel
 
 ### TransactionValidation
+Validation spécialisée pour les transactions.
 
-```python
-validate_signature(signature: str) -> ValidationResult
-validate_amount(amount: float, field_name: str = "amount") -> ValidationResult
-```
+#### validate_signature(signature: str)
+- **Validations**:
+  - Présence de la signature
+  - Longueur exacte de 88 caractères
+  - Format Base58 valide
 
----
+#### validate_amount(amount: float, field_name: str)
+- **Validations**: Montant non-négatif
+- **Avertissement**: Montant > 1M considéré comme très élevé
 
-## 🛠 Utilitaires de validation
+## Utilitaires de Validation
 
 ### validate_time_range(start_time, end_time, max_range_hours=168)
-
-Valide une plage temporelle cohérente.
+Validation des plages temporelles.
+- **Validations**:
+  - Timestamps non-négatifs
+  - Cohérence start ≤ end
+  - Plage ≤ maximum autorisé (défaut: 168h/1 semaine)
 
 ### validate_pagination_with_total(pagination, total_count)
-
-Valide les paramètres de pagination par rapport au nombre total d'éléments.
+Validation de pagination avec vérification d'existence.
+- **Validations**: Page demandée ≤ nombre total de pages calculé
 
 ### sanitize_string_input(value, max_length=255, allow_empty=False)
+Nettoyage et validation des chaînes.
+- **Traitements**:
+  - Suppression espaces début/fin
+  - Vérification longueur maximale
+  - Suppression caractères de contrôle
+- **Paramètres**: Longueur max, autorisation valeurs vides
 
-Nettoie une chaîne (trim, contrôle de longueur, caractères non imprimables).
+### Fonctions de Réponse Standardisées
 
-### create_error_response / create_success_response
+#### create_error_response(message, errors=None)
+Création de réponse d'erreur standardisée.
+- **Retour**: ApiResponse avec success=False
 
-Génèrent des objets `ApiResponse` standardisés.
+#### create_success_response(message, data=None, warnings=None)
+Création de réponse de succès standardisée.
+- **Retour**: ApiResponse avec success=True et données optionnelles
 
----
+## Patterns d'Usage
 
-## 🧩 Dépendances externes
-
-- `base58` (facultatif) : pour décodage d’adresse Solana
-- `re`, `time`, `dataclasses`, `typing` : intégrés
-
----
-
-## 🧪 Exemple d'utilisation
-
+### Validation Typique
 ```python
-req = WalletPriorityUpdateRequest(wallet_address="...", priority_score=2.0)
-result = req.validate()
+# 1. Créer l'objet de requête
+request = WalletPriorityUpdateRequest(...)
+
+# 2. Valider
+result = request.validate()
+
+# 3. Vérifier le résultat
 if not result.is_valid:
     return create_error_response("Validation failed", result.errors)
+
+# 4. Traiter la requête valide
 ```
 
----
+### Gestion des Erreurs
+- **ValidationError**: Exception levée pour erreurs critiques
+- **ValidationResult**: Conteneur pour erreurs/avertissements multiples
+- **ApiResponse**: Format standardisé pour retour API
 
-## 📚 Résumé
+### Niveaux de Validation
+1. **Format**: Patterns regex, types de données
+2. **Métier**: Règles spécifiques au domaine
+3. **Cohérence**: Relations entre champs
+4. **Sécurité**: Prévention d'opérations dangereuses
 
-Ce module fournit un socle robuste pour structurer, valider et répondre aux appels d'une API Solana Wallet Monitor. Il centralise toute la logique de validation et structure de données côté backend.
+## Dépendances
+
+### Bibliothèques Standard
+- `typing`: Annotations de type
+- `dataclasses`: Structures de données
+- `enum`: Énumérations
+- `re`: Expressions régulières
+- `time`: Timestamps
+
+### Bibliothèques Optionnelles
+- `base58`: Validation avancée Base58 (graceful degradation si absente)
+
+## Extensibilité
+
+Le système est conçu pour être facilement extensible :
+- Nouveaux schémas par dataclass
+- Nouvelles validations par méthodes statiques
+- Patterns de validation centralisés
+- Réponses API standardisées
+- Gestion d'erreurs uniforme
