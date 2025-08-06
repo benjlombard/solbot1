@@ -740,13 +740,13 @@ class SolanaWalletLogger:
        self.logger.setLevel(numeric_level)
        self.logger.info(f"🔧 Niveau de log changé vers: {self.log_level}")
    
-   def add_custom_handler(self, handler: logging.Handler):
+    def add_custom_handler(self, handler: logging.Handler):
        """Ajoute un handler personnalisé"""
        handler.addFilter(self.context_filter)
        self.logger.addHandler(handler)
        self.logger.info(f"➕ Handler personnalisé ajouté: {type(handler).__name__}")
    
-   def remove_handler(self, handler_type: type):
+    def remove_handler(self, handler_type: type):
        """Supprime tous les handlers d'un type donné"""
        handlers_to_remove = [h for h in self.logger.handlers if isinstance(h, handler_type)]
        for handler in handlers_to_remove:
@@ -756,7 +756,7 @@ class SolanaWalletLogger:
        if handlers_to_remove:
            self.logger.info(f"➖ {len(handlers_to_remove)} handlers {handler_type.__name__} supprimés")
    
-   def get_log_stats(self) -> Dict[str, Any]:
+    def get_log_stats(self) -> Dict[str, Any]:
        """Retourne des statistiques sur le logging"""
        stats = {
            'level': self.log_level,
