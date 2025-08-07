@@ -122,16 +122,29 @@ class ConnectionPool:
     
     def _optimize_connection(self, conn: sqlite3.Connection):
         """Applique les optimisations SQLite à une connexion"""
-        optimizations = [
-            f"PRAGMA journal_mode={SQLITE_SETTINGS['journal_mode']}",
-            f"PRAGMA synchronous={SQLITE_SETTINGS['synchronous']}",
-            f"PRAGMA busy_timeout={SQLITE_SETTINGS['busy_timeout']}",
-            f"PRAGMA cache_size={SQLITE_SETTINGS['cache_size']}",
-            f"PRAGMA page_size={SQLITE_SETTINGS['page_size']}",
-            "PRAGMA temp_store=MEMORY",
-            "PRAGMA mmap_size=268435456",  # 256MB
-            "PRAGMA optimize"
-        ]
+        try:
+            optimizations = [
+                f"PRAGMA journal_mode={SQLITE_SETTINGS['journal_mode']}",
+                f"PRAGMA synchronous={SQLITE_SETTINGS['synchronous']}",
+                f"PRAGMA busy_timeout={SQLITE_SETTINGS['busy_timeout']}",
+                f"PRAGMA cache_size={SQLITE_SETTINGS['cache_size']}",
+                f"PRAGMA page_size={SQLITE_SETTINGS['page_size']}",
+                "PRAGMA temp_store=MEMORY",
+                "PRAGMA mmap_size=268435456",
+                "PRAGMA optimize"
+            ]
+        except NameError:
+            # Fallback si SQLITE_SETTINGS n'est pas défini
+            optimizations = [
+                "PRAGMA journal_mode=WAL",
+                "PRAGMA synchronous=NORMAL",
+                "PRAGMA busy_timeout=30000",
+                "PRAGMA cache_size=-64000",
+                "PRAGMA page_size=4096",
+                "PRAGMA temp_store=MEMORY",
+                "PRAGMA mmap_size=268435456",
+                "PRAGMA optimize"
+            ]
         
         cursor = conn.cursor()
         for pragma in optimizations:
@@ -141,6 +154,194 @@ class ConnectionPool:
                 logging.warning(f"Failed to apply pragma '{pragma}': {e}")
         cursor.close()
     
+    def _cleanup_connection_pool(self):
+        """Nettoie les connexions inactives du pool"""
+        try:
+            # Cette méthode peut être appelée périodiquement pour optimiser le pool
+            # Pour l'instant, on laisse le pool se gérer automatiquement
+            pass
+        except Exception as e:
+            logging.warning(f"Connection pool cleanup error: {e}")  # logging, pas self.logger
+            
+    @contextmanager
+    def get_connection(self, retry_count: int = 3) -> Generator[sqlite3.Connection, None, None]:
+        """Context manager pour obtenir une connexion du pool"""
+        conn = None
+        start_time = time.time()
+        
+        for attempt in range(retry_count):
+            try:
+                # Essayer de récupérer une connexion du pool
+                try:
+                    conn = self._pool.get(block=True, timeout=5.0)
+                except queue.Empty:
+                    # Créer une nouvelle connexion si le pool est vide
+                    if self._created_connections < self.max_connections:
+                        conn = self._create_connection()
+                    else:
+                        raise DatabaseConnectionError(
+                            self.db_path, 
+                            attempt + 1, 
+                            "Connection pool exhausted"
+                        )
+                
+                # Vérifier que la connexion est valide
+                try:
+                    conn.execute("SELECT 1").fetchone()
+                    break
+                except sqlite3.Error:
+                    # Connexion invalide, en créer une nouvelle
+                    self._close_connection(conn)
+                    conn = self._create_connection()
+                    break
+                    
+            except Exception as e:
+                if attempt < retry_count - 1:
+                    wait_time = (attempt + 1) * 0.1
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise DatabaseConnectionError(self.db_path, attempt + 1, str(e))
+        
+        try:
+            with self._lock:
+                self._connection_stats['total_queries'] += 1
+            
+            yield conn
+            
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e).lower():
+                wait_time = time.time() - start_time
+                raise DatabaseLockError(self.db_path, wait_time)
+            else:
+                raise DatabaseError(f"Database operation failed: {e}")
+                
+        except sqlite3.IntegrityError as e:
+            raise DatabaseIntegrityError(str(e))
+            
+        except sqlite3.Error as e:
+            raise DatabaseError(f"Database error: {e}")
+            
+        finally:
+            # Remettre la connexion dans le pool
+            if conn:
+                try:
+                    # Nettoyer les transactions en cours
+                    conn.rollback()
+                    
+                    # Remettre dans le pool si possible
+                    try:
+                        self._pool.put(conn, block=False)
+                    except queue.Full:
+                        # Pool plein, fermer la connexion
+                        self._close_connection(conn)
+                        
+                except Exception as e:
+                    logging.warning(f"Error returning connection to pool: {e}")
+                    self._close_connection(conn)
+    
+    def _close_connection(self, conn: sqlite3.Connection):
+        """Ferme une connexion proprement"""
+        try:
+            conn.close()
+            with self._lock:
+                self._created_connections -= 1
+                self._connection_stats['active_connections'] -= 1
+        except Exception as e:
+            logging.warning(f"Error closing database connection: {e}")
+    
+    def close_all(self):
+        """Ferme toutes les connexions du pool"""
+        with self._lock:
+            while not self._pool.empty():
+                try:
+                    conn = self._pool.get(block=False)
+                    self._close_connection(conn)
+                except queue.Empty:
+                    break
+                except Exception as e:
+                    logging.warning(f"Error closing pooled connection: {e}")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Retourne les statistiques du pool"""
+        with self._lock:
+            return {
+                'max_connections': self.max_connections,
+                'active_connections': self._connection_stats['active_connections'],
+                'pool_size': self._pool.qsize(),
+                'total_created': self._connection_stats['total_created'],
+                'total_queries': self._connection_stats['total_queries'],
+                'failed_connections': self._connection_stats['failed_connections']
+            }
+
+
+# =============================================================================
+# GESTIONNAIRE PRINCIPAL DE BASE DE DONNÉES
+# =============================================================================
+
+class DatabaseManager:
+    """Gestionnaire principal de base de données avec fonctionnalités avancées"""
+    
+    _instance = None
+    _lock = threading.Lock()
+        
+    def __new__(cls, config=None):
+        """Singleton pattern thread-safe"""
+        if not cls._instance:
+            with cls._lock:
+                if not cls._instance:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+    
+    def __init__(self, config=None):
+        # Éviter la réinitialisation multiple
+        if hasattr(self, '_initialized'):
+            return
+        
+        self.config = DatabaseConfig(config)
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialiser le pool de connexions
+        self.connection_pool = ConnectionPool(
+            self.config.db_path,
+            self.config.max_connections,
+            self.config.timeout
+        )
+        
+        # Statistiques et monitoring
+        self.stats = {
+            'start_time': time.time(),
+            'total_operations': 0,
+            'failed_operations': 0,
+            'last_backup': 0,
+            'last_cleanup': 0,
+            'schema_version': 1
+        }
+        
+        # Thread pour les tâches de maintenance
+        self.maintenance_thread = None
+        self.maintenance_stop_event = threading.Event()
+        
+        # Initialiser la base de données
+        self._initialize_database()
+        
+        # Démarrer la maintenance automatique
+        self._start_maintenance_thread()
+        
+        self._initialized = True
+        self.logger.info(f"DatabaseManager initialized with path: {self.config.db_path}")
+    
+    @contextmanager
+    def get_connection(self, retry_count: int = 3) -> Generator[sqlite3.Connection, None, None]:
+        """Context manager pour obtenir une connexion de base de données"""
+        with self.connection_pool.get_connection(retry_count) as conn:
+            try:
+                self.stats['total_operations'] += 1
+                yield conn
+            except Exception as e:
+                self.stats['failed_operations'] += 1
+                raise
+                
     def _create_tables(self, cursor: sqlite3.Cursor):
         """Crée toutes les tables nécessaires"""
         
@@ -350,89 +551,6 @@ class ConnectionPool:
             )
         ''')
     
-
-    def _check_schema_version(self, cursor: sqlite3.Cursor):
-        """Vérifie et met à jour la version du schéma si nécessaire"""
-        try:
-            # Vérifier la version actuelle
-            cursor.execute("SELECT value FROM system_config WHERE key = 'schema_version'")
-            result = cursor.fetchone()
-            
-            current_version = int(result[0]) if result else 0
-            target_version = self.stats['schema_version']
-            
-            if current_version < target_version:
-                self.logger.info(f"Upgrading database schema from version {current_version} to {target_version}")
-                self._upgrade_schema(cursor, current_version, target_version)
-                
-                # Mettre à jour la version
-                cursor.execute('''
-                    INSERT OR REPLACE INTO system_config (key, value, description)
-                    VALUES ('schema_version', ?, 'Database schema version')
-                ''', (str(target_version),))
-            
-        except sqlite3.Error as e:
-            self.logger.warning(f"Schema version check failed: {e}")
-    
-    def _upgrade_schema(self, cursor: sqlite3.Cursor, from_version: int, to_version: int):
-        """Met à jour le schéma de base de données"""
-        # Pour l'instant, pas de migrations spécifiques
-        # À implémenter selon les besoins futurs
-        pass
-    
-    def _start_maintenance_thread(self):
-        """Démarre le thread de maintenance automatique"""
-        if self.maintenance_thread and self.maintenance_thread.is_alive():
-            return
-        
-        self.maintenance_thread = threading.Thread(
-            target=self._maintenance_loop,
-            name="DatabaseMaintenance",
-            daemon=True
-        )
-        self.maintenance_thread.start()
-        self.logger.info("Database maintenance thread started")
-    
-    def _maintenance_loop(self):
-        """Boucle de maintenance automatique"""
-        while not self.maintenance_stop_event.wait(3600):  # Vérifier toutes les heures
-            try:
-                current_time = get_current_timestamp()
-                
-                # Backup automatique
-                if (self.config.backup_enabled and 
-                    current_time - self.stats['last_backup'] > self.config.backup_interval_hours * 3600):
-                    self._perform_backup()
-                
-                # Nettoyage automatique (toutes les 6 heures par défaut)
-                cleanup_interval = 6 * 3600  # 6 heures
-                try:
-                    cleanup_interval = CLEANUP_INTERVALS.get('cache_cleanup', 6 * 3600)
-                except (NameError, AttributeError):
-                    pass
-                    
-                if current_time - self.stats['last_cleanup'] > cleanup_interval:
-                    self._perform_cleanup()
-                
-                # Optimisation VACUUM (hebdomadaire)
-                if current_time % (7 * 24 * 3600) < 3600:  # Une fois par semaine
-                    self._vacuum_database()
-                
-                # Nettoyage des connexions inactives du pool
-                self._cleanup_connection_pool()
-                
-            except Exception as e:
-                self.logger.error(f"Maintenance loop error: {e}")
-    
-    def _cleanup_connection_pool(self):
-        """Nettoie les connexions inactives du pool"""
-        try:
-            # Cette méthode peut être appelée périodiquement pour optimiser le pool
-            # Pour l'instant, on laisse le pool se gérer automatiquement
-            pass
-        except Exception as e:
-            self.logger.warning(f"Connection pool cleanup error: {e}")
-    
     def _create_indexes(self, cursor: sqlite3.Cursor):
         """Crée tous les index nécessaires pour optimiser les performances"""
         
@@ -491,18 +609,31 @@ class ConnectionPool:
                 cursor.execute(index_sql)
             except sqlite3.Error as e:
                 self.logger.warning(f"Failed to create index: {index_sql[:50]}... Error: {e}")
-
-    @contextmanager
-    def get_connection(self, retry_count: int = 3) -> Generator[sqlite3.Connection, None, None]:
-        """Context manager pour obtenir une connexion de base de données"""
-        with self.connection_pool.get_connection(retry_count) as conn:
-            try:
-                self.stats['total_operations'] += 1
-                yield conn
-            except Exception as e:
-                self.stats['failed_operations'] += 1
-                raise
     
+    def _cleanup_connection_pool(self):
+        """Délègue le nettoyage du pool"""
+        try:
+            self.connection_pool._cleanup_connection_pool()
+        except Exception as e:
+            self.logger.warning(f"Connection pool cleanup delegation error: {e}")
+            
+    def _cleanup_old_backups(self, backup_dir: Path, keep_count: int = 10):
+        """Nettoie les anciens fichiers de backup"""
+        try:
+            backup_files = list(backup_dir.glob("backup_*.db"))
+            backup_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+            
+            # Supprimer les anciens backups
+            for old_backup in backup_files[keep_count:]:
+                try:
+                    old_backup.unlink()
+                    self.logger.debug(f"Deleted old backup: {old_backup}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to delete backup {old_backup}: {e}")
+                    
+        except Exception as e:
+            self.logger.error(f"Backup cleanup failed: {e}")
+            
     def execute_query(self, query: str, params: tuple = (), fetch_one: bool = False, 
                      fetch_all: bool = False) -> Union[sqlite3.Cursor, Any, List[Any]]:
         """Exécute une requête SQL avec gestion d'erreurs"""
@@ -538,49 +669,7 @@ class ConnectionPool:
     def transaction(self) -> 'DatabaseTransaction':
         """Retourne un context manager pour les transactions"""
         return DatabaseTransaction(self)
-    
-    def _perform_backup(self):
-        """Effectue une sauvegarde de la base de données"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_filename = f"backup_{timestamp}_{sanitize_filename(Path(self.config.db_path).stem)}.db"
-            backup_path = self.config.db_dir / "backups" / backup_filename
-            
-            # Créer le répertoire de backup
-            backup_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Effectuer la sauvegarde
-            with self.get_connection() as conn:
-                backup = sqlite3.connect(str(backup_path))
-                conn.backup(backup)
-                backup.close()
-            
-            # Nettoyer les anciens backups (garder 10 plus récents)
-            self._cleanup_old_backups(backup_path.parent, keep_count=10)
-            
-            self.stats['last_backup'] = get_current_timestamp()
-            self.logger.info(f"Database backup created: {backup_path}")
-            
-        except Exception as e:
-            self.logger.error(f"Backup failed: {e}")
-    
-    def _cleanup_old_backups(self, backup_dir: Path, keep_count: int = 10):
-        """Nettoie les anciens fichiers de backup"""
-        try:
-            backup_files = list(backup_dir.glob("backup_*.db"))
-            backup_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-            
-            # Supprimer les anciens backups
-            for old_backup in backup_files[keep_count:]:
-                try:
-                    old_backup.unlink()
-                    self.logger.debug(f"Deleted old backup: {old_backup}")
-                except Exception as e:
-                    self.logger.warning(f"Failed to delete backup {old_backup}: {e}")
-                    
-        except Exception as e:
-            self.logger.error(f"Backup cleanup failed: {e}")
-    
+        
     def _perform_cleanup(self):
         """Effectue le nettoyage automatique des anciennes données"""
         try:
@@ -636,174 +725,104 @@ class ConnectionPool:
         except Exception as e:
             self.logger.error(f"Database cleanup failed: {e}")
             
-    @contextmanager
-    def get_connection(self, retry_count: int = 3) -> Generator[sqlite3.Connection, None, None]:
-        """Context manager pour obtenir une connexion du pool"""
-        conn = None
-        start_time = time.time()
-        
-        for attempt in range(retry_count):
-            try:
-                # Essayer de récupérer une connexion du pool
-                try:
-                    conn = self._pool.get(block=True, timeout=5.0)
-                except queue.Empty:
-                    # Créer une nouvelle connexion si le pool est vide
-                    if self._created_connections < self.max_connections:
-                        conn = self._create_connection()
-                    else:
-                        raise DatabaseConnectionError(
-                            self.db_path, 
-                            attempt + 1, 
-                            "Connection pool exhausted"
-                        )
-                
-                # Vérifier que la connexion est valide
-                try:
-                    conn.execute("SELECT 1").fetchone()
-                    break
-                except sqlite3.Error:
-                    # Connexion invalide, en créer une nouvelle
-                    self._close_connection(conn)
-                    conn = self._create_connection()
-                    break
-                    
-            except Exception as e:
-                if attempt < retry_count - 1:
-                    wait_time = (attempt + 1) * 0.1
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    raise DatabaseConnectionError(self.db_path, attempt + 1, str(e))
-        
+    def _perform_backup(self):
+        """Effectue une sauvegarde de la base de données"""
         try:
-            with self._lock:
-                self._connection_stats['total_queries'] += 1
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_filename = f"backup_{timestamp}_{sanitize_filename(Path(self.config.db_path).stem)}.db"
+            backup_path = self.config.db_dir / "backups" / backup_filename
             
-            yield conn
+            # Créer le répertoire de backup
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
             
-        except sqlite3.OperationalError as e:
-            if "database is locked" in str(e).lower():
-                wait_time = time.time() - start_time
-                raise DatabaseLockError(self.db_path, wait_time)
-            else:
-                raise DatabaseError(f"Database operation failed: {e}")
+            # Effectuer la sauvegarde
+            with self.get_connection() as conn:
+                backup = sqlite3.connect(str(backup_path))
+                conn.backup(backup)
+                backup.close()
+            
+            # Nettoyer les anciens backups (garder 10 plus récents)
+            self._cleanup_old_backups(backup_path.parent, keep_count=10)
+            
+            self.stats['last_backup'] = get_current_timestamp()
+            self.logger.info(f"Database backup created: {backup_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Backup failed: {e}")
+            
+    def _check_schema_version(self, cursor: sqlite3.Cursor):
+        """Vérifie et met à jour la version du schéma si nécessaire"""
+        try:
+            # Vérifier la version actuelle
+            cursor.execute("SELECT value FROM system_config WHERE key = 'schema_version'")
+            result = cursor.fetchone()
+            
+            current_version = int(result[0]) if result else 0
+            target_version = self.stats['schema_version']
+            
+            if current_version < target_version:
+                self.logger.info(f"Upgrading database schema from version {current_version} to {target_version}")
+                self._upgrade_schema(cursor, current_version, target_version)
                 
-        except sqlite3.IntegrityError as e:
-            raise DatabaseIntegrityError(str(e))
+                # Mettre à jour la version
+                cursor.execute('''
+                    INSERT OR REPLACE INTO system_config (key, value, description)
+                    VALUES ('schema_version', ?, 'Database schema version')
+                ''', (str(target_version),))
             
         except sqlite3.Error as e:
-            raise DatabaseError(f"Database error: {e}")
-            
-        finally:
-            # Remettre la connexion dans le pool
-            if conn:
-                try:
-                    # Nettoyer les transactions en cours
-                    conn.rollback()
-                    
-                    # Remettre dans le pool si possible
-                    try:
-                        self._pool.put(conn, block=False)
-                    except queue.Full:
-                        # Pool plein, fermer la connexion
-                        self._close_connection(conn)
-                        
-                except Exception as e:
-                    logging.warning(f"Error returning connection to pool: {e}")
-                    self._close_connection(conn)
+            self.logger.warning(f"Schema version check failed: {e}")
     
-    def _close_connection(self, conn: sqlite3.Connection):
-        """Ferme une connexion proprement"""
-        try:
-            conn.close()
-            with self._lock:
-                self._created_connections -= 1
-                self._connection_stats['active_connections'] -= 1
-        except Exception as e:
-            logging.warning(f"Error closing database connection: {e}")
-    
-    def close_all(self):
-        """Ferme toutes les connexions du pool"""
-        with self._lock:
-            while not self._pool.empty():
-                try:
-                    conn = self._pool.get(block=False)
-                    self._close_connection(conn)
-                except queue.Empty:
-                    break
-                except Exception as e:
-                    logging.warning(f"Error closing pooled connection: {e}")
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Retourne les statistiques du pool"""
-        with self._lock:
-            return {
-                'max_connections': self.max_connections,
-                'active_connections': self._connection_stats['active_connections'],
-                'pool_size': self._pool.qsize(),
-                'total_created': self._connection_stats['total_created'],
-                'total_queries': self._connection_stats['total_queries'],
-                'failed_connections': self._connection_stats['failed_connections']
-            }
-
-
-# =============================================================================
-# GESTIONNAIRE PRINCIPAL DE BASE DE DONNÉES
-# =============================================================================
-
-class DatabaseManager:
-    """Gestionnaire principal de base de données avec fonctionnalités avancées"""
-    
-    _instance = None
-    _lock = threading.Lock()
-    
-    def __new__(cls, config=None):
-        """Singleton pattern thread-safe"""
-        if not cls._instance:
-            with cls._lock:
-                if not cls._instance:
-                    cls._instance = super().__new__(cls)
-        return cls._instance
-    
-    def __init__(self, config=None):
-        # Éviter la réinitialisation multiple
-        if hasattr(self, '_initialized'):
+    def _upgrade_schema(self, cursor: sqlite3.Cursor, from_version: int, to_version: int):
+        """Met à jour le schéma de base de données"""
+        # Pour l'instant, pas de migrations spécifiques
+        # À implémenter selon les besoins futurs
+        pass
+        
+    def _start_maintenance_thread(self):
+        """Démarre le thread de maintenance automatique"""
+        if self.maintenance_thread and self.maintenance_thread.is_alive():
             return
         
-        self.config = DatabaseConfig(config)
-        self.logger = logging.getLogger(__name__)
-        
-        # Initialiser le pool de connexions
-        self.connection_pool = ConnectionPool(
-            self.config.db_path,
-            self.config.max_connections,
-            self.config.timeout
+        self.maintenance_thread = threading.Thread(
+            target=self._maintenance_loop,
+            name="DatabaseMaintenance",
+            daemon=True
         )
-        
-        # Statistiques et monitoring
-        self.stats = {
-            'start_time': time.time(),
-            'total_operations': 0,
-            'failed_operations': 0,
-            'last_backup': 0,
-            'last_cleanup': 0,
-            'schema_version': 1
-        }
-        
-        # Thread pour les tâches de maintenance
-        self.maintenance_thread = None
-        self.maintenance_stop_event = threading.Event()
-        
-        # Initialiser la base de données
-        self._initialize_database()
-        
-        # Démarrer la maintenance automatique
-        self._start_maintenance_thread()
-        
-        self._initialized = True
-        self.logger.info(f"DatabaseManager initialized with path: {self.config.db_path}")
+        self.maintenance_thread.start()
+        self.logger.info("Database maintenance thread started")
     
+    def _maintenance_loop(self):
+        """Boucle de maintenance automatique"""
+        while not self.maintenance_stop_event.wait(3600):  # Vérifier toutes les heures
+            try:
+                current_time = get_current_timestamp()
+                
+                # Backup automatique
+                if (self.config.backup_enabled and 
+                    current_time - self.stats['last_backup'] > self.config.backup_interval_hours * 3600):
+                    self._perform_backup()
+                
+                # Nettoyage automatique (toutes les 6 heures par défaut)
+                cleanup_interval = 6 * 3600  # 6 heures
+                try:
+                    cleanup_interval = CLEANUP_INTERVALS.get('cache_cleanup', 6 * 3600)
+                except (NameError, AttributeError):
+                    pass
+                    
+                if current_time - self.stats['last_cleanup'] > cleanup_interval:
+                    self._perform_cleanup()
+                
+                # Optimisation VACUUM (hebdomadaire)
+                if current_time % (7 * 24 * 3600) < 3600:  # Une fois par semaine
+                    self._vacuum_database()
+                
+                # Nettoyage des connexions inactives du pool
+                self._cleanup_connection_pool()
+                
+            except Exception as e:
+                self.logger.error(f"Maintenance loop error: {e}")
+                
     def _initialize_database(self):
         """Initialise la base de données avec le schéma complet"""
         try:
