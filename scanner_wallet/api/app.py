@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Application Flask principale pour le Solana Wallet Monitor
 Point d'entrée avec tous les blueprints et middleware configurés
@@ -12,6 +13,22 @@ import os
 from pathlib import Path
 import time
 from datetime import datetime
+import traceback
+
+
+if sys.platform.startswith('win'):
+    # Forcer UTF-8 pour toute l'application
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    
+    # Reconfigurer les streams si possible
+    if hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+
+
 
 # Ajouter le répertoire parent au Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,22 +38,53 @@ log_dir = Path('logs')
 log_dir.mkdir(exist_ok=True)
 
 from flask import Flask, jsonify, request, g
-import traceback
 
-# Imports de configuration
+# === CONFIGURATION LOGGING SÉCURISÉ ===
+class UnicodeFileHandler(logging.FileHandler):
+    """Handler de fichier avec encodage UTF-8 forcé"""
+    def __init__(self, filename, mode='a', encoding='utf-8', delay=False):
+        super().__init__(filename, mode, encoding, delay)
+
+class SafeConsoleHandler(logging.StreamHandler):
+    """Handler console qui gère les erreurs Unicode"""
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            
+            # Sur Windows, gérer l'encodage
+            if sys.platform.startswith('win'):
+                try:
+                    stream.write(msg + self.terminator)
+                except UnicodeEncodeError:
+                    # Remplacer les caractères problématiques
+                    safe_msg = msg.encode('ascii', errors='replace').decode('ascii')
+                    stream.write(safe_msg + self.terminator)
+            else:
+                stream.write(msg + self.terminator)
+            
+            self.flush()
+            
+        except Exception:
+            self.handleError(record)
+
+# Configuration du logging de base
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        UnicodeFileHandler('logs/app.log')
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+# Imports de configuration avec fallbacks
 try:
     from core.config import get_config, init_config
     from core.logger import get_logger, setup_logger
     from core.database import get_database_manager
-    from core.config import Config
-    from core.logger import setup_logger
-    from core.database import DatabaseManager
-    from api.routes.dashboard import dashboard_bp
-    from api.routes.analytics import analytics_bp
-    from api.routes.batching import batching_bp
-    from api.routes.admin import admin_bp
-    from api.middleware.cors import setup_cors
-    from wallet.monitor import WalletMonitor
 except ImportError as e:
     logging.warning(f"Config/core imports not available: {e}")
     # Fallbacks pour développement
@@ -56,55 +104,55 @@ except ImportError as e:
     
     def get_logger(name):
         return logging.getLogger(name)
+    
+    def get_database_manager():
+        raise ImportError("DatabaseManager not available")
 
-# Configuration du logging de base
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('logs/app.log')
+def load_blueprints():
+    """Charge les blueprints avec gestion d'erreurs détaillée"""
+    blueprints = []
+    
+    blueprint_configs = [
+        ('dashboard', 'api.routes.dashboard', 'dashboard_bp', '/api/dashboard/*'),
+        ('analytics', 'api.routes.analytics', 'analytics_bp', '/api/analytics/*'),
+        ('admin', 'api.routes.admin', 'admin_bp', '/api/admin/*'),
+        ('batching', 'api.routes.batching', 'batching_bp', '/api/batching/*')
     ]
-)
+    
+    for name, module_path, bp_name, route_prefix in blueprint_configs:
+        try:
+            module = __import__(module_path, fromlist=[bp_name])
+            blueprint = getattr(module, bp_name)
+            blueprints.append((name, blueprint, route_prefix))
+            logger.debug(f"✅ Blueprint {name} chargé depuis {module_path}")
+        except ImportError as e:
+            logger.warning(f"⚠️ Blueprint {name} non disponible: {e}")
+            blueprints.append((name, None, route_prefix))
+        except AttributeError as e:
+            logger.error(f"❌ Blueprint {name}: {bp_name} non trouvé dans {module_path}")
+            blueprints.append((name, None, route_prefix))
+    
+    return blueprints
 
-logger = logging.getLogger(__name__)
+blueprints_config = load_blueprints()
 
-# Imports des blueprints
+
+# Middleware
 try:
-    from api.routes.dashboard import dashboard_bp
-    from api.routes.admin import admin_bp  
-    from api.routes.batching import batching_bp
     from api.middleware.auth import init_auth
-    from api.middleware.cors import init_cors
 except ImportError as e:
-    logger.error(f"Erreur imports blueprints: {e}")
-    logger.error(f"Traceback: {traceback.format_exc()}")
-    # Créer des blueprints factices pour éviter les erreurs
-    from flask import Blueprint
-    dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/dashboard')
-    admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin') 
-    batching_bp = Blueprint('batching', __name__, url_prefix='/api/batching')
-    
-    @dashboard_bp.route('/health')
-    def dashboard_health():
-        return jsonify({"status": "fallback", "message": "Dashboard routes not loaded"})
-    
-    @admin_bp.route('/health')
-    def admin_health():
-        return jsonify({"status": "fallback", "message": "Admin routes not loaded"})
-    
-    @batching_bp.route('/health')
-    def batching_health():
-        return jsonify({"status": "fallback", "message": "Batching routes not loaded"})
-    
+    logger.warning(f"Auth middleware non disponible: {e}")
     def init_auth(app, config=None):
-        logger.warning("Auth middleware not available")
-        return None
-    
-    def init_cors(app, config=None):
-        logger.warning("CORS middleware not available") 
+        logger.warning("Auth middleware stub")
         return None
 
+try:
+    from api.middleware.cors import init_cors  # ✅ CORRECTION ICI
+except ImportError as e:
+    logger.warning(f"CORS middleware non disponible: {e}")
+    def init_cors(app, config=None):
+        logger.warning("CORS middleware stub")
+        return None
 def create_app():
     """Factory pour créer l'application Flask"""
     
@@ -204,24 +252,40 @@ def create_app():
         """Page d'accueil de l'API"""
         uptime = time.time() - app.stats['start_time']
         
+        # Détecter les blueprints enregistrés
+        registered_bp = list(app.blueprints.keys())
+        
+        endpoints = {
+            'health': '/health',
+            'stats': '/stats',
+            'dashboard': '/api/dashboard/' if 'dashboard' in registered_bp else None,
+            'analytics': '/api/analytics/' if 'analytics' in registered_bp else None,
+            'admin': '/api/admin/health' if 'admin' in registered_bp else None,
+            'batching': '/api/batching/status' if 'batching' in registered_bp else None,
+        }
+        
+        # Filtrer les endpoints None
+        available_endpoints = {k: v for k, v in endpoints.items() if v is not None}
+
         return jsonify({
             'name': 'Solana Wallet Monitor API',
             'version': '2.0.0',
             'status': 'running',
             'uptime_seconds': round(uptime, 2),
             'environment': getattr(getattr(config, 'environment', None), 'value', 'unknown'),
-            'endpoints': {
-                'dashboard': '/api/dashboard/',
-                'admin': '/api/admin/health',
-                'batching': '/api/batching/status',
-                'health': '/health',
-                'stats': '/stats'
-            },
+            'blueprints_registered': len(registered_bp),
+            'blueprints': registered_bp,
+            'endpoints': available_endpoints,
             'documentation': {
                 'dashboard': 'Interface principale de visualisation',
+                'analytics': 'API d\'analyse des wallets Solana',
                 'admin': 'Administration et monitoring système', 
-                'batching': 'Contrôle du système de batching RPC'
-            }
+                'batching': 'Contrôle du système de batching RPC',
+                'health': 'Statut de santé de l\'application',
+                'stats': 'Statistiques d\'utilisation'
+            },
+            'unicode_support': '🚀✅📊🎯',  # Test des emojis dans la réponse
+            'message': '🎉 API Solana Wallet Monitor opérationnelle!'
         })
 
     @app.route('/health')
@@ -302,17 +366,23 @@ def create_app():
 
     # ============= ENREGISTREMENT DES BLUEPRINTS =============
 
-    # Blueprint Dashboard (interface principale)
-    app.register_blueprint(dashboard_bp)
-    logger.info("✅ Dashboard routes enregistrées: /api/dashboard/*")
+    registered_blueprints = []
 
-    # Blueprint Admin (gestion système)
-    app.register_blueprint(admin_bp)
-    logger.info("✅ Admin routes enregistrées: /api/admin/*")
+    # Enregistrement avec gestion d'erreurs
+    for name, blueprint, path in blueprints_config:
+        if blueprint is not None:
+            try:
+                app.register_blueprint(blueprint)
+                registered_blueprints.append(name)
+                logger.info(f"✅ {name.capitalize()} routes enregistrées: {path}")
+            except Exception as bp_error:
+                logger.error(f"❌ Erreur enregistrement blueprint {name}: {bp_error}")
+        else:
+            logger.warning(f"⚠️ Blueprint {name} non disponible")
 
-    # Blueprint Batching (contrôle RPC)
-    app.register_blueprint(batching_bp) 
-    logger.info("✅ Batching routes enregistrées: /api/batching/*")
+    # Vérification analytics
+    if 'analytics' not in registered_blueprints:
+        logger.warning("⚠️ Blueprint Analytics manquant - certaines fonctionnalités seront indisponibles")
 
     # ============= INITIALISATION MIDDLEWARE =============
 
@@ -387,12 +457,46 @@ def create_app():
 
 # ============= POINT D'ENTRÉE PRINCIPAL =============
 
+def test_application_startup():
+    """Teste les composants critiques avant démarrage"""
+    tests = []
+    
+    # Test emojis
+    try:
+        test_msg = "🚀 Test emoji"
+        test_msg.encode('utf-8')
+        tests.append(('Unicode/Emojis', True, 'OK'))
+    except Exception as e:
+        tests.append(('Unicode/Emojis', False, str(e)))
+    
+    # Test config
+    try:
+        config = get_config()
+        tests.append(('Configuration', True, 'Chargée'))
+    except Exception as e:
+        tests.append(('Configuration', False, str(e)))
+    
+    # Test blueprints
+    bp_count = len([bp for name, bp, path in blueprints_config if bp is not None])
+    tests.append(('Blueprints', bp_count > 0, f'{bp_count} disponibles'))
+    
+    # Afficher les résultats
+    logger.info("🧪 Tests de démarrage:")
+    for test_name, success, details in tests:
+        status = "✅" if success else "❌"
+        logger.info(f"   {status} {test_name}: {details}")
+    
+    return all(test[1] for test in tests)
+
 # Création de l'instance d'application
 app = create_app()
 
 if __name__ == "__main__":
     """Démarrage de l'application en mode development"""
-    
+
+    if not test_application_startup():
+        logger.warning("⚠️ Certains tests ont échoué, démarrage quand même...")
+
     try:
         # Récupération de la configuration
         config = get_config()
@@ -409,18 +513,22 @@ if __name__ == "__main__":
         logger.info(f"🔧 Mode debug: {'Activé' if debug else 'Désactivé'}")
         logger.info(f"📍 Endpoints principaux:")
         logger.info(f"   • Dashboard: http://{host}:{port}/api/dashboard/")
+        logger.info(f"   • Analytics: http://{host}:{port}/api/analytics/")  # ✅ Ajouter analytics
         logger.info(f"   • Admin: http://{host}:{port}/api/admin/health")
         logger.info(f"   • Health: http://{host}:{port}/health")
+        logger.info(f"   • Stats: http://{host}:{port}/stats")
         logger.info("=" * 60)
         
+        # Test des emojis
+        logger.info("🎯 Test emojis: ✅ 🚀 📊 🔧")
+
         # Démarrer le serveur
         app.run(
             host=host,
             port=port,
             debug=debug,
             threaded=True,
-            use_reloader=debug,
-            reload=False
+            use_reloader=debug
         )
         
     except KeyboardInterrupt:

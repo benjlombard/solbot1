@@ -1,0 +1,516 @@
+{
+  "summary": {
+    "total_tests": 17,
+    "successful_tests": 12,
+    "failed_tests": 5,
+    "success_rate": 70.59,
+    "average_response_time_ms": 11.22
+  },
+  "failed_tests": [
+    {
+      "endpoint": "/nonexistent",
+      "method": "GET",
+      "description": "Test 404",
+      "status_code": 500,
+      "expected_status": 404,
+      "success": false,
+      "duration_ms": 19.32,
+      "response_size": 150,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "error",
+        "message",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/dashboard/",
+      "method": "GET",
+      "description": "Dashboard principal",
+      "status_code": 500,
+      "expected_status": 200,
+      "success": false,
+      "duration_ms": 6.08,
+      "response_size": 46,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "error"
+      ]
+    },
+    {
+      "endpoint": "/api/analytics/",
+      "method": "GET",
+      "description": "Analytics info",
+      "status_code": 400,
+      "expected_status": 200,
+      "success": false,
+      "duration_ms": 13.54,
+      "response_size": 115,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "data",
+        "message",
+        "success",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/analytics/wallet/analyze",
+      "method": "POST",
+      "description": "Analytics - données invalides",
+      "status_code": 500,
+      "expected_status": 400,
+      "success": false,
+      "duration_ms": 62.3,
+      "response_size": 143,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "error",
+        "message",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/analytics/wallet/analyze",
+      "method": "POST",
+      "description": "Analytics - wallet factice",
+      "status_code": 503,
+      "expected_status": [
+        200,
+        500
+      ],
+      "success": false,
+      "duration_ms": 11.48,
+      "response_size": 280,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "data",
+        "message",
+        "success",
+        "timestamp"
+      ]
+    }
+  ],
+  "slowest_tests": [
+    {
+      "endpoint": "/api/analytics/wallet/analyze",
+      "method": "POST",
+      "description": "Analytics - données invalides",
+      "status_code": 500,
+      "expected_status": 400,
+      "success": false,
+      "duration_ms": 62.3,
+      "response_size": 143,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "error",
+        "message",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/nonexistent",
+      "method": "GET",
+      "description": "Test 404",
+      "status_code": 500,
+      "expected_status": 404,
+      "success": false,
+      "duration_ms": 19.32,
+      "response_size": 150,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "error",
+        "message",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/analytics/",
+      "method": "GET",
+      "description": "Analytics info",
+      "status_code": 400,
+      "expected_status": 200,
+      "success": false,
+      "duration_ms": 13.54,
+      "response_size": 115,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "data",
+        "message",
+        "success",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/analytics/wallet/analyze",
+      "method": "POST",
+      "description": "Analytics - wallet factice",
+      "status_code": 503,
+      "expected_status": [
+        200,
+        500
+      ],
+      "success": false,
+      "duration_ms": 11.48,
+      "response_size": 280,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "data",
+        "message",
+        "success",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/admin/health",
+      "method": "GET",
+      "description": "Admin health check",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 8.98,
+      "response_size": 940,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "data",
+        "message",
+        "success",
+        "timestamp"
+      ]
+    }
+  ],
+  "all_results": [
+    {
+      "endpoint": "/",
+      "method": "GET",
+      "description": "Page d'accueil API",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 5.7,
+      "response_size": 975,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "blueprints",
+        "blueprints_registered",
+        "documentation",
+        "endpoints",
+        "environment",
+        "message",
+        "name",
+        "status",
+        "unicode_support",
+        "uptime_seconds",
+        "version"
+      ]
+    },
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "description": "Health check",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 5.3,
+      "response_size": 543,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "checks",
+        "statistics",
+        "status",
+        "timestamp",
+        "uptime_seconds",
+        "version"
+      ]
+    },
+    {
+      "endpoint": "/stats",
+      "method": "GET",
+      "description": "Statistiques",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 5.63,
+      "response_size": 470,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "application",
+        "environment",
+        "requests",
+        "routes",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/nonexistent",
+      "method": "GET",
+      "description": "Test 404",
+      "status_code": 500,
+      "expected_status": 404,
+      "success": false,
+      "duration_ms": 19.32,
+      "response_size": 150,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "error",
+        "message",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/dashboard/",
+      "method": "GET",
+      "description": "Dashboard principal",
+      "status_code": 500,
+      "expected_status": 200,
+      "success": false,
+      "duration_ms": 6.08,
+      "response_size": 46,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "error"
+      ]
+    },
+    {
+      "endpoint": "/api/analytics/",
+      "method": "GET",
+      "description": "Analytics info",
+      "status_code": 400,
+      "expected_status": 200,
+      "success": false,
+      "duration_ms": 13.54,
+      "response_size": 115,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "data",
+        "message",
+        "success",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/analytics/wallet/analyze",
+      "method": "POST",
+      "description": "Analytics - données invalides",
+      "status_code": 500,
+      "expected_status": 400,
+      "success": false,
+      "duration_ms": 62.3,
+      "response_size": 143,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "error",
+        "message",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/analytics/wallet/analyze",
+      "method": "POST",
+      "description": "Analytics - wallet factice",
+      "status_code": 503,
+      "expected_status": [
+        200,
+        500
+      ],
+      "success": false,
+      "duration_ms": 11.48,
+      "response_size": 280,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "data",
+        "message",
+        "success",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/admin/health",
+      "method": "GET",
+      "description": "Admin health check",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 8.98,
+      "response_size": 940,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "data",
+        "message",
+        "success",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/api/batching/status",
+      "method": "GET",
+      "description": "Batching status",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 7.96,
+      "response_size": 1048,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "data",
+        "message",
+        "success",
+        "timestamp"
+      ]
+    },
+    {
+      "endpoint": "/debug/routes",
+      "method": "GET",
+      "description": "Liste des routes",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 5.17,
+      "response_size": 10352,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "routes",
+        "total_routes"
+      ]
+    },
+    {
+      "endpoint": "/debug/config",
+      "method": "GET",
+      "description": "Configuration debug",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 4.7,
+      "response_size": 281,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "blueprints_loaded",
+        "environment",
+        "flask",
+        "note"
+      ]
+    },
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "description": "Stress test 1",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 5.43,
+      "response_size": 546,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "checks",
+        "statistics",
+        "status",
+        "timestamp",
+        "uptime_seconds",
+        "version"
+      ]
+    },
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "description": "Stress test 2",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 8.57,
+      "response_size": 545,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "checks",
+        "statistics",
+        "status",
+        "timestamp",
+        "uptime_seconds",
+        "version"
+      ]
+    },
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "description": "Stress test 3",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 6.38,
+      "response_size": 546,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "checks",
+        "statistics",
+        "status",
+        "timestamp",
+        "uptime_seconds",
+        "version"
+      ]
+    },
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "description": "Stress test 4",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 7.62,
+      "response_size": 546,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "checks",
+        "statistics",
+        "status",
+        "timestamp",
+        "uptime_seconds",
+        "version"
+      ]
+    },
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "description": "Stress test 5",
+      "status_code": 200,
+      "expected_status": 200,
+      "success": true,
+      "duration_ms": 6.61,
+      "response_size": 546,
+      "content_type": "application/json",
+      "has_json": true,
+      "response_keys": [
+        "checks",
+        "statistics",
+        "status",
+        "timestamp",
+        "uptime_seconds",
+        "version"
+      ]
+    }
+  ]
+}

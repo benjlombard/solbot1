@@ -443,6 +443,35 @@ class APIValidationError(APIError):
         super().__init__(message, "API_VALIDATION_ERROR", details)
 
 
+class ValidationError(SolanaWalletMonitorError):
+    """Erreur de validation générique pour les données d'entrée"""
+    
+    def __init__(self, message: str, field_errors: Dict[str, str] = None, context: str = None):
+        self.field_errors = field_errors or {}
+        self.context = context
+        
+        full_message = f"Validation error: {message}"
+        if self.field_errors:
+            error_details = ", ".join([f"{field}: {error}" for field, error in self.field_errors.items()])
+            full_message += f" | Field errors: {error_details}"
+        
+        details = {
+            'validation_message': message,
+            'field_errors': self.field_errors,
+            'context': context
+        }
+        
+        super().__init__(full_message, "VALIDATION_ERROR", details)
+    
+    def add_field_error(self, field: str, error: str):
+        """Ajouter une erreur de champ"""
+        self.field_errors[field] = error
+    
+    def has_field_errors(self) -> bool:
+        """Vérifier s'il y a des erreurs de champs"""
+        return len(self.field_errors) > 0
+        
+
 class APIRateLimitError(APIError):
     """Rate limit API atteint"""
     

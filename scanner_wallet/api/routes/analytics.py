@@ -31,28 +31,75 @@ except ImportError as e:
     
     # Classes de fallback pour éviter les erreurs
     class WalletAnalyzer:
+        def __init__(self):
+            self.available = False
+        
         def analyze_wallet(self, **kwargs): 
-            return {"error": "WalletAnalyzer not implemented"}
+            return {
+                "error": "WalletAnalyzer not implemented",
+                "status": "service_unavailable",
+                "wallet_address": kwargs.get('wallet_address', 'unknown')
+            }
+            
         def get_wallet_summary(self, **kwargs):
-            return {"error": "WalletAnalyzer not implemented"}
+            return {
+                "error": "WalletAnalyzer not implemented",
+                "status": "service_unavailable",
+                "wallet_address": kwargs.get('wallet_address', 'unknown'),
+                "summary": {}
+            }
+            
         def get_performance_metrics(self, **kwargs):
-            return {"error": "WalletAnalyzer not implemented"}
+            return {
+                "error": "WalletAnalyzer not implemented", 
+                "status": "service_unavailable",
+                "wallet_address": kwargs.get('wallet_address', 'unknown'),
+                "metrics": {}
+            }
     
     class TransactionProcessor:
+        def __init__(self):
+            self.available = False
+        
         def analyze_transactions(self, **kwargs):
-            return {"error": "TransactionProcessor not implemented"}
+            return {
+                "error": "TransactionProcessor not implemented",
+                "status": "service_unavailable",
+                "transactions": []
+            }
+        
         def get_transactions(self, **kwargs):
-            return {"error": "TransactionProcessor not implemented"}
+            return []
     
     class PortfolioTracker:
+        def __init__(self):
+            self.available = False
+        
         def analyze_portfolio(self, **kwargs):
-            return {"error": "PortfolioTracker not implemented"}
-        def get_current_portfolio(self, **kwargs):
-            return {"error": "PortfolioTracker not implemented"}
+            return {
+                "error": "PortfolioTracker not implemented",
+                "status": "service_unavailable",
+                "portfolio": {}
+            }
+            
+        def get_current_portfolio(self, wallet_address):
+            return {
+                "error": "PortfolioTracker not implemented",
+                "status": "service_unavailable", 
+                "tokens": [],
+                "total_value": 0
+            }
     
     class DataCollector:
+        def __init__(self):
+            self.available = False
+        
         def analyze_tokens(self, **kwargs):
-            return {"error": "DataCollector not implemented"}
+            return {
+                "error": "DataCollector not implemented",
+                "status": "service_unavailable",
+                "tokens": []
+            }
 
 from utils.helpers import (
     get_current_timestamp, validate_wallet_address, 
@@ -74,29 +121,107 @@ portfolio_tracker = PortfolioTracker()
 data_collector = DataCollector()
 
 # ============= FONCTIONS DE VALIDATION =============
-
-def validate_wallet_analysis_request(data: dict) -> dict:
-    """Valide une requête d'analyse de wallet"""
+def validate_request_data(data, required_fields, optional_fields=None):
+    """Validation générique des données de requête"""
+    if optional_fields is None:
+        optional_fields = {}
+    
     errors = []
+    validated_data = {}
     
-    wallet_address = data.get('wallet_address', '').strip()
-    if not wallet_address:
-        errors.append("wallet_address is required")
-    elif not validate_wallet_address(wallet_address):
-        errors.append("Invalid Solana wallet address format")
+    # Vérifier les champs requis
+    for field in required_fields:
+        value = data.get(field)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            errors.append(f"{field} is required")
+        else:
+            if field == 'wallet_address':
+                if not validate_wallet_address(value.strip()):
+                    errors.append("Invalid Solana wallet address format")
+                else:
+                    validated_data[field] = value.strip()
+            else:
+                validated_data[field] = value
     
-    days = data.get('days', 30)
-    if not isinstance(days, int) or days < 1 or days > 365:
-        errors.append("days must be between 1 and 365")
+    # Traiter les champs optionnels avec valeurs par défaut
+    for field, default_value in optional_fields.items():
+        value = data.get(field, default_value)
+        
+        if field == 'days':
+            value = min(max(int(value) if isinstance(value, (int, str)) else default_value, 1), 365)
+        elif field == 'limit':
+            value = min(max(int(value) if isinstance(value, (int, str)) else default_value, 1), 1000)
+        
+        validated_data[field] = value
     
     return {
         'valid': len(errors) == 0,
         'errors': errors,
+        'validated_data': validated_data
+    }
+
+def safe_database_query(query_func, error_message="Database query failed"):
+    """Wrapper sécurisé pour les requêtes de base de données"""
+    try:
+        return query_func()
+    except DatabaseError as e:
+        logger.error(f"Database error: {e}")
+        raise DatabaseError(f"{error_message}: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in database query: {e}")
+        raise DatabaseError(f"{error_message}: Unexpected error")
+
+
+def validate_wallet_analysis_request(data: dict) -> dict:
+    """Valide une requête d'analyse de wallet avec gestion d'erreurs améliorée"""
+    field_errors = {}
+    
+    wallet_address = data.get('wallet_address', '').strip()
+    if not wallet_address:
+        field_errors['wallet_address'] = "is required"
+    elif not validate_wallet_address(wallet_address):
+        field_errors['wallet_address'] = "Invalid Solana wallet address format"
+    
+    days = data.get('days', 30)
+    if not isinstance(days, int):
+        try:
+            days = int(days)
+        except (ValueError, TypeError):
+            field_errors['days'] = "must be a valid integer"
+    
+    if isinstance(days, int) and (days < 1 or days > 365):
+        field_errors['days'] = "must be between 1 and 365"
+    
+    include_tokens = data.get('include_tokens', True)
+    if not isinstance(include_tokens, bool):
+        field_errors['include_tokens'] = "must be a boolean"
+    
+    include_nfts = data.get('include_nfts', False)
+    if not isinstance(include_nfts, bool):
+        field_errors['include_nfts'] = "must be a boolean"
+    
+    # Si des erreurs de validation
+    if field_errors:
+        validation_error = ValidationError(
+            "Invalid request parameters",
+            field_errors=field_errors,
+            context="wallet_analysis_request"
+        )
+        return {
+            'valid': False,
+            'errors': [str(validation_error)],
+            'field_errors': field_errors,
+            'validation_exception': validation_error
+        }
+    
+    return {
+        'valid': True,
+        'errors': [],
         'validated_data': {
             'wallet_address': wallet_address,
             'days': min(max(days, 1), 365),
-            'include_tokens': data.get('include_tokens', True),
-            'include_nfts': data.get('include_nfts', False)
+            'include_tokens': include_tokens,
+            'include_nfts': include_nfts
         }
     }
 
@@ -127,6 +252,77 @@ def validate_transaction_analysis_request(data: dict) -> dict:
     }
 
 # ============= ROUTES PRINCIPALES =============
+# 6. AJOUTER UNE ROUTE DE STATUS DES SERVICES
+@analytics_bp.route('/services/status')
+def get_services_status():
+    """Statut détaillé de tous les services analytics"""
+    try:
+        services_status = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'services': {
+                'wallet_analyzer': {
+                    'available': hasattr(wallet_analyzer, 'available') and wallet_analyzer.available,
+                    'status': 'operational' if wallet_analyzer.available else 'unavailable'
+                },
+                'transaction_processor': {
+                    'available': hasattr(transaction_processor, 'available') and transaction_processor.available,
+                    'status': 'operational' if transaction_processor.available else 'unavailable'
+                },
+                'portfolio_tracker': {
+                    'available': hasattr(portfolio_tracker, 'available') and portfolio_tracker.available,
+                    'status': 'operational' if portfolio_tracker.available else 'unavailable'
+                },
+                'data_collector': {
+                    'available': hasattr(data_collector, 'available') and data_collector.available,
+                    'status': 'operational' if data_collector.available else 'unavailable'
+                }
+            }
+        }
+        
+        # Test de la base de données
+        try:
+            with get_database_manager().get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                services_status['services']['database'] = {
+                    'available': True,
+                    'status': 'operational'
+                }
+        except Exception as db_e:
+            services_status['services']['database'] = {
+                'available': False,
+                'status': f'error: {str(db_e)}'
+            }
+        
+        # Déterminer le statut global
+        available_services = sum(1 for service in services_status['services'].values() 
+                               if service.get('available', False))
+        total_services = len(services_status['services'])
+        
+        if available_services == total_services:
+            overall_status = 'fully_operational'
+        elif available_services > 0:
+            overall_status = 'partially_operational'
+        else:
+            overall_status = 'unavailable'
+        
+        services_status['overall_status'] = overall_status
+        services_status['available_services'] = available_services
+        services_status['total_services'] = total_services
+        
+        return jsonify(format_api_response(
+            services_status,
+            message=f"Services status: {overall_status}"
+        ))
+        
+    except Exception as e:
+        logger.error(f"Services status check failed: {e}")
+        return jsonify(format_api_response(
+            None,
+            success=False,
+            message="Services status check failed"
+        )), 500
+        
 
 @analytics_bp.route('/')
 def analytics_info():
@@ -159,13 +355,43 @@ def analyze_wallet():
         "include_tokens": "boolean (default: true)",
         "include_nfts": "boolean (default: false)"
     }
+   Returns:
+    {
+        "success": true,
+        "message": "Wallet analysis completed successfully",
+        "data": {
+            "wallet_address": "string",
+            "analysis_date": "ISO datetime",
+            "parameters": {
+                "days": 30,
+                "include_tokens": true,
+                "include_nfts": false
+            },
+            "summary": {
+                "transaction_count": 0,
+                "total_volume_sol": 0.0,
+                "active_days": 0,
+                "first_transaction": null,
+                "last_transaction": null
+            },
+            "tokens": [...],
+            "performance": {...},
+            "activity": {...}
+        }
+    }
     """
     try:
         data = request.get_json() or {}
         
-        # Validation
+        # Validation avec gestion d'erreurs améliorée
         validation = validate_wallet_analysis_request(data)
         if not validation['valid']:
+            logger.warning(f"Wallet analysis validation failed: {validation.get('field_errors', {})}")
+            
+            # Si une exception ValidationError a été créée, la relancer
+            if 'validation_exception' in validation:
+                raise validation['validation_exception']
+            
             return jsonify(format_api_response(
                 None, 
                 success=False, 
@@ -174,38 +400,135 @@ def analyze_wallet():
             )), 400
         
         validated_data = validation['validated_data']
+        wallet_address = validated_data['wallet_address']
         
-        logger.info(f"Starting wallet analysis for: {validated_data['wallet_address']}")
+        logger.info(f"Starting wallet analysis for: {wallet_address[:8]}...{wallet_address[-6:]}")
+        start_time = time.time()
         
-        # Analyse du wallet
+        # Vérification de la disponibilité du service
+        if not hasattr(wallet_analyzer, 'available') or not wallet_analyzer.available:
+            logger.warning("WalletAnalyzer service not available")
+            return jsonify(format_api_response(
+                {
+                    'wallet_address': wallet_address,
+                    'status': 'service_unavailable',
+                    'message': 'Wallet analysis service is currently unavailable'
+                },
+                success=False,
+                message="Wallet analysis service unavailable"
+            )), 503
+        
+        # Analyse du wallet avec gestion d'erreurs robuste
         try:
             analysis_result = wallet_analyzer.analyze_wallet(**validated_data)
             
-            response_data = {
-                'wallet_address': validated_data['wallet_address'],
-                'analysis_date': datetime.utcnow().isoformat(),
-                'parameters': validated_data,
-                **analysis_result
-            }
+            # Vérification du résultat
+            if isinstance(analysis_result, dict) and 'error' in analysis_result:
+                logger.error(f"Wallet analyzer returned error: {analysis_result['error']}")
+                return jsonify(format_api_response(
+                    {
+                        'wallet_address': wallet_address,
+                        'error': analysis_result['error'],
+                        'status': analysis_result.get('status', 'analysis_failed')
+                    },
+                    success=False,
+                    message=f"Analysis failed: {analysis_result['error']}"
+                )), 500
             
+        except RPCError as rpc_e:
+            logger.error(f"RPC error during wallet analysis: {rpc_e}")
             return jsonify(format_api_response(
-                response_data,
-                message="Wallet analysis completed successfully"
-            ))
+                {
+                    'wallet_address': wallet_address,
+                    'error': 'rpc_connection_failed',
+                    'details': str(rpc_e)
+                },
+                success=False,
+                message="Solana RPC connection failed"
+            )), 503
+            
+        except DatabaseError as db_e:
+            logger.error(f"Database error during wallet analysis: {db_e}")
+            return jsonify(format_api_response(
+                {
+                    'wallet_address': wallet_address,
+                    'error': 'database_error',
+                    'details': str(db_e)
+                },
+                success=False,
+                message="Database operation failed"
+            )), 500
+            
+        except SolanaWalletMonitorError as swm_e:
+            logger.error(f"Solana wallet monitor error: {swm_e}")
+            return jsonify(format_api_response(
+                {
+                    'wallet_address': wallet_address,
+                    'error': 'wallet_monitor_error',
+                    'details': str(swm_e)
+                },
+                success=False,
+                message="Wallet monitoring error"
+            )), 500
             
         except Exception as analyzer_error:
-            logger.error(f"Wallet analyzer failed: {analyzer_error}")
+            logger.error(f"Unexpected error in wallet analyzer: {analyzer_error}")
             return jsonify(format_api_response(
-                None,
+                {
+                    'wallet_address': wallet_address,
+                    'error': 'unexpected_analysis_error',
+                    'details': str(analyzer_error)
+                },
                 success=False,
-                message=f"Analysis failed: {str(analyzer_error)}"
+                message="Unexpected analysis error occurred"
             )), 500
         
-    except ValidationError as e:
+        # Construction de la réponse avec données enrichies
+        analysis_duration = round((time.time() - start_time) * 1000, 2)  # en ms
+        
+        response_data = {
+            'wallet_address': wallet_address,
+            'wallet_short': format_wallet_address(wallet_address),
+            'analysis_date': datetime.utcnow().isoformat(),
+            'analysis_duration_ms': analysis_duration,
+            'parameters': validated_data,
+            **analysis_result
+        }
+        
+        # Ajout de métadonnées sur l'analyse
+        response_data['metadata'] = {
+            'analyzer_version': '1.0.0',
+            'analysis_type': 'complete_wallet_analysis',
+            'data_freshness': 'real_time',
+            'confidence_score': analysis_result.get('confidence_score', 0.95)
+        }
+        
+        # Logging du succès
+        logger.info(f"Wallet analysis completed successfully for {wallet_address[:8]}...{wallet_address[-6:]} in {analysis_duration}ms")
+        
+        return jsonify(format_api_response(
+            response_data,
+            message="Wallet analysis completed successfully"
+        ))
+        
+    except ValidationError as validation_e:
+        logger.warning(f"Validation error in wallet analysis: {validation_e}")
+        return jsonify(format_api_response(
+            {
+                'field_errors': validation_e.field_errors,
+                'context': validation_e.context
+            },
+            success=False,
+            message=str(validation_e),
+            errors=[validation_e.message]
+        )), 400
+        
+    except Exception as unexpected_e:
+        logger.error(f"Unexpected error in analyze_wallet endpoint: {unexpected_e}")
         return jsonify(format_api_response(
             None,
             success=False,
-            message="Failed to get wallet summary"
+            message="Internal server error during wallet analysis"
         )), 500
 
 @analytics_bp.route('/wallet/<wallet_address>/transactions')
@@ -775,29 +1098,33 @@ def internal_error(error):
 
 @analytics_bp.before_request
 def before_analytics_request():
-    """Exécuté avant chaque requête analytics"""
-    logger.debug(f"Analytics request: {request.method} {request.path}")
+    """Middleware exécuté avant chaque requête analytics"""
+    start_time = time.time()
+    request.start_time = start_time
+    
+    # Logging détaillé
+    logger.info(f"Analytics request: {request.method} {request.path}")
+    if request.is_json and request.get_json():
+        data = request.get_json()
+        # Masquer les données sensibles pour les logs
+        safe_data = {k: v if k != 'wallet_address' else f"{v[:6]}...{v[-6:]}" 
+                    for k, v in data.items() if isinstance(v, str) and len(str(v)) > 20}
+        logger.debug(f"Request data: {safe_data}")
 
 @analytics_bp.after_request
 def after_analytics_request(response):
-    """Exécuté après chaque requête analytics"""
+    """Middleware exécuté après chaque requête analytics"""
+    if hasattr(request, 'start_time'):
+        duration = round((time.time() - request.start_time) * 1000, 2)
+        response.headers['X-Response-Time-Ms'] = str(duration)
+        logger.info(f"Analytics response: {response.status_code} in {duration}ms")
+    
     response.headers['X-Analytics-API'] = 'v1.0'
+    response.headers['X-Service-Status'] = 'operational'
     return response
 
-# ============= EXPORT =============
 
-__all__ = ['analytics_bp']
-            success=False, 
-            message="Validation error",
-            errors=[str(e)]
-        )), 400
-    except Exception as e:
-        logger.error(f"Wallet analysis failed: {e}")
-        return jsonify(format_api_response(
-            None,
-            success=False,
-            message="Internal server error"
-        )), 500
+
 
 @analytics_bp.route('/transactions/analyze', methods=['POST'])
 def analyze_transactions():
@@ -983,3 +1310,10 @@ def get_wallet_summary(wallet_address):
         logger.error(f"Wallet summary failed: {e}")
         return jsonify(format_api_response(
             None,
+            success=False,
+            message="Failed to get wallet summary"
+        )), 500
+
+# ============= EXPORT =============
+
+__all__ = ['analytics_bp']
