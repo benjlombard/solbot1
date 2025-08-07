@@ -3,6 +3,8 @@
 Application Flask principale pour le Solana Wallet Monitor
 Point d'entrée avec tous les blueprints et middleware configurés
 """
+# Dépendances directes
+
 
 import logging
 import sys
@@ -26,6 +28,15 @@ try:
     from core.config import get_config, init_config
     from core.logger import get_logger, setup_logger
     from core.database import get_database_manager
+    from core.config import Config
+    from core.logger import setup_logger
+    from core.database import DatabaseManager
+    from api.routes.dashboard import dashboard_bp
+    from api.routes.analytics import analytics_bp
+    from api.routes.batching import batching_bp
+    from api.routes.admin import admin_bp
+    from api.middleware.cors import setup_cors
+    from wallet.monitor import WalletMonitor
 except ImportError as e:
     logging.warning(f"Config/core imports not available: {e}")
     # Fallbacks pour développement
