@@ -25,7 +25,19 @@ try:
 except ImportError:
     # Fallbacks si les modules ne sont pas encore disponibles
     def validate_wallet_address(addr):
-        return isinstance(addr, str) and len(addr) >= 32
+        if not isinstance(addr, str):
+            return False
+        # Validation Solana plus stricte
+        if len(addr) < 32 or len(addr) > 44:
+            return False
+        # Vérifier que c'est une base58 valide
+        try:
+            import base58
+            base58.b58decode(addr)
+            return True
+        except:
+            # Fallback basique si base58 pas disponible
+            return addr.isalnum() and len(addr) >= 32
     
     def sanitize_filename(name):
         return "".join(c for c in name if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
@@ -88,6 +100,9 @@ class WalletConfig:
         """Validation et initialisation post-création"""
         if not self.addresses:
             raise ConfigurationError("Au moins une adresse de wallet est requise")
+            
+        if not all(isinstance(addr, str) for addr in self.addresses):
+            raise ConfigurationError("Toutes les adresses doivent être des strings")
         
         # Valider toutes les adresses
         invalid_addresses = [addr for addr in self.addresses if not validate_wallet_address(addr)]
@@ -115,6 +130,10 @@ class RPCConfig:
     retry_delay: int = 2
     requests_per_minute: int = 100
     error_backoff_multiplier: float = 1.2
+    pool_connections: int = 10      # Nombre de pools de connexions
+    pool_maxsize: int = 20         # Taille max de chaque pool
+    session_timeout: float = 30.0  # Timeout par défaut des sessions
+    keep_alive: bool = True        # Forcer keep-alive
     
     def get_all_endpoints(self) -> List[str]:
         """Retourne tous les endpoints dans l'ordre de priorité"""
@@ -695,47 +714,234 @@ def load_config_from_file(file_path: str) -> Dict[str, Any]:
        print(f"❌ Erreur lecture configuration {file_path}: {e}")
        return {}
 
-
 def load_config_from_env_file(env_file_path: str = ".env"):
-   """Charge les variables d'environnement depuis un fichier .env"""
-   env_path = Path(env_file_path)
-   if not env_path.exists():
-       return
-   
-   try:
-       with open(env_path, 'r', encoding='utf-8') as f:
-           for line_num, line in enumerate(f, 1):
-               line = line.strip()
-               
-               # Ignorer les commentaires et lignes vides
-               if not line or line.startswith('#'):
-                   continue
-               
-               # Parser KEY=VALUE
-               if '=' in line:
-                   key, value = line.split('=', 1)
-                   key = key.strip()
-                   value = value.strip()
-                   
-                   # NOUVEAU : Supprimer les commentaires inline
-                   if '#' in value:
-                     value = value.split('#')[0].strip()
+    """
+    Charge les variables d'environnement depuis un fichier .env
+    Gestion robuste avec validation et reporting d'erreurs détaillé
+    """
+    env_path = Path(env_file_path)
+    if not env_path.exists():
+        return
+    
+    loaded_vars = 0
+    skipped_lines = 0
+    errors = []
+    
+    try:
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                original_line = line
+                line = line.strip()
+                
+                # Ignorer les commentaires et lignes vides
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Vérifier la présence du séparateur =
+                if '=' not in line:
+                    errors.append(f"Ligne {line_num}: Format invalide (pas de '=') - {line[:50]}")
+                    skipped_lines += 1
+                    continue
+                
+                try:
+                    # Parser KEY=VALUE
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Validation de la clé
+                    if not key:
+                        errors.append(f"Ligne {line_num}: Clé vide")
+                        skipped_lines += 1
+                        continue
+                    
+                    # Vérifier que la clé est un identifiant valide
+                    if not key.replace('_', '').replace('-', '').isalnum():
+                        errors.append(f"Ligne {line_num}: Clé invalide '{key}' (caractères non autorisés)")
+                        skipped_lines += 1
+                        continue
+                    
+                    # Supprimer les commentaires inline (après #)
+                    if '#' in value:
+                        comment_pos = value.find('#')
+                        # Vérifier que ce n'est pas un # entre guillemets
+                        in_quotes = False
+                        quote_char = None
+                        
+                        for i, char in enumerate(value):
+                            if char in ('"', "'") and (i == 0 or value[i-1] != '\\'):
+                                if not in_quotes:
+                                    in_quotes = True
+                                    quote_char = char
+                                elif char == quote_char:
+                                    in_quotes = False
+                                    quote_char = None
+                            elif char == '#' and not in_quotes:
+                                value = value[:i].strip()
+                                break
+                    
+                    # Supprimer les guillemets optionnels
+                    if len(value) >= 2:
+                        if (value.startswith('"') and value.endswith('"')) or \
+                           (value.startswith("'") and value.endswith("'")):
+                            # Vérifier que les guillemets sont bien appariés
+                            quote_char = value[0]
+                            if value.count(quote_char) >= 2:
+                                value = value[1:-1]
+                                # Gérer les échappements dans les guillemets
+                                value = value.replace(f'\\{quote_char}', quote_char)
+                                value = value.replace('\\\\', '\\')
+                                value = value.replace('\\n', '\n')
+                                value = value.replace('\\t', '\t')
+                    
+                    # Définir la variable d'environnement si elle n'existe pas déjà
+                    if key not in os.environ:
+                        os.environ[key] = value
+                        loaded_vars += 1
+                    else:
+                        # Optionnel: Logger que la variable existe déjà
+                        pass
+                    
+                except ValueError as e:
+                    errors.append(f"Ligne {line_num}: Erreur de parsing - {e}")
+                    skipped_lines += 1
+                    continue
+                
+                except Exception as e:
+                    errors.append(f"Ligne {line_num}: Erreur inattendue - {e}")
+                    skipped_lines += 1
+                    continue
+        
+        # Reporting des résultats
+        if loaded_vars > 0:
+            print(f"✅ Variables d'environnement chargées depuis {env_file_path}: {loaded_vars}")
+        
+        if skipped_lines > 0:
+            print(f"⚠️ {skipped_lines} ligne(s) ignorée(s) dans {env_file_path}")
+        
+        # Afficher les erreurs (limitées pour éviter le spam)
+        if errors:
+            print(f"❌ Erreurs dans {env_file_path}:")
+            for error in errors[:5]:  # Limiter à 5 erreurs pour éviter le spam
+                print(f"   - {error}")
+            if len(errors) > 5:
+                print(f"   ... et {len(errors) - 5} autres erreurs")
+        
+        return {
+            'loaded_vars': loaded_vars,
+            'skipped_lines': skipped_lines,
+            'errors': errors
+        }
+        
+    except FileNotFoundError:
+        # Déjà géré par la vérification env_path.exists()
+        return None
+        
+    except PermissionError:
+        print(f"❌ Pas de permission de lecture pour {env_file_path}")
+        return None
+        
+    except UnicodeDecodeError as e:
+        print(f"❌ Erreur d'encodage dans {env_file_path}: {e}")
+        print("💡 Vérifiez que le fichier est en UTF-8")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Erreur lecture fichier .env {env_file_path}: {e}")
+        return None
 
-                   # Supprimer les guillemets optionnels
-                   if value.startswith('"') and value.endswith('"'):
-                     value = value[1:-1]
-                   elif value.startswith("'") and value.endswith("'"):
-                       value = value[1:-1]
-                   
-                   # Définir la variable d'environnement si elle n'existe pas déjà
-                   if key and key not in os.environ:
-                       os.environ[key] = value
-               else:
-                   print(f"⚠️ Ligne invalide dans {env_file_path}:{line_num}: {line}")
-       
-       print(f"✅ Variables d'environnement chargées depuis {env_file_path}")
-   except Exception as e:
-       print(f"❌ Erreur lecture fichier .env: {e}")
+
+# Fonction helper pour valider un fichier .env
+def validate_env_file(env_file_path: str = ".env") -> Dict[str, Any]:
+    """
+    Valide un fichier .env sans charger les variables
+    Retourne un rapport détaillé de validation
+    """
+    env_path = Path(env_file_path)
+    
+    if not env_path.exists():
+        return {
+            'valid': False,
+            'error': 'File not found',
+            'suggestions': [f"Créer le fichier {env_file_path}"]
+        }
+    
+    validation_report = {
+        'valid': True,
+        'total_lines': 0,
+        'valid_vars': 0,
+        'comments': 0,
+        'empty_lines': 0,
+        'errors': [],
+        'warnings': [],
+        'suggestions': []
+    }
+    
+    try:
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                validation_report['total_lines'] += 1
+                original_line = line
+                line = line.strip()
+                
+                # Ligne vide
+                if not line:
+                    validation_report['empty_lines'] += 1
+                    continue
+                
+                # Commentaire
+                if line.startswith('#'):
+                    validation_report['comments'] += 1
+                    continue
+                
+                # Validation variable
+                if '=' not in line:
+                    validation_report['errors'].append(f"Ligne {line_num}: Format invalide - {line}")
+                    validation_report['valid'] = False
+                    continue
+                
+                key, value = line.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                
+                # Validation clé
+                if not key:
+                    validation_report['errors'].append(f"Ligne {line_num}: Clé vide")
+                    validation_report['valid'] = False
+                    continue
+                
+                if not key.replace('_', '').replace('-', '').isalnum():
+                    validation_report['errors'].append(f"Ligne {line_num}: Clé invalide '{key}'")
+                    validation_report['valid'] = False
+                    continue
+                
+                # Avertissements
+                if key.lower() != key and key.upper() != key:
+                    validation_report['warnings'].append(f"Ligne {line_num}: Clé '{key}' avec casse mixte")
+                
+                if len(value) == 0:
+                    validation_report['warnings'].append(f"Ligne {line_num}: Valeur vide pour '{key}'")
+                
+                # Suggestions
+                if key.startswith('password') or key.startswith('secret') or key.startswith('key'):
+                    if len(value) < 8:
+                        validation_report['suggestions'].append(f"'{key}': Valeur suspecte (trop courte)")
+                
+                validation_report['valid_vars'] += 1
+        
+        # Suggestions générales
+        if validation_report['valid_vars'] == 0:
+            validation_report['suggestions'].append("Aucune variable trouvée, fichier peut être vide")
+        
+        if validation_report['total_lines'] > 100:
+            validation_report['suggestions'].append("Fichier .env volumineux, considérer le découpage")
+        
+    except Exception as e:
+        validation_report['valid'] = False
+        validation_report['error'] = str(e)
+    
+    return validation_report
+
 
 
 def get_environment_from_args_or_env() -> Environment:
@@ -1211,6 +1417,7 @@ def reload_config():
    global _global_config
    with _config_lock:
        _global_config = None
+       _global_config = create_config()
    return get_config()
 
 
@@ -1375,14 +1582,6 @@ __all__ = [
    'ConfigurationError'
 ]
 
-# Initialisation automatique si ce module est importé
-if __name__ != "__main__":
-   try:
-       init_config()
-   except Exception as e:
-       # Ne pas faire planter l'import, juste avertir
-       print(f"⚠️ Initialisation configuration échouée: {e}")
-
 # Mode test/développement
 if __name__ == "__main__":
    print("🧪 Test du système de configuration")
@@ -1407,4 +1606,3 @@ if __name__ == "__main__":
    
    print("\n✅ Tests de configuration terminés")
 
-settings = get_config()
