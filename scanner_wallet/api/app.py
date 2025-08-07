@@ -408,7 +408,8 @@ if __name__ == "__main__":
             port=port,
             debug=debug,
             threaded=True,
-            use_reloader=debug
+            use_reloader=debug,
+            reload=False
         )
         
     except KeyboardInterrupt:

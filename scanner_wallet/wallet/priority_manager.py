@@ -206,7 +206,7 @@ class WalletPriorityManager:
             with self._lock:
                 if wallet_address in self._wallet_priorities:
                     del self._wallet_priorities[wallet_address]
-                    del self._priority_scores.get(wallet_address, None)
+                    self._priority_scores.pop(wallet_address, None)
                     logger.info(f"✅ Removed wallet {wallet_address}")
                     return True
             return False
@@ -699,3 +699,14 @@ if __name__ == "__main__":
     logger.info(f"📊 Priority statistics: {stats}")
     
     logger.info("✅ Priority manager test completed")
+
+
+
+__all__ = [
+    'WalletPriorityManager',
+    'PriorityScore',
+    'get_priority_manager',
+    'calculate_priority',
+    'get_next_priority_wallet',
+    'update_wallet_priority'
+]

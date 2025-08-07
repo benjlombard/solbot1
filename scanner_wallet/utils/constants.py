@@ -56,10 +56,13 @@ DEFAULT_RPC_TIMEOUT = 15  # secondes
 DEFAULT_CONNECTION_TIMEOUT = 10  # secondes
 BATCH_RPC_TIMEOUT = 25  # secondes pour les requêtes batch
 CRITICAL_RPC_TIMEOUT = 30  # timeout pour les requêtes critiques
+RPC_TIMEOUT_BATCH = 25 # secondes pour les requêtes batch (alias pour compatibilité)
+RPC_TIMEOUT_DEFAULT = 15 #(alias pour compatibilité)
 
 # Rate limiting
 DEFAULT_REQUESTS_PER_SECOND = 5
 QUICKNODE_FREE_RPS_LIMIT = 100  # Limite théorique QuickNode free
+QUICKNODE_FREE_TIER_RPS = 100   # AJOUTER CETTE LIGNE (alias pour compatibilité)
 BURST_REQUESTS_LIMIT = 20  # Nombre max de requêtes en burst
 COOLDOWN_AFTER_RATE_LIMIT = 60  # Attente après rate limit (secondes)
 
@@ -617,7 +620,7 @@ __all__ = [
     
     # RPC et réseau
     'DEFAULT_RPC_ENDPOINTS', 'DEFAULT_RPC_TIMEOUT', 'MAX_RPC_RETRIES',
-    'QUICKNODE_FREE_RPS_LIMIT',
+    'QUICKNODE_FREE_RPS_LIMIT','RPC_TIMEOUT_BATCH','QUICKNODE_FREE_TIER_RPS', 'RPC_TIMEOUT_DEFAULT',
     
     # Batching
     'OPTIMAL_BATCH_SIZES', 'CONSERVATIVE_BATCH_SIZES', 'PERFORMANCE_THRESHOLDS',

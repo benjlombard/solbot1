@@ -21,7 +21,7 @@ from core.exceptions import (
     SolanaWalletMonitorError
 )
 from rpc.batch_manager import BatchManager  
-from wallet.priority_manager import PriorityManager
+from wallet.priority_manager import WalletPriorityManager
 from utils.helpers import (
     get_current_timestamp, calculate_time_since, safe_divide,
     validate_wallet_address, generate_short_hash

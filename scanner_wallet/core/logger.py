@@ -16,6 +16,31 @@ from typing import Any, Dict, Optional, Union, List
 from pathlib import Path
 from contextlib import contextmanager
 
+
+def setup_windows_unicode():
+    """Configure l'encodage Unicode pour Windows"""
+    if sys.platform.startswith('win'):
+        try:
+            # Forcer UTF-8 pour stdout et stderr
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8')
+            if hasattr(sys.stderr, 'reconfigure'):
+                sys.stderr.reconfigure(encoding='utf-8')
+            
+            # Alternative pour Python plus ancien
+            if not hasattr(sys.stdout, 'reconfigure'):
+                import codecs
+                sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+                sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+            
+            # Activer le support Unicode dans la console Windows
+            os.system('chcp 65001 > nul 2>&1')  # UTF-8 code page
+            
+            return True
+        except Exception:
+            return False
+    return True
+
 # Import des constantes et helpers
 try:
     from utils.constants import LOG_ICONS, LOG_FORMATS, CUSTOM_LOG_LEVELS
@@ -100,7 +125,17 @@ class ColoredFormatter(logging.Formatter):
     def __init__(self, fmt=None, datefmt=None, use_colors=True):
         super().__init__(fmt, datefmt)
         self.use_colors = use_colors and self._supports_color()
+        self.unicode_support = self._check_unicode_support()
     
+    def _check_unicode_support(self) -> bool:
+        """Vérifie si le terminal supporte Unicode"""
+        try:
+            sys.stdout.write('✓')
+            sys.stdout.flush()
+            return True
+        except UnicodeEncodeError:
+            return False
+
     def _supports_color(self) -> bool:
         """Détecte si le terminal supporte les couleurs"""
         return (
@@ -120,7 +155,45 @@ class ColoredFormatter(logging.Formatter):
             if hasattr(record, 'name') and record.name:
                 record.name = f"\033[90m{record.name}{self.RESET}"
         
-        return super().format(record)
+            # Gérer l'encodage des emojis sur Windows
+            result = super().format(record)
+            
+            if not self.unicode_support and sys.platform.startswith('win'):
+                # Remplacer les emojis par des équivalents ASCII sur Windows
+                emoji_replacements = {
+                    '🚀': '[START]',
+                    '✅': '[OK]',
+                    '❌': '[ERROR]',
+                    '⚠️': '[WARN]',
+                    'ℹ️': '[INFO]',
+                    '🔍': '[DEBUG]',
+                    '🚨': '[CRITICAL]',
+                    '📦': '[BATCH]',
+                    '🆕': '[NEW]',
+                    '💰': '[TX]',
+                    '🎯': '[PRIORITY]',
+                    '👛': '[WALLET]',
+                    '🪙': '[TOKEN]',
+                    '🔌': '[RPC]',
+                    '💾': '[DB]',
+                    '🗄️': '[CACHE]',
+                    '⚡': '[FAST]',
+                    '🐌': '[SLOW]',
+                    '📊': '[STATS]',
+                    '🔧': '[CONFIG]',
+                    '🔄': '[UPDATE]',
+                    '🧠': '[CYCLE]',
+                    '📈': '[UP]',
+                    '📉': '[DOWN]',
+                    '➡️': '[NEUTRAL]',
+                    '🔥': '[HOT]',
+                    '🔵': '[EMPTY]'
+                }
+                
+                for emoji, replacement in emoji_replacements.items():
+                    result = result.replace(emoji, replacement)
+            
+            return result
 
 
 class ContextFormatter(logging.Formatter):
@@ -475,6 +548,63 @@ class RateLimitFilter(logging.Filter):
 # =============================================================================
 # LOGGER PRINCIPAL ET CONFIGURATION
 # =============================================================================
+class SafeIconFormatter(logging.Formatter):
+    """Formatter sécurisé avec icônes qui gère les champs manquants"""
+    
+    def __init__(self, fmt=None, datefmt=None):
+        super().__init__(fmt, datefmt)
+        self.unicode_support = self._check_unicode_support()
+        
+        # Icônes alternatives pour Windows
+        if sys.platform.startswith('win') and not self.unicode_support:
+            self.level_icons = {
+                'DEBUG': '[DEBUG]',
+                'BATCH': '[BATCH]', 
+                'INFO': '[INFO]',
+                'DISCOVERY': '[NEW]',
+                'TRANSACTION': '[TX]',
+                'WARNING': '[WARN]',
+                'ERROR': '[ERROR]',
+                'CRITICAL': '[CRIT]',
+                'PERFORMANCE': '[PERF]'
+            }
+        else:
+            self.level_icons = {
+                'DEBUG': '🔍',
+                'BATCH': '📦', 
+                'INFO': 'ℹ️',
+                'DISCOVERY': '🆕',
+                'TRANSACTION': '💰',
+                'WARNING': '⚠️',
+                'ERROR': '❌',
+                'CRITICAL': '🚨',
+                'PERFORMANCE': '📊'
+            }
+    
+    def _check_unicode_support(self) -> bool:
+        """Vérifie si le terminal supporte Unicode"""
+        if not sys.platform.startswith('win'):
+            return True
+        
+        try:
+            # Test simple d'écriture Unicode
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=True) as f:
+                f.write('✓')
+            return True
+        except UnicodeEncodeError:
+            return False
+
+    def format(self, record: logging.LogRecord) -> str:
+        # S'assurer que l'icône existe
+        if not hasattr(record, 'icon'):
+            record.icon = self.level_icons.get(record.levelname, '[INFO]' if not self.unicode_support else 'ℹ️')
+        
+        # S'assurer que le contexte existe
+        if not hasattr(record, 'context'):
+            record.context = ""
+        
+        return super().format(record)
 
 class SolanaWalletLogger:
     """Logger principal pour le Solana Wallet Monitor"""
@@ -503,6 +633,7 @@ class SolanaWalletLogger:
         if hasattr(self, '_initialized'):
             return
         
+        setup_windows_unicode()
         self.log_level = log_level.upper()
         self.log_file = log_file
         self.console_output = console_output
@@ -550,7 +681,7 @@ class SolanaWalletLogger:
                 encoding='utf-8'
             )
             
-            file_formatter = ContextFormatter(
+            file_formatter = SafeIconFormatter(
                 fmt='%(asctime)s - %(levelname)-8s - %(context)s%(name)s - [%(funcName)s:%(lineno)d] - %(message)s',
                 datefmt='%Y-%m-%d %H:%M:%S'
             )
@@ -562,7 +693,7 @@ class SolanaWalletLogger:
             console_handler = logging.StreamHandler(sys.stdout)
             
             # Formatter avec couleurs et icônes
-            console_formatter = IconFormatter(
+            console_formatter = SafeIconFormatter(
                 fmt='%(icon)s %(asctime)s - %(levelname)-8s - %(message)s',
                 datefmt='%H:%M:%S'
             )

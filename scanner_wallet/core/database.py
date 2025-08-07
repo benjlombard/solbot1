@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Gestionnaire de base de données SQLite thread-safe pour le Solana Wallet Monitor
@@ -142,6 +141,501 @@ class ConnectionPool:
                 logging.warning(f"Failed to apply pragma '{pragma}': {e}")
         cursor.close()
     
+    def _create_tables(self, cursor: sqlite3.Cursor):
+        """Crée toutes les tables nécessaires"""
+        
+        # Table des transactions (schema principal)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signature TEXT UNIQUE NOT NULL,
+                wallet_address TEXT NOT NULL,
+                slot INTEGER,
+                block_time INTEGER,
+                amount REAL DEFAULT 0.0,
+                token_mint TEXT,
+                token_symbol TEXT,
+                token_name TEXT,
+                transaction_type TEXT,
+                token_amount REAL DEFAULT 0.0,
+                price_per_token REAL DEFAULT 0.0,
+                fee REAL DEFAULT 0.0,
+                status TEXT DEFAULT 'success',
+                is_token_transaction BOOLEAN DEFAULT 0,
+                is_large_token_amount BOOLEAN DEFAULT 0,
+                detection_delay REAL DEFAULT 0.0,
+                wallet_priority_at_detection REAL DEFAULT 1.0,
+                scan_cycle_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Table des tokens (métadonnées)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tokens (
+                address TEXT PRIMARY KEY,
+                symbol TEXT,
+                name TEXT,
+                decimals INTEGER DEFAULT 9,
+                price_usd REAL DEFAULT 0.0,
+                logo_uri TEXT,
+                coingecko_id TEXT,
+                is_verified BOOLEAN DEFAULT 0,
+                market_cap REAL DEFAULT 0.0,
+                volume_24h REAL DEFAULT 0.0,
+                price_change_24h REAL DEFAULT 0.0,
+                last_price_update INTEGER DEFAULT 0,
+                metadata_source TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Table des comptes de tokens (ATA)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS token_accounts (
+                wallet_address TEXT NOT NULL,
+                ata_pubkey TEXT NOT NULL,
+                token_mint TEXT NOT NULL,
+                balance REAL DEFAULT 0.0,
+                decimals INTEGER DEFAULT 9,
+                first_seen INTEGER NOT NULL,
+                last_updated INTEGER NOT NULL,
+                last_scanned INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT 1,
+                scan_priority INTEGER DEFAULT 1,
+                activity_score REAL DEFAULT 0.0,
+                last_activity_time INTEGER DEFAULT 0,
+                total_transactions INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (wallet_address, ata_pubkey)
+            )
+        ''')
+        
+        # Table des priorités des wallets
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS wallet_priorities (
+                wallet_address TEXT PRIMARY KEY,
+                priority_score REAL DEFAULT 1.0,
+                last_scan_time INTEGER DEFAULT 0,
+                scan_count_1h INTEGER DEFAULT 0,
+                scan_count_24h INTEGER DEFAULT 0,
+                activity_score REAL DEFAULT 0.0,
+                volume_score_1h REAL DEFAULT 0.0,
+                new_tokens_score_1h INTEGER DEFAULT 0,
+                total_scans INTEGER DEFAULT 0,
+                avg_scan_duration REAL DEFAULT 0.0,
+                last_activity_detected INTEGER DEFAULT 0,
+                consecutive_empty_scans INTEGER DEFAULT 0,
+                best_priority_ever REAL DEFAULT 1.0,
+                worst_priority_ever REAL DEFAULT 1.0,
+                priority_history TEXT DEFAULT '[]',
+                updated_at INTEGER DEFAULT 0,
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        ''')
+        
+        # Table des statistiques des wallets
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS wallet_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet_address TEXT NOT NULL,
+                balance_sol REAL DEFAULT 0.0,
+                total_transactions INTEGER DEFAULT 0,
+                total_volume REAL DEFAULT 0.0,
+                pnl REAL DEFAULT 0.0,
+                largest_transaction REAL DEFAULT 0.0,
+                token_count INTEGER DEFAULT 0,
+                active_token_count INTEGER DEFAULT 0,
+                first_transaction_time INTEGER DEFAULT 0,
+                last_transaction_time INTEGER DEFAULT 0,
+                avg_transaction_size REAL DEFAULT 0.0,
+                success_rate REAL DEFAULT 0.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Table de l'historique des scans
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scan_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet_address TEXT NOT NULL,
+                scan_type TEXT NOT NULL,
+                total_accounts INTEGER DEFAULT 0,
+                new_accounts INTEGER DEFAULT 0,
+                scan_duration REAL DEFAULT 0.0,
+                completed_at INTEGER NOT NULL,
+                priority_score_before REAL DEFAULT 1.0,
+                priority_score_after REAL DEFAULT 1.0,
+                rpc_requests_count INTEGER DEFAULT 0,
+                efficiency_score REAL DEFAULT 0.0,
+                activity_detected INTEGER DEFAULT 0,
+                errors_count INTEGER DEFAULT 0,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Table des métriques d'activité des wallets
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS wallet_activity_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet_address TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                period_minutes INTEGER DEFAULT 15,
+                new_transactions_count INTEGER DEFAULT 0,
+                volume_sol REAL DEFAULT 0.0,
+                new_token_accounts INTEGER DEFAULT 0,
+                scan_duration REAL DEFAULT 0.0,
+                discoveries_count INTEGER DEFAULT 0,
+                balance_changes_count INTEGER DEFAULT 0,
+                rpc_requests_made INTEGER DEFAULT 0,
+                errors_count INTEGER DEFAULT 0,
+                efficiency_score REAL DEFAULT 0.0,
+                throughput_score REAL DEFAULT 0.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Table de la queue de scan
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scan_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallet_address TEXT NOT NULL,
+                priority_score REAL NOT NULL,
+                scheduled_time INTEGER NOT NULL,
+                status TEXT DEFAULT 'pending',
+                scan_type TEXT DEFAULT 'balance_change',
+                estimated_duration REAL DEFAULT 30.0,
+                retry_count INTEGER DEFAULT 0,
+                max_retries INTEGER DEFAULT 3,
+                created_at INTEGER DEFAULT (strftime('%s', 'now')),
+                started_at INTEGER,
+                completed_at INTEGER,
+                error_message TEXT
+            )
+        ''')
+        
+        # Table des configurations système
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS system_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                value_type TEXT DEFAULT 'string',
+                description TEXT,
+                is_encrypted BOOLEAN DEFAULT 0,
+                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            )
+        ''')
+        
+        # Table des logs système (optionnelle)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS system_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                level TEXT NOT NULL,
+                logger_name TEXT,
+                message TEXT NOT NULL,
+                wallet_address TEXT,
+                cycle_id TEXT,
+                scan_id TEXT,
+                signature TEXT,
+                token_mint TEXT,
+                exception_info TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+    
+
+    def _check_schema_version(self, cursor: sqlite3.Cursor):
+        """Vérifie et met à jour la version du schéma si nécessaire"""
+        try:
+            # Vérifier la version actuelle
+            cursor.execute("SELECT value FROM system_config WHERE key = 'schema_version'")
+            result = cursor.fetchone()
+            
+            current_version = int(result[0]) if result else 0
+            target_version = self.stats['schema_version']
+            
+            if current_version < target_version:
+                self.logger.info(f"Upgrading database schema from version {current_version} to {target_version}")
+                self._upgrade_schema(cursor, current_version, target_version)
+                
+                # Mettre à jour la version
+                cursor.execute('''
+                    INSERT OR REPLACE INTO system_config (key, value, description)
+                    VALUES ('schema_version', ?, 'Database schema version')
+                ''', (str(target_version),))
+            
+        except sqlite3.Error as e:
+            self.logger.warning(f"Schema version check failed: {e}")
+    
+    def _upgrade_schema(self, cursor: sqlite3.Cursor, from_version: int, to_version: int):
+        """Met à jour le schéma de base de données"""
+        # Pour l'instant, pas de migrations spécifiques
+        # À implémenter selon les besoins futurs
+        pass
+    
+    def _start_maintenance_thread(self):
+        """Démarre le thread de maintenance automatique"""
+        if self.maintenance_thread and self.maintenance_thread.is_alive():
+            return
+        
+        self.maintenance_thread = threading.Thread(
+            target=self._maintenance_loop,
+            name="DatabaseMaintenance",
+            daemon=True
+        )
+        self.maintenance_thread.start()
+        self.logger.info("Database maintenance thread started")
+    
+    def _maintenance_loop(self):
+        """Boucle de maintenance automatique"""
+        while not self.maintenance_stop_event.wait(3600):  # Vérifier toutes les heures
+            try:
+                current_time = get_current_timestamp()
+                
+                # Backup automatique
+                if (self.config.backup_enabled and 
+                    current_time - self.stats['last_backup'] > self.config.backup_interval_hours * 3600):
+                    self._perform_backup()
+                
+                # Nettoyage automatique (toutes les 6 heures par défaut)
+                cleanup_interval = 6 * 3600  # 6 heures
+                try:
+                    cleanup_interval = CLEANUP_INTERVALS.get('cache_cleanup', 6 * 3600)
+                except (NameError, AttributeError):
+                    pass
+                    
+                if current_time - self.stats['last_cleanup'] > cleanup_interval:
+                    self._perform_cleanup()
+                
+                # Optimisation VACUUM (hebdomadaire)
+                if current_time % (7 * 24 * 3600) < 3600:  # Une fois par semaine
+                    self._vacuum_database()
+                
+                # Nettoyage des connexions inactives du pool
+                self._cleanup_connection_pool()
+                
+            except Exception as e:
+                self.logger.error(f"Maintenance loop error: {e}")
+    
+    def _cleanup_connection_pool(self):
+        """Nettoie les connexions inactives du pool"""
+        try:
+            # Cette méthode peut être appelée périodiquement pour optimiser le pool
+            # Pour l'instant, on laisse le pool se gérer automatiquement
+            pass
+        except Exception as e:
+            self.logger.warning(f"Connection pool cleanup error: {e}")
+    
+    def _create_indexes(self, cursor: sqlite3.Cursor):
+        """Crée tous les index nécessaires pour optimiser les performances"""
+        
+        indexes = [
+            # Index sur les transactions
+            "CREATE INDEX IF NOT EXISTS idx_transactions_wallet_time ON transactions(wallet_address, block_time DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_transactions_signature ON transactions(signature)",
+            "CREATE INDEX IF NOT EXISTS idx_transactions_token_type ON transactions(is_token_transaction, block_time DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_transactions_large_amount ON transactions(is_large_token_amount, block_time DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_transactions_token_mint ON transactions(token_mint, block_time DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_transactions_cycle ON transactions(scan_cycle_id)",
+            
+            # Index sur les comptes de tokens
+            "CREATE INDEX IF NOT EXISTS idx_token_accounts_wallet ON token_accounts(wallet_address)",
+            "CREATE INDEX IF NOT EXISTS idx_token_accounts_mint ON token_accounts(token_mint)",
+            "CREATE INDEX IF NOT EXISTS idx_token_accounts_priority ON token_accounts(scan_priority DESC, last_scanned ASC)",
+            "CREATE INDEX IF NOT EXISTS idx_token_accounts_active ON token_accounts(is_active, last_updated DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_token_accounts_activity ON token_accounts(activity_score DESC, last_activity_time DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_token_accounts_balance ON token_accounts(balance DESC) WHERE balance > 0",
+            
+            # Index sur les priorités des wallets
+            "CREATE INDEX IF NOT EXISTS idx_wallet_priorities_score ON wallet_priorities(priority_score DESC, last_scan_time ASC)",
+            "CREATE INDEX IF NOT EXISTS idx_wallet_priorities_activity ON wallet_priorities(last_activity_detected DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_wallet_priorities_scans ON wallet_priorities(total_scans DESC)",
+            
+            # Index sur l'historique des scans
+            "CREATE INDEX IF NOT EXISTS idx_scan_history_wallet ON scan_history(wallet_address, completed_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_scan_history_time ON scan_history(completed_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_scan_history_activity ON scan_history(activity_detected, completed_at DESC)",
+            
+            # Index sur les métriques d'activité
+            "CREATE INDEX IF NOT EXISTS idx_activity_metrics_wallet_time ON wallet_activity_metrics(wallet_address, timestamp DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_activity_metrics_timestamp ON wallet_activity_metrics(timestamp DESC)",
+            
+            # Index sur les tokens
+            "CREATE INDEX IF NOT EXISTS idx_tokens_symbol ON tokens(symbol)",
+            "CREATE INDEX IF NOT EXISTS idx_tokens_verified ON tokens(is_verified, symbol)",
+            "CREATE INDEX IF NOT EXISTS idx_tokens_price_update ON tokens(last_price_update DESC)",
+            
+            # Index sur les statistiques des wallets
+            "CREATE INDEX IF NOT EXISTS idx_wallet_stats_address ON wallet_stats(wallet_address, updated_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_wallet_stats_volume ON wallet_stats(total_volume DESC)",
+            
+            # Index sur la queue de scan
+            "CREATE INDEX IF NOT EXISTS idx_scan_queue_priority ON scan_queue(status, priority_score DESC, scheduled_time ASC)",
+            "CREATE INDEX IF NOT EXISTS idx_scan_queue_status ON scan_queue(status, created_at DESC)",
+            
+            # Index sur les logs système
+            "CREATE INDEX IF NOT EXISTS idx_system_logs_timestamp ON system_logs(timestamp DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_system_logs_level ON system_logs(level, timestamp DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_system_logs_wallet ON system_logs(wallet_address, timestamp DESC)"
+        ]
+        
+        for index_sql in indexes:
+            try:
+                cursor.execute(index_sql)
+            except sqlite3.Error as e:
+                self.logger.warning(f"Failed to create index: {index_sql[:50]}... Error: {e}")
+
+    @contextmanager
+    def get_connection(self, retry_count: int = 3) -> Generator[sqlite3.Connection, None, None]:
+        """Context manager pour obtenir une connexion de base de données"""
+        with self.connection_pool.get_connection(retry_count) as conn:
+            try:
+                self.stats['total_operations'] += 1
+                yield conn
+            except Exception as e:
+                self.stats['failed_operations'] += 1
+                raise
+    
+    def execute_query(self, query: str, params: tuple = (), fetch_one: bool = False, 
+                     fetch_all: bool = False) -> Union[sqlite3.Cursor, Any, List[Any]]:
+        """Exécute une requête SQL avec gestion d'erreurs"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                
+                if fetch_one:
+                    return cursor.fetchone()
+                elif fetch_all:
+                    return cursor.fetchall()
+                else:
+                    return cursor
+                    
+        except sqlite3.Error as e:
+            self.logger.error(f"Query execution failed: {query[:100]}... Error: {e}")
+            raise DatabaseError(f"Query execution failed: {e}")
+    
+    def execute_many(self, query: str, params_list: List[tuple]) -> int:
+        """Exécute une requête en batch pour plusieurs paramètres"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.executemany(query, params_list)
+                conn.commit()
+                return cursor.rowcount
+                
+        except sqlite3.Error as e:
+            self.logger.error(f"Batch execution failed: {query[:100]}... Error: {e}")
+            raise DatabaseError(f"Batch execution failed: {e}")
+    
+    def transaction(self) -> 'DatabaseTransaction':
+        """Retourne un context manager pour les transactions"""
+        return DatabaseTransaction(self)
+    
+    def _perform_backup(self):
+        """Effectue une sauvegarde de la base de données"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_filename = f"backup_{timestamp}_{sanitize_filename(Path(self.config.db_path).stem)}.db"
+            backup_path = self.config.db_dir / "backups" / backup_filename
+            
+            # Créer le répertoire de backup
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Effectuer la sauvegarde
+            with self.get_connection() as conn:
+                backup = sqlite3.connect(str(backup_path))
+                conn.backup(backup)
+                backup.close()
+            
+            # Nettoyer les anciens backups (garder 10 plus récents)
+            self._cleanup_old_backups(backup_path.parent, keep_count=10)
+            
+            self.stats['last_backup'] = get_current_timestamp()
+            self.logger.info(f"Database backup created: {backup_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Backup failed: {e}")
+    
+    def _cleanup_old_backups(self, backup_dir: Path, keep_count: int = 10):
+        """Nettoie les anciens fichiers de backup"""
+        try:
+            backup_files = list(backup_dir.glob("backup_*.db"))
+            backup_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+            
+            # Supprimer les anciens backups
+            for old_backup in backup_files[keep_count:]:
+                try:
+                    old_backup.unlink()
+                    self.logger.debug(f"Deleted old backup: {old_backup}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to delete backup {old_backup}: {e}")
+                    
+        except Exception as e:
+            self.logger.error(f"Backup cleanup failed: {e}")
+    
+    def _perform_cleanup(self):
+        """Effectue le nettoyage automatique des anciennes données"""
+        try:
+            # Tâches de nettoyage par défaut si CLEANUP_INTERVALS n'est pas disponible
+            try:
+                cleanup_tasks = [
+                    ("scan_history", "completed_at", CLEANUP_INTERVALS.get('old_scan_history', 30)),
+                    ("wallet_activity_metrics", "timestamp", CLEANUP_INTERVALS.get('old_metrics', 7)),
+                    ("system_logs", "timestamp", CLEANUP_INTERVALS.get('old_logs', 14)),
+                    ("token_accounts", "last_updated", CLEANUP_INTERVALS.get('inactive_accounts', 90)),
+                    ("transactions", "block_time", CLEANUP_INTERVALS.get('old_transactions', 365))
+                ]
+            except (NameError, AttributeError):
+                # Fallback si CLEANUP_INTERVALS n'est pas disponible
+                cleanup_tasks = [
+                    ("scan_history", "completed_at", 30),  # Garder 30 jours
+                    ("wallet_activity_metrics", "timestamp", 7),  # Garder 7 jours
+                    ("system_logs", "timestamp", 14),  # Garder 14 jours
+                    ("token_accounts", "last_updated", 90),  # Garder 90 jours pour les comptes inactifs
+                    ("transactions", "block_time", 365)  # Garder 1 an de transactions
+                ]
+            
+            current_time = get_current_timestamp()
+            total_deleted = 0
+            
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                for table, timestamp_column, days_to_keep in cleanup_tasks:
+                    try:
+                        cutoff_timestamp = current_time - (days_to_keep * 24 * 3600)
+                        
+                        cursor.execute(f'''
+                            DELETE FROM {table} 
+                            WHERE {timestamp_column} < ?
+                        ''', (cutoff_timestamp,))
+                        
+                        deleted_count = cursor.rowcount
+                        total_deleted += deleted_count
+                        
+                        if deleted_count > 0:
+                            self.logger.info(f"Cleaned up {deleted_count} old records from {table}")
+                            
+                    except sqlite3.Error as e:
+                        self.logger.error(f"Cleanup failed for table {table}: {e}")
+                
+                conn.commit()
+            
+            self.stats['last_cleanup'] = current_time
+            if total_deleted > 0:
+                self.logger.info(f"Database cleanup completed: {total_deleted} total records deleted")
+                
+        except Exception as e:
+            self.logger.error(f"Database cleanup failed: {e}")
+            
     @contextmanager
     def get_connection(self, retry_count: int = 3) -> Generator[sqlite3.Connection, None, None]:
         """Context manager pour obtenir une connexion du pool"""
@@ -316,32 +810,22 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                for table, timestamp_column, days_to_keep in cleanup_tasks:
-                    try:
-                        cutoff_timestamp = current_time - (days_to_keep * 24 * 3600)
-                        
-                        cursor.execute(f'''
-                            DELETE FROM {table} 
-                            WHERE {timestamp_column} < ?
-                        ''', (cutoff_timestamp,))
-                        
-                        deleted_count = cursor.rowcount
-                        total_deleted += deleted_count
-                        
-                        if deleted_count > 0:
-                            self.logger.info(f"Cleaned up {deleted_count} old records from {table}")
-                            
-                    except sqlite3.Error as e:
-                        self.logger.error(f"Cleanup failed for table {table}: {e}")
+                # Créer toutes les tables
+                self._create_tables(cursor)
+                
+                # Créer les index optimisés
+                self._create_indexes(cursor)
+                
+                # Vérifier et mettre à jour le schéma si nécessaire
+                self._check_schema_version(cursor)
                 
                 conn.commit()
-            
-            self.stats['last_cleanup'] = current_time
-            if total_deleted > 0:
-                self.logger.info(f"Database cleanup completed: {total_deleted} total records deleted")
                 
+            self.logger.info("Database schema initialized successfully")
+            
         except Exception as e:
-            self.logger.error(f"Database cleanup failed: {e}")
+            self.logger.error(f"Failed to initialize database: {e}")
+            raise DatabaseError(f"Database initialization failed: {e}")
     
     def _vacuum_database(self):
         """Optimise la base de données avec VACUUM"""
@@ -674,6 +1158,191 @@ class DatabaseManager:
             self.logger.error(f"Database optimization failed: {e}")
             raise DatabaseError(f"Optimization failed: {e}")
 
+    def execute_script(self, script_path: str) -> bool:
+        """Exécute un script SQL depuis un fichier"""
+        try:
+            script_file = Path(script_path)
+            if not script_file.exists():
+                raise DatabaseError(f"Script file not found: {script_path}")
+            
+            with open(script_file, 'r', encoding='utf-8') as f:
+                script_content = f.read()
+            
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Exécuter le script par blocs (séparés par ;)
+                for statement in script_content.split(';'):
+                    statement = statement.strip()
+                    if statement:
+                        cursor.execute(statement)
+                conn.commit()
+            
+            self.logger.info(f"Script executed successfully: {script_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Script execution failed: {script_path}, Error: {e}")
+            return False
+    
+    def get_table_info(self, table_name: str) -> Dict[str, Any]:
+        """Récupère les informations détaillées d'une table"""
+        try:
+            info = {}
+            
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Structure de la table
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                columns = cursor.fetchall()
+                info['columns'] = [
+                    {
+                        'name': col[1],
+                        'type': col[2],
+                        'not_null': bool(col[3]),
+                        'default_value': col[4],
+                        'primary_key': bool(col[5])
+                    }
+                    for col in columns
+                ]
+                
+                # Nombre de lignes
+                cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                info['row_count'] = cursor.fetchone()[0]
+                
+                # Index sur cette table
+                cursor.execute(f"PRAGMA index_list({table_name})")
+                indexes = cursor.fetchall()
+                info['indexes'] = [
+                    {
+                        'name': idx[1],
+                        'unique': bool(idx[2]),
+                        'origin': idx[3]
+                    }
+                    for idx in indexes
+                ]
+                
+                # Taille approximative (en pages)
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM pragma_table_info('{table_name}')")
+                    column_count = cursor.fetchone()[0]
+                    info['estimated_size_kb'] = (info['row_count'] * column_count * 8) / 1024
+                except Exception:
+                    info['estimated_size_kb'] = 0
+            
+            return info
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get table info for {table_name}: {e}")
+            return {'error': str(e)}
+    
+    def export_table_to_csv(self, table_name: str, output_path: str, limit: Optional[int] = None) -> bool:
+        """Exporte une table vers un fichier CSV"""
+        try:
+            import csv
+            
+            output_file = Path(output_path)
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            query = f"SELECT * FROM {table_name}"
+            if limit:
+                query += f" LIMIT {limit}"
+            
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query)
+                
+                # Récupérer les noms des colonnes
+                column_names = [description[0] for description in cursor.description]
+                
+                # Écrire vers le CSV
+                with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(column_names)  # En-têtes
+                    
+                    # Écrire les données par chunks pour économiser la mémoire
+                    while True:
+                        rows = cursor.fetchmany(1000)  # 1000 lignes à la fois
+                        if not rows:
+                            break
+                        writer.writerows(rows)
+            
+            self.logger.info(f"Table {table_name} exported to {output_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to export table {table_name}: {e}")
+            return False
+    
+    def import_csv_to_table(self, table_name: str, csv_path: str, 
+                           mapping: Optional[Dict[str, str]] = None) -> bool:
+        """Importe un CSV dans une table"""
+        try:
+            import csv
+            
+            csv_file = Path(csv_path)
+            if not csv_file.exists():
+                raise DatabaseError(f"CSV file not found: {csv_path}")
+            
+            with open(csv_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                
+                # Préparer la requête d'insertion
+                if mapping:
+                    # Utiliser le mapping fourni
+                    db_columns = list(mapping.values())
+                    csv_columns = list(mapping.keys())
+                else:
+                    # Utiliser les colonnes telles quelles
+                    csv_columns = reader.fieldnames
+                    db_columns = csv_columns
+                
+                placeholders = ', '.join(['?' for _ in db_columns])
+                column_names = ', '.join(db_columns)
+                insert_query = f"INSERT INTO {table_name} ({column_names}) VALUES ({placeholders})"
+                
+                # Insérer les données par batch
+                batch_size = 1000
+                batch_data = []
+                
+                with self.transaction() as cursor:
+                    for row in reader:
+                        if mapping:
+                            values = [row.get(csv_col, '') for csv_col in csv_columns]
+                        else:
+                            values = [row.get(col, '') for col in csv_columns]
+                        
+                        batch_data.append(tuple(values))
+                        
+                        if len(batch_data) >= batch_size:
+                            cursor.executemany(insert_query, batch_data)
+                            batch_data = []
+                    
+                    # Insérer le dernier batch
+                    if batch_data:
+                        cursor.executemany(insert_query, batch_data)
+            
+            self.logger.info(f"CSV {csv_path} imported to table {table_name}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to import CSV to {table_name}: {e}")
+            return False
+        """Ferme proprement le gestionnaire de base de données"""
+        try:
+            # Arrêter le thread de maintenance
+            self.maintenance_stop_event.set()
+            if self.maintenance_thread and self.maintenance_thread.is_alive():
+                self.maintenance_thread.join(timeout=10)
+            
+            # Fermer toutes les connexions
+            self.connection_pool.close_all()
+            
+            self.logger.info("DatabaseManager closed successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error closing DatabaseManager: {e}")
+
     def close(self):
         """Ferme proprement le gestionnaire de base de données"""
         try:
@@ -924,484 +1593,7 @@ __all__ = [
     'get_database_manager',
     'create_database_backup',
     'test_database_connection'
-]cursor()
-                
-                # Créer toutes les tables
-                self._create_tables(cursor)
-                
-                # Créer les index optimisés
-                self._create_indexes(cursor)
-                
-                # Vérifier et mettre à jour le schéma si nécessaire
-                self._check_schema_version(cursor)
-                
-                conn.commit()
-                
-            self.logger.info("Database schema initialized successfully")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize database: {e}")
-            raise DatabaseError(f"Database initialization failed: {e}")
+]
     
-    def _create_tables(self, cursor: sqlite3.Cursor):
-        """Crée toutes les tables nécessaires"""
-        
-        # Table des transactions (schema principal)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS transactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                signature TEXT UNIQUE NOT NULL,
-                wallet_address TEXT NOT NULL,
-                slot INTEGER,
-                block_time INTEGER,
-                amount REAL DEFAULT 0.0,
-                token_mint TEXT,
-                token_symbol TEXT,
-                token_name TEXT,
-                transaction_type TEXT,
-                token_amount REAL DEFAULT 0.0,
-                price_per_token REAL DEFAULT 0.0,
-                fee REAL DEFAULT 0.0,
-                status TEXT DEFAULT 'success',
-                is_token_transaction BOOLEAN DEFAULT 0,
-                is_large_token_amount BOOLEAN DEFAULT 0,
-                detection_delay REAL DEFAULT 0.0,
-                wallet_priority_at_detection REAL DEFAULT 1.0,
-                scan_cycle_id TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Table des tokens (métadonnées)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS tokens (
-                address TEXT PRIMARY KEY,
-                symbol TEXT,
-                name TEXT,
-                decimals INTEGER DEFAULT 9,
-                price_usd REAL DEFAULT 0.0,
-                logo_uri TEXT,
-                coingecko_id TEXT,
-                is_verified BOOLEAN DEFAULT 0,
-                market_cap REAL DEFAULT 0.0,
-                volume_24h REAL DEFAULT 0.0,
-                price_change_24h REAL DEFAULT 0.0,
-                last_price_update INTEGER DEFAULT 0,
-                metadata_source TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Table des comptes de tokens (ATA)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS token_accounts (
-                wallet_address TEXT NOT NULL,
-                ata_pubkey TEXT NOT NULL,
-                token_mint TEXT NOT NULL,
-                balance REAL DEFAULT 0.0,
-                decimals INTEGER DEFAULT 9,
-                first_seen INTEGER NOT NULL,
-                last_updated INTEGER NOT NULL,
-                last_scanned INTEGER DEFAULT 0,
-                is_active BOOLEAN DEFAULT 1,
-                scan_priority INTEGER DEFAULT 1,
-                activity_score REAL DEFAULT 0.0,
-                last_activity_time INTEGER DEFAULT 0,
-                total_transactions INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (wallet_address, ata_pubkey)
-            )
-        ''')
-        
-        # Table des priorités des wallets
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS wallet_priorities (
-                wallet_address TEXT PRIMARY KEY,
-                priority_score REAL DEFAULT 1.0,
-                last_scan_time INTEGER DEFAULT 0,
-                scan_count_1h INTEGER DEFAULT 0,
-                scan_count_24h INTEGER DEFAULT 0,
-                activity_score REAL DEFAULT 0.0,
-                volume_score_1h REAL DEFAULT 0.0,
-                new_tokens_score_1h INTEGER DEFAULT 0,
-                total_scans INTEGER DEFAULT 0,
-                avg_scan_duration REAL DEFAULT 0.0,
-                last_activity_detected INTEGER DEFAULT 0,
-                consecutive_empty_scans INTEGER DEFAULT 0,
-                best_priority_ever REAL DEFAULT 1.0,
-                worst_priority_ever REAL DEFAULT 1.0,
-                priority_history TEXT DEFAULT '[]',
-                updated_at INTEGER DEFAULT 0,
-                created_at INTEGER DEFAULT (strftime('%s', 'now'))
-            )
-        ''')
-        
-        # Table des statistiques des wallets
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS wallet_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                wallet_address TEXT NOT NULL,
-                balance_sol REAL DEFAULT 0.0,
-                total_transactions INTEGER DEFAULT 0,
-                total_volume REAL DEFAULT 0.0,
-                pnl REAL DEFAULT 0.0,
-                largest_transaction REAL DEFAULT 0.0,
-                token_count INTEGER DEFAULT 0,
-                active_token_count INTEGER DEFAULT 0,
-                first_transaction_time INTEGER DEFAULT 0,
-                last_transaction_time INTEGER DEFAULT 0,
-                avg_transaction_size REAL DEFAULT 0.0,
-                success_rate REAL DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Table de l'historique des scans
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS scan_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                wallet_address TEXT NOT NULL,
-                scan_type TEXT NOT NULL,
-                total_accounts INTEGER DEFAULT 0,
-                new_accounts INTEGER DEFAULT 0,
-                scan_duration REAL DEFAULT 0.0,
-                completed_at INTEGER NOT NULL,
-                priority_score_before REAL DEFAULT 1.0,
-                priority_score_after REAL DEFAULT 1.0,
-                rpc_requests_count INTEGER DEFAULT 0,
-                efficiency_score REAL DEFAULT 0.0,
-                activity_detected INTEGER DEFAULT 0,
-                errors_count INTEGER DEFAULT 0,
-                notes TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Table des métriques d'activité des wallets
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS wallet_activity_metrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                wallet_address TEXT NOT NULL,
-                timestamp INTEGER NOT NULL,
-                period_minutes INTEGER DEFAULT 15,
-                new_transactions_count INTEGER DEFAULT 0,
-                volume_sol REAL DEFAULT 0.0,
-                new_token_accounts INTEGER DEFAULT 0,
-                scan_duration REAL DEFAULT 0.0,
-                discoveries_count INTEGER DEFAULT 0,
-                balance_changes_count INTEGER DEFAULT 0,
-                rpc_requests_made INTEGER DEFAULT 0,
-                errors_count INTEGER DEFAULT 0,
-                efficiency_score REAL DEFAULT 0.0,
-                throughput_score REAL DEFAULT 0.0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Table de la queue de scan
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS scan_queue (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                wallet_address TEXT NOT NULL,
-                priority_score REAL NOT NULL,
-                scheduled_time INTEGER NOT NULL,
-                status TEXT DEFAULT 'pending',
-                scan_type TEXT DEFAULT 'balance_change',
-                estimated_duration REAL DEFAULT 30.0,
-                retry_count INTEGER DEFAULT 0,
-                max_retries INTEGER DEFAULT 3,
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                started_at INTEGER,
-                completed_at INTEGER,
-                error_message TEXT
-            )
-        ''')
-        
-        # Table des configurations système
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS system_config (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                value_type TEXT DEFAULT 'string',
-                description TEXT,
-                is_encrypted BOOLEAN DEFAULT 0,
-                updated_at INTEGER DEFAULT (strftime('%s', 'now')),
-                created_at INTEGER DEFAULT (strftime('%s', 'now'))
-            )
-        ''')
-        
-        # Table des logs système (optionnelle)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS system_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp INTEGER NOT NULL,
-                level TEXT NOT NULL,
-                logger_name TEXT,
-                message TEXT NOT NULL,
-                wallet_address TEXT,
-                cycle_id TEXT,
-                scan_id TEXT,
-                signature TEXT,
-                token_mint TEXT,
-                exception_info TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+
     
-    def _create_indexes(self, cursor: sqlite3.Cursor):
-        """Crée tous les index nécessaires pour optimiser les performances"""
-        
-        indexes = [
-            # Index sur les transactions
-            "CREATE INDEX IF NOT EXISTS idx_transactions_wallet_time ON transactions(wallet_address, block_time DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_transactions_signature ON transactions(signature)",
-            "CREATE INDEX IF NOT EXISTS idx_transactions_token_type ON transactions(is_token_transaction, block_time DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_transactions_large_amount ON transactions(is_large_token_amount, block_time DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_transactions_token_mint ON transactions(token_mint, block_time DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_transactions_cycle ON transactions(scan_cycle_id)",
-            
-            # Index sur les comptes de tokens
-            "CREATE INDEX IF NOT EXISTS idx_token_accounts_wallet ON token_accounts(wallet_address)",
-            "CREATE INDEX IF NOT EXISTS idx_token_accounts_mint ON token_accounts(token_mint)",
-            "CREATE INDEX IF NOT EXISTS idx_token_accounts_priority ON token_accounts(scan_priority DESC, last_scanned ASC)",
-            "CREATE INDEX IF NOT EXISTS idx_token_accounts_active ON token_accounts(is_active, last_updated DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_token_accounts_activity ON token_accounts(activity_score DESC, last_activity_time DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_token_accounts_balance ON token_accounts(balance DESC) WHERE balance > 0",
-            
-            # Index sur les priorités des wallets
-            "CREATE INDEX IF NOT EXISTS idx_wallet_priorities_score ON wallet_priorities(priority_score DESC, last_scan_time ASC)",
-            "CREATE INDEX IF NOT EXISTS idx_wallet_priorities_activity ON wallet_priorities(last_activity_detected DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_wallet_priorities_scans ON wallet_priorities(total_scans DESC)",
-            
-            # Index sur l'historique des scans
-            "CREATE INDEX IF NOT EXISTS idx_scan_history_wallet ON scan_history(wallet_address, completed_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_scan_history_time ON scan_history(completed_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_scan_history_activity ON scan_history(activity_detected, completed_at DESC)",
-            
-            # Index sur les métriques d'activité
-            "CREATE INDEX IF NOT EXISTS idx_activity_metrics_wallet_time ON wallet_activity_metrics(wallet_address, timestamp DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_activity_metrics_timestamp ON wallet_activity_metrics(timestamp DESC)",
-            
-            # Index sur les tokens
-            "CREATE INDEX IF NOT EXISTS idx_tokens_symbol ON tokens(symbol)",
-            "CREATE INDEX IF NOT EXISTS idx_tokens_verified ON tokens(is_verified, symbol)",
-            "CREATE INDEX IF NOT EXISTS idx_tokens_price_update ON tokens(last_price_update DESC)",
-            
-            # Index sur les statistiques des wallets
-            "CREATE INDEX IF NOT EXISTS idx_wallet_stats_address ON wallet_stats(wallet_address, updated_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_wallet_stats_volume ON wallet_stats(total_volume DESC)",
-            
-            # Index sur la queue de scan
-            "CREATE INDEX IF NOT EXISTS idx_scan_queue_priority ON scan_queue(status, priority_score DESC, scheduled_time ASC)",
-            "CREATE INDEX IF NOT EXISTS idx_scan_queue_status ON scan_queue(status, created_at DESC)",
-            
-            # Index sur les logs système
-            "CREATE INDEX IF NOT EXISTS idx_system_logs_timestamp ON system_logs(timestamp DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_system_logs_level ON system_logs(level, timestamp DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_system_logs_wallet ON system_logs(wallet_address, timestamp DESC)"
-        ]
-        
-        for index_sql in indexes:
-            try:
-                cursor.execute(index_sql)
-            except sqlite3.Error as e:
-                self.logger.warning(f"Failed to create index: {index_sql[:50]}... Error: {e}")
-    
-    def _check_schema_version(self, cursor: sqlite3.Cursor):
-        """Vérifie et met à jour la version du schéma si nécessaire"""
-        try:
-            # Vérifier la version actuelle
-            cursor.execute("SELECT value FROM system_config WHERE key = 'schema_version'")
-            result = cursor.fetchone()
-            
-            current_version = int(result[0]) if result else 0
-            target_version = self.stats['schema_version']
-            
-            if current_version < target_version:
-                self.logger.info(f"Upgrading database schema from version {current_version} to {target_version}")
-                self._upgrade_schema(cursor, current_version, target_version)
-                
-                # Mettre à jour la version
-                cursor.execute('''
-                    INSERT OR REPLACE INTO system_config (key, value, description)
-                    VALUES ('schema_version', ?, 'Database schema version')
-                ''', (str(target_version),))
-            
-        except sqlite3.Error as e:
-            self.logger.warning(f"Schema version check failed: {e}")
-    
-    def _upgrade_schema(self, cursor: sqlite3.Cursor, from_version: int, to_version: int):
-        """Met à jour le schéma de base de données"""
-        # Pour l'instant, pas de migrations spécifiques
-        # À implémenter selon les besoins futurs
-        pass
-    
-    def _start_maintenance_thread(self):
-        """Démarre le thread de maintenance automatique"""
-        if self.maintenance_thread and self.maintenance_thread.is_alive():
-            return
-        
-        self.maintenance_thread = threading.Thread(
-            target=self._maintenance_loop,
-            name="DatabaseMaintenance",
-            daemon=True
-        )
-        self.maintenance_thread.start()
-        self.logger.info("Database maintenance thread started")
-    
-    def _maintenance_loop(self):
-        """Boucle de maintenance automatique"""
-        while not self.maintenance_stop_event.wait(3600):  # Vérifier toutes les heures
-            try:
-                current_time = get_current_timestamp()
-                
-                # Backup automatique
-                if (self.config.backup_enabled and 
-                    current_time - self.stats['last_backup'] > self.config.backup_interval_hours * 3600):
-                    self._perform_backup()
-                
-                # Nettoyage automatique
-                if current_time - self.stats['last_cleanup'] > CLEANUP_INTERVALS['cache_cleanup']:
-                    self._perform_cleanup()
-                
-                # Optimisation VACUUM (hebdomadaire)
-                if current_time % (7 * 24 * 3600) < 3600:  # Une fois par semaine
-                    self._vacuum_database()
-                
-            except Exception as e:
-                self.logger.error(f"Maintenance loop error: {e}")
-    
-    @contextmanager
-    def get_connection(self, retry_count: int = 3) -> Generator[sqlite3.Connection, None, None]:
-        """Context manager pour obtenir une connexion de base de données"""
-        with self.connection_pool.get_connection(retry_count) as conn:
-            try:
-                self.stats['total_operations'] += 1
-                yield conn
-            except Exception as e:
-                self.stats['failed_operations'] += 1
-                raise
-    
-    def execute_query(self, query: str, params: tuple = (), fetch_one: bool = False, 
-                     fetch_all: bool = False) -> Union[sqlite3.Cursor, Any, List[Any]]:
-        """Exécute une requête SQL avec gestion d'erreurs"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, params)
-                
-                if fetch_one:
-                    return cursor.fetchone()
-                elif fetch_all:
-                    return cursor.fetchall()
-                else:
-                    return cursor
-                    
-        except sqlite3.Error as e:
-            self.logger.error(f"Query execution failed: {query[:100]}... Error: {e}")
-            raise DatabaseError(f"Query execution failed: {e}")
-    
-    def execute_many(self, query: str, params_list: List[tuple]) -> int:
-        """Exécute une requête en batch pour plusieurs paramètres"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.executemany(query, params_list)
-                conn.commit()
-                return cursor.rowcount
-                
-        except sqlite3.Error as e:
-            self.logger.error(f"Batch execution failed: {query[:100]}... Error: {e}")
-            raise DatabaseError(f"Batch execution failed: {e}")
-    
-    def transaction(self) -> 'DatabaseTransaction':
-        """Retourne un context manager pour les transactions"""
-        return DatabaseTransaction(self)
-    
-    def _perform_backup(self):
-        """Effectue une sauvegarde de la base de données"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_filename = f"backup_{timestamp}_{sanitize_filename(Path(self.config.db_path).stem)}.db"
-            backup_path = self.config.db_dir / "backups" / backup_filename
-            
-            # Créer le répertoire de backup
-            backup_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Effectuer la sauvegarde
-            with self.get_connection() as conn:
-                backup = sqlite3.connect(str(backup_path))
-                conn.backup(backup)
-                backup.close()
-            
-            # Nettoyer les anciens backups (garder 10 plus récents)
-            self._cleanup_old_backups(backup_path.parent, keep_count=10)
-            
-            self.stats['last_backup'] = get_current_timestamp()
-            self.logger.info(f"Database backup created: {backup_path}")
-            
-        except Exception as e:
-            self.logger.error(f"Backup failed: {e}")
-    
-    def _cleanup_old_backups(self, backup_dir: Path, keep_count: int = 10):
-        """Nettoie les anciens fichiers de backup"""
-        try:
-            backup_files = list(backup_dir.glob("backup_*.db"))
-            backup_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-            
-            # Supprimer les anciens backups
-            for old_backup in backup_files[keep_count:]:
-                try:
-                    old_backup.unlink()
-                    self.logger.debug(f"Deleted old backup: {old_backup}")
-                except Exception as e:
-                    self.logger.warning(f"Failed to delete backup {old_backup}: {e}")
-                    
-        except Exception as e:
-            self.logger.error(f"Backup cleanup failed: {e}")
-    
-    def _perform_cleanup(self):
-        """Effectue le nettoyage automatique des anciennes données"""
-        try:
-            cleanup_tasks = [
-                ("scan_history", "completed_at", CLEANUP_INTERVALS['old_scan_history']),
-                ("wallet_activity_metrics", "timestamp", CLEANUP_INTERVALS['old_metrics']),
-                ("system_logs", "timestamp", CLEANUP_INTERVALS['old_logs'])
-            ]
-            
-            current_time = get_current_timestamp()
-            total_deleted = 0
-            
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                
-                for table, timestamp_column, days_to_keep in cleanup_tasks:
-                    try:
-                        cutoff_timestamp = current_time - (days_to_keep * 24 * 3600)
-                        
-                        cursor.execute(f'''
-                            DELETE FROM {table} 
-                            WHERE {timestamp_column} < ?
-                        ''', (cutoff_timestamp,))
-                        
-                        deleted_count = cursor.rowcount
-                        total_deleted += deleted_count
-                        
-                        if deleted_count > 0:
-                            self.logger.info(f"Cleaned up {deleted_count} old records from {table}")
-                            
-                    except sqlite3.Error as e:
-                        self.logger.error(f"Cleanup failed for table {table}: {e}")
-                
-                conn.commit()
-            
-            self.stats['last_cleanup'] = current_time
-            if total_deleted > 0:
-                self.logger.info(f"Database cleanup completed: {total_deleted} total records deleted")
-                
-        except Exception as e:
-            self.logger.error(f"Database cleanup failed: {e}")
