@@ -5,6 +5,8 @@ Client RPC pour Solana avec système de fallback intelligent et gestion avancée
 Gère la communication avec les endpoints RPC Solana avec résilience et optimisation
 """
 
+
+
 import requests
 import time
 import logging
@@ -17,6 +19,8 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 import hashlib
 import json
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry 
 
 # Imports des modules internes
 try:
@@ -24,15 +28,19 @@ try:
     from core.exceptions import (
         RPCError, RPCTimeoutError, RPCRateLimitError, 
         RPCEndpointUnavailableError, RPCResponseError,
-        create_rpc_error, handle_rpc_errors
+        create_rpc_error, handle_rpc_errors,RPCException
     )
     from core.logger import get_logger
-    from utils.helpers import exponential_backoff, CircularBuffer, get_current_timestamp
+    from utils.helpers import exponential_backoff, CircularBuffer, get_current_timestamp,retry_with_backoff
     from utils.constants import (
         DEFAULT_RPC_ENDPOINTS, QUICKNODE_FREE_TIER_RPS,
         RPC_TIMEOUT_DEFAULT, RPC_TIMEOUT_BATCH, RPC_TIMEOUT_CRITICAL,
         MAX_RPC_RETRIES, RPC_RETRY_DELAY_BASE
     )
+    # Dépendances RPC
+    from rpc.rate_limiter import RateLimiter
+    from rpc.endpoints import EndpointManager
+
 except ImportError as e:
     logging.warning(f"Import error in RPC client: {e}")
     # Fallbacks pour développement
@@ -54,8 +62,40 @@ except ImportError as e:
     class RPCError(Exception):
         pass
 
+     class RPCRateLimitError(RPCError):
+        def __init__(self, endpoint, retry_after):
+            self.endpoint = endpoint
+            self.retry_after = retry_after
+            super().__init__(f"Rate limit hit on {endpoint}, retry after {retry_after}s")
+    
+    class RPCTimeoutError(RPCError):
+        def __init__(self, endpoint, timeout, method):
+            self.endpoint = endpoint
+            self.timeout = timeout
+            self.method = method
+            super().__init__(f"Timeout {timeout}s for {method} on {endpoint}")
+    
+    class RPCEndpointUnavailableError(RPCError):
+        def __init__(self, endpoints, message):
+            self.endpoints = endpoints
+            super().__init__(message)
+    
+    class RPCResponseError(RPCError):
+        def __init__(self, method, message, code):
+            self.method = method
+            self.code = code
+            super().__init__(f"RPC error {code} for {method}: {message}")
+
+    def exponential_backoff(attempt, max_delay=30.0):
+        """Calcule un délai d'attente exponentiel avec jitter"""
+        delay = min(max_delay, (2 ** attempt) + random.uniform(0, 1))
+        return delay 
+        
 # Configuration du logger
 logger = logging.getLogger(__name__)
+
+# Variables globales pour le singleton
+_default_rpc_client: Optional[RPCClient] = None
 
 
 @dataclass
@@ -179,7 +219,7 @@ class RPCClient:
         """Initialise le client RPC avec configuration"""
         self.config = config or get_config()
         self.logger = logger
-        
+        self._setup_http_session()
         # Configuration des endpoints
         self._setup_endpoints()
         
@@ -215,6 +255,42 @@ class RPCClient:
         self._initialize_metrics()
         
         self.logger.info(f"🔌 Client RPC initialisé avec {len(self.endpoints)} endpoints")
+    
+    def _setup_http_session(self):
+        """Configure la session HTTP avec pool de connexions réutilisables"""
+        self.session = requests.Session()
+        
+        # Configuration du pool de connexions
+        pool_config = {
+            'pool_connections': getattr(self.config.rpc, 'pool_connections', 10),
+            'pool_maxsize': getattr(self.config.rpc, 'pool_maxsize', 20),
+            'max_retries': 0,  # Géré manuellement par notre logique
+            'pool_block': False  # Non-bloquant si pool plein
+        }
+        
+        # Créer l'adaptateur avec pool personnalisé
+        adapter = HTTPAdapter(**pool_config)
+        
+        # Monter l'adaptateur pour HTTP et HTTPS
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
+        
+        # Configuration des timeouts par défaut
+        self.session_timeout = getattr(self.config.rpc, 'session_timeout', 30.0)
+        
+        # Headers par défaut pour toutes les requêtes
+        self.session.headers.update({
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'User-Agent': 'SolanaWalletMonitor/2.0',
+            'Connection': 'keep-alive'  # Forcer keep-alive
+        })
+        
+        self.logger.info(
+            f"🔗 Session HTTP configurée: "
+            f"{pool_config['pool_connections']} connexions, "
+            f"pool max {pool_config['pool_maxsize']}"
+        )
     
     def _setup_endpoints(self):
         """Configure les endpoints RPC depuis la configuration"""
@@ -371,14 +447,15 @@ class RPCClient:
     
     def _cleanup_cache(self):
         """Nettoie les entrées expirées du cache"""
-        current_time = time.time()
-        expired_keys = [
-            key for key, (_, timestamp) in self.request_cache.items()
-            if current_time - timestamp > self.cache_ttl
-        ]
-        
-        for key in expired_keys:
-            del self.request_cache[key]
+        with self._lock:
+            current_time = time.time()
+            expired_keys = [
+                key for key, (_, timestamp) in self.request_cache.items()
+                if current_time - timestamp > self.cache_ttl
+            ]
+            
+            for key in expired_keys:
+                del self.request_cache[key]
     
     def call(self, method: str, params: List = None, 
              priority: int = 0, use_cache: bool = True) -> Optional[Dict]:
@@ -553,10 +630,10 @@ class RPCClient:
             self.logger.debug(f"🔌 RPC {request.method} vers {endpoint_url[:50]}...")
             
             # Faire la requête HTTP
-            response = requests.post(
+            response = self.session.post(
                 endpoint_url,
                 json=payload,
-                headers=headers,
+                headers=self._get_headers(endpoint_config),  # Headers spécifiques
                 timeout=request.timeout or RPC_TIMEOUT_DEFAULT
             )
             
@@ -662,7 +739,8 @@ class RPCClient:
         endpoint_url = endpoint_config['url']
         
         try:
-            response = requests.post(
+            
+            response = self.session.post(
                 endpoint_url,
                 json=batch_requests,
                 headers=self._get_headers(endpoint_config),
@@ -742,8 +820,29 @@ class RPCClient:
                 },
                 'requests_by_method': dict(self.session_stats['requests_by_method']),
                 'errors_by_type': dict(self.session_stats['errors_by_type']),
-                'endpoints': endpoints_stats
+                'endpoints': endpoints_stats,
+                'connection_pool': self.get_connection_stats()
             }
+    
+    def get_connection_stats(self) -> Dict[str, Any]:
+        """Retourne les statistiques du pool de connexions"""
+        stats = {
+            'session_active': self.session is not None,
+            'adapters_mounted': len(self.session.adapters) if self.session else 0
+        }
+        
+        # Statistiques détaillées si disponibles
+        if self.session:
+            for prefix, adapter in self.session.adapters.items():
+                if hasattr(adapter, 'poolmanager'):
+                    pool_stats = {
+                        f'{prefix}_pools': len(adapter.poolmanager.pools),
+                        f'{prefix}_pool_connections': getattr(adapter.config, 'pool_connections', 'N/A'),
+                        f'{prefix}_pool_maxsize': getattr(adapter.config, 'pool_maxsize', 'N/A')
+                    }
+                    stats.update(pool_stats)
+        
+        return stats
     
     def health_check(self) -> Dict[str, Any]:
         """Effectue un health check de tous les endpoints"""
@@ -756,7 +855,7 @@ class RPCClient:
                 start_time = time.time()
                 
                 # Test simple avec getHealth
-                result = requests.post(
+                response = self.session.post(
                     url,
                     json={
                         "jsonrpc": "2.0",
@@ -882,6 +981,11 @@ class RPCClient:
     def close(self):
         """Ferme le client RPC et nettoie les ressources"""
         try:
+            
+            if hasattr(self, 'session') and self.session:
+                self.session.close()
+                self.logger.debug("🔗 Session HTTP fermée")
+                
             # Nettoyage final du cache
             self.request_cache.clear()
             
@@ -992,52 +1096,56 @@ def test_rpc_connectivity(endpoints: List[str] = None) -> Dict[str, Any]:
     
     results = {}
     
-    for endpoint in endpoints:
-        start_time = time.time()
+    with requests.Session() as session:
+        # Configuration de base pour les tests
+        session.headers.update({'Content-Type': 'application/json'})
         
-        try:
-            response = requests.post(
-                endpoint,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "getHealth",
-                    "params": []
-                },
-                timeout=5.0,
-                headers={'Content-Type': 'application/json'}
-            )
+        for endpoint in endpoints:
+            start_time = time.time()
             
-            response_time = (time.time() - start_time) * 1000
-            
-            if response.status_code == 200:
+            try:
+                response = session.post(
+                    endpoint,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "getHealth",
+                        "params": []
+                    },
+                    timeout=5.0,
+                    headers={'Content-Type': 'application/json'}
+                )
+                
+                response_time = (time.time() - start_time) * 1000
+                
+                if response.status_code == 200:
+                    results[endpoint] = {
+                        'status': 'success',
+                        'response_time_ms': round(response_time, 0),
+                        'available': True
+                    }
+                else:
+                    results[endpoint] = {
+                        'status': 'http_error',
+                        'status_code': response.status_code,
+                        'available': False
+                    }
+                    
+            except requests.exceptions.Timeout:
                 results[endpoint] = {
-                    'status': 'success',
-                    'response_time_ms': round(response_time, 0),
-                    'available': True
-                }
-            else:
-                results[endpoint] = {
-                    'status': 'http_error',
-                    'status_code': response.status_code,
+                    'status': 'timeout',
                     'available': False
                 }
-                
-        except requests.exceptions.Timeout:
-            results[endpoint] = {
-                'status': 'timeout',
-                'available': False
-            }
-        except requests.exceptions.ConnectionError:
-            results[endpoint] = {
-                'status': 'connection_error',
-                'available': False
-            }
-        except Exception as e:
-            results[endpoint] = {
-                'status': 'error',
-                'error': str(e),
-                'available': False
+            except requests.exceptions.ConnectionError:
+                results[endpoint] = {
+                    'status': 'connection_error',
+                    'available': False
+                }
+            except Exception as e:
+                results[endpoint] = {
+                    'status': 'error',
+                    'error': str(e),
+                    'available': False
             }
     
     # Statistiques globales
@@ -1052,11 +1160,6 @@ def test_rpc_connectivity(endpoints: List[str] = None) -> Dict[str, Any]:
             'availability_percentage': round((available_endpoints / total_endpoints) * 100, 1) if total_endpoints > 0 else 0
         }
     }
-
-
-# Variables globales pour le singleton
-_default_rpc_client: Optional[RPCClient] = None
-
 
 # Context manager pour l'utilisation temporaire d'un client
 @contextmanager
