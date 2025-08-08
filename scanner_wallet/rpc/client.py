@@ -11,7 +11,7 @@ import requests
 import time
 import logging
 import random
-from typing import Dict, List, Optional, Any, Union, Tuple, Callable
+from typing import Dict, List, Optional, Any, Union, Tuple, Callable, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from threading import Lock, RLock
@@ -54,7 +54,7 @@ except ImportError as e:
     ]
     RPC_TIMEOUT_DEFAULT = 15
     RPC_TIMEOUT_BATCH = 25
-    RPC_TIMEOUT_CRITICAL = 30
+    CRITICAL_RPC_TIMEOUT = 30
     MAX_RPC_RETRIES = 3
     RPC_RETRY_DELAY_BASE = 2
     QUICKNODE_FREE_TIER_RPS = 100
@@ -95,7 +95,7 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 # Variables globales pour le singleton
-_default_rpc_client: Optional[RPCClient] = None
+_default_rpc_client: Optional['RPCClient'] = None
 
 
 @dataclass

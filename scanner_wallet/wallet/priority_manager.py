@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 import heapq
+import sqlite3
 
 # Core imports with fallbacks
 try:
@@ -132,6 +133,7 @@ class WalletPriorityManager:
         """Load existing priorities from database"""
         try:
             with self.db_manager.get_connection() as conn:
+                conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute("SELECT * FROM wallet_priorities")
                 

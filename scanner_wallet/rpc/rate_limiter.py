@@ -23,7 +23,7 @@ try:
     from core.logger import get_logger
     from utils.helpers import get_current_timestamp, CircularBuffer, exponential_backoff
     from utils.constants import (
-        QUICKNODE_FREE_TIER_RPS, RPC_TIMEOUT_DEFAULT,
+        QUICKNODE_FREE_RPS_LIMIT, RPC_TIMEOUT_DEFAULT,
         OPTIMAL_BATCH_SIZES, PERFORMANCE_THRESHOLDS
     )
 except ImportError as e:
@@ -32,7 +32,7 @@ except ImportError as e:
     logger = logging.getLogger(__name__)
     
     # Constantes par défaut
-    QUICKNODE_FREE_TIER_RPS = 100
+    QUICKNODE_FREE_RPS_LIMIT = 100
     RPC_TIMEOUT_DEFAULT = 15
     OPTIMAL_BATCH_SIZES = {
         'getMultipleAccounts': 100,

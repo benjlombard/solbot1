@@ -51,9 +51,9 @@ DEFAULT_RPC_ENDPOINTS = [
 ]
 
 # Configuration timeouts
-DEFAULT_RPC_TIMEOUT = 15  # secondes
+RPC_TIMEOUT_DEFAULT = 15  # secondes
 DEFAULT_CONNECTION_TIMEOUT = 10  # secondes
-BATCH_RPC_TIMEOUT = 25  # secondes pour les requêtes batch
+RPC_TIMEOUT_BATCH = 25  # secondes pour les requêtes batch
 CRITICAL_RPC_TIMEOUT = 30  # timeout pour les requêtes critiques
 
 # Rate limiting
@@ -67,7 +67,12 @@ MAX_RPC_RETRIES = 3
 RETRY_EXPONENTIAL_BASE = 2
 RETRY_MAX_DELAY = 30  # secondes
 RETRY_JITTER_MAX = 2  # secondes de jitter aléatoire
+RPC_RETRY_DELAY_BASE = 2
 
+# Validation patterns (AJOUTER CES LIGNES SI MANQUANTES)
+SOLANA_ADDRESS_PATTERN = r'^[1-9A-HJ-NP-Za-km-z]{44}$'  # Base58, 44 chars
+SOLANA_SIGNATURE_PATTERN = r'^[1-9A-HJ-NP-Za-km-z]{88}$'  # Base58, 88 chars
+TOKEN_SYMBOL_PATTERN = r'^[A-Z][A-Z0-9_]{1,10}$'  # Symbole token valide
 
 # =============================================================================
 # CONSTANTES BATCHING ET PERFORMANCE
