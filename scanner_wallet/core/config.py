@@ -16,7 +16,8 @@ import logging
 
 # Import des utilitaires (avec fallbacks)
 try:
-    from utils.helpers import validate_wallet_address, sanitize_filename
+    from utils.helpers import sanitize_filename
+    from utils.validators import quick_validate_address as validate_wallet_address
     from utils.constants import (
         DEFAULT_RPC_ENDPOINTS, SOLANA_TOKEN_PROGRAM_ID, 
         LAMPORTS_PER_SOL, DEFAULT_TOKEN_DECIMALS
@@ -24,7 +25,9 @@ try:
     from core.exceptions import ConfigurationError
 except ImportError:
     # Fallbacks si les modules ne sont pas encore disponibles
+    import logging
     def validate_wallet_address(addr):
+        logging.getLogger('config').warning("Using fallback address validator for %s", addr)
         if not isinstance(addr, str):
             return False
         # Validation Solana plus stricte

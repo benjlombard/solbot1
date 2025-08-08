@@ -20,19 +20,27 @@ try:
     from models.token import Token, TokenAccount, TokenDiscovery
     from models.transaction import TransactionType
     from utils.helpers import get_current_timestamp, safe_divide
-    from utils.validators import validate_wallet_address, validate_token_mint
+    from utils.validators import quick_validate_address as validate_token_mint
+    from utils.validators import quick_validate_address as validate_wallet_address
     from constants import DEFAULT_RPC_ENDPOINTS, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID
 except ImportError as e:
     # Fallback implementations
     import logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - fallback - %(message)s')
     def get_logger(name=None):
-        return logging.getLogger(name or 'account_manager')
+        logger = logging.getLogger(name or 'account_manager')
+        logger.warning("Using fallback logger due to ImportError: %s", e)
+        return logger
     
     def get_database_manager(): return None
     def get_config(): return None
     
-    def validate_wallet_address(addr): return bool(addr and len(addr) == 44)
-    def validate_token_mint(mint): return bool(mint and len(mint) == 44)
+   def validate_wallet_address(addr):
+        logging.getLogger('account_manager').warning("Using fallback address validator for %s", addr)
+        return bool(addr and len(addr) == 44)
+    def validate_token_mint(mint):
+        logging.getLogger('account_manager').warning("Using fallback mint validator for %s", mint)
+        return bool(mint and len(mint) == 44)
     def get_current_timestamp(): return int(time.time())
     def safe_divide(a, b, default=0): return a/b if b else default
     

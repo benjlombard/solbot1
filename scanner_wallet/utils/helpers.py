@@ -377,64 +377,6 @@ def sol_to_lamports(sol: Union[float, int]) -> int:
         return 0
 
 
-def validate_wallet_address(address: str) -> bool:
-    """
-    Valide le format d'une adresse de wallet Solana
-    
-    Args:
-        address: Adresse à valider
-    
-    Returns:
-        True si l'adresse est valide
-    """
-    if not address or not isinstance(address, str):
-        return False
-    
-    # Vérifier la longueur (32 bytes en base58 = ~44 caractères)
-    if len(address) < 32 or len(address) > 48:
-        return False
-    
-    # Vérifier les caractères base58
-    base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-    if not all(c in base58_chars for c in address):
-        return False
-    
-    try:
-        # Tenter de décoder en base58
-        decoded = base58.b58decode(address)
-        return len(decoded) == 32
-    except Exception:
-        return False
-
-
-def validate_signature(signature: str) -> bool:
-    """
-    Valide le format d'une signature de transaction Solana
-    
-    Args:
-        signature: Signature à valider
-    
-    Returns:
-        True si la signature est valide
-    """
-    if not signature or not isinstance(signature, str):
-        return False
-    
-    # Signature Solana = 64 bytes en base58 = ~88 caractères
-    if len(signature) < 80 or len(signature) > 95:
-        return False
-    
-    base58_chars = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-    if not all(c in base58_chars for c in signature):
-        return False
-    
-    try:
-        decoded = base58.b58decode(signature)
-        return len(decoded) == 64
-    except Exception:
-        return False
-
-
 def is_native_sol_mint(mint_address: str) -> bool:
     """
     Vérifie si une adresse de mint correspond au SOL natif
@@ -1021,7 +963,7 @@ __all__ = [
     
     # Solana
     'parse_solana_amount', 'lamports_to_sol', 'sol_to_lamports',
-    'validate_wallet_address', 'validate_signature', 'is_native_sol_mint',
+    'is_native_sol_mint',
     'get_token_program_id',
     
     # Identifiants

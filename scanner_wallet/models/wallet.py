@@ -337,24 +337,6 @@ class ScanHistory:
 
 
 # Fonctions utilitaires pour les wallets
-
-def validate_wallet_address(address: str) -> bool:
-    """Valide une adresse de wallet Solana"""
-    if not address or len(address) != 44:
-        return False
-    
-    # Validation Base58 basique
-    try:
-        import base58
-        decoded = base58.b58decode(address)
-        return len(decoded) == 32
-    except:
-        # Fallback sans base58
-        import re
-        base58_pattern = r'^[1-9A-HJ-NP-Za-km-z]{44}$'
-        return bool(re.match(base58_pattern, address))
-
-
 def format_wallet_address(address: str, length: int = 8) -> str:
     """Formate une adresse de wallet pour l'affichage"""
     if not address or len(address) < (2 * length + 3):

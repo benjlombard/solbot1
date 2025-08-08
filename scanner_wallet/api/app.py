@@ -288,6 +288,44 @@ def create_app():
             'message': '🎉 API Solana Wallet Monitor opérationnelle!'
         })
 
+
+    @app.route('/debug/routes-list')
+    def debug_routes_list():
+        """Debug: Liste toutes les routes enregistrées"""
+        try:
+            routes_info = []
+            for rule in app.url_map.iter_rules():
+                routes_info.append({
+                    'endpoint': rule.endpoint,
+                    'rule': str(rule.rule),
+                    'methods': list(rule.methods)
+                })
+            
+            # Grouper par règle pour détecter les duplicatas
+            rules_count = {}
+            for route in routes_info:
+                rule = route['rule']
+                if rule in rules_count:
+                    rules_count[rule].append(route)
+                else:
+                    rules_count[rule] = [route]
+            
+            duplicates = {rule: routes for rule, routes in rules_count.items() if len(routes) > 1}
+            
+            return jsonify({
+                'total_routes': len(routes_info),
+                'all_routes': sorted(routes_info, key=lambda x: x['rule']),
+                'duplicates': duplicates,
+                'health_routes': [r for r in routes_info if 'health' in r['rule']],
+                'dashboard_routes': [r for r in routes_info if 'dashboard' in r['rule']]
+            })
+            
+        except Exception as e:
+            return jsonify({
+                'error': str(e),
+                'message': 'Failed to list routes'
+            }), 500
+
     @app.route('/health')
     def health_check():
         """Health check global de l'application"""

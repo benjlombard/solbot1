@@ -47,7 +47,6 @@ DEFAULT_RPC_ENDPOINTS = [
     "https://api.mainnet-beta.solana.com",
     "https://rpc.ankr.com/solana", 
     "https://solana.public-rpc.com",
-    "https://api.mainnet-beta.solana.com",
     "https://solana-api.projectserum.com"
 ]
 
@@ -56,13 +55,10 @@ DEFAULT_RPC_TIMEOUT = 15  # secondes
 DEFAULT_CONNECTION_TIMEOUT = 10  # secondes
 BATCH_RPC_TIMEOUT = 25  # secondes pour les requêtes batch
 CRITICAL_RPC_TIMEOUT = 30  # timeout pour les requêtes critiques
-RPC_TIMEOUT_BATCH = 25 # secondes pour les requêtes batch (alias pour compatibilité)
-RPC_TIMEOUT_DEFAULT = 15 #(alias pour compatibilité)
 
 # Rate limiting
 DEFAULT_REQUESTS_PER_SECOND = 5
 QUICKNODE_FREE_RPS_LIMIT = 100  # Limite théorique QuickNode free
-QUICKNODE_FREE_TIER_RPS = 100   # AJOUTER CETTE LIGNE (alias pour compatibilité)
 BURST_REQUESTS_LIMIT = 20  # Nombre max de requêtes en burst
 COOLDOWN_AFTER_RATE_LIMIT = 60  # Attente après rate limit (secondes)
 
@@ -552,21 +548,6 @@ def get_scan_priority_name(priority_level: int) -> str:
             return name.lower().replace('_', ' ')
     return f"custom_{priority_level}"
 
-
-def validate_solana_address(address: str) -> bool:
-    """Valide le format d'une adresse Solana"""
-    if not address:
-        return False
-    return bool(VALIDATION_PATTERNS['solana_address'].match(address))
-
-
-def validate_solana_signature(signature: str) -> bool:
-    """Valide le format d'une signature Solana"""
-    if not signature:
-        return False
-    return bool(VALIDATION_PATTERNS['solana_signature'].match(signature))
-
-
 def get_adaptive_interval(activity_level: str) -> int:
     """Retourne l'intervalle adaptatif selon le niveau d'activité"""
     return ADAPTIVE_INTERVALS.get(activity_level, ADAPTIVE_INTERVALS['no_activity'])
@@ -620,7 +601,7 @@ __all__ = [
     
     # RPC et réseau
     'DEFAULT_RPC_ENDPOINTS', 'DEFAULT_RPC_TIMEOUT', 'MAX_RPC_RETRIES',
-    'QUICKNODE_FREE_RPS_LIMIT','RPC_TIMEOUT_BATCH','QUICKNODE_FREE_TIER_RPS', 'RPC_TIMEOUT_DEFAULT',
+    'QUICKNODE_FREE_RPS_LIMIT',
     
     # Batching
     'OPTIMAL_BATCH_SIZES', 'CONSERVATIVE_BATCH_SIZES', 'PERFORMANCE_THRESHOLDS',
@@ -638,6 +619,6 @@ __all__ = [
     'API_LIMITS', 'CUSTOM_HTTP_STATUS',
     
     # Helpers
-    'format_wallet_address', 'format_token_mint', 'validate_solana_address',
+    'format_wallet_address', 'format_token_mint',
     'is_large_token_amount', 'get_performance_status', 'get_icon_for_log_type'
 ]

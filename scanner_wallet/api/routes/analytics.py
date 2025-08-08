@@ -102,9 +102,10 @@ except ImportError as e:
             }
 
 from utils.helpers import (
-    get_current_timestamp, validate_wallet_address, 
+    get_current_timestamp, 
     safe_get, calculate_time_since
 )
+from utils.validators import quick_validate_address as validate_wallet_address
 from utils.formatters import (
     format_api_response, format_wallet_address,
     format_timestamp, format_sol_amount

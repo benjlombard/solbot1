@@ -23,23 +23,24 @@ try:
     from models.wallet import WalletStats
     
     from utils.helpers import get_current_timestamp, safe_divide
-    from utils.validators import validate_wallet_address
+    from utils.validators import quick_validate_address as validate_wallet_address
+
     
     # RPC imports
-    from rpc.client import get_rpc_client
+    from rpc.client import get_default_rpc_client as get_rpc_client
     from rpc.batch_manager import create_batch_manager
     
 except ImportError as e:
     # Fallback implementations for development
     import logging
+    logging.warning(f"A core module import failed in scanner.py: {e}. Using fallback implementations.")
+
     def get_logger(name=None):
         return logging.getLogger(name or 'wallet_scanner')
     
     def get_database_manager(): return None
     def get_config(): return None
     def get_rpc_client(): return None
-    
-    def validate_wallet_address(addr): return len(addr) == 44
 
 # Logger
 logger = get_logger(__name__)
@@ -91,6 +92,8 @@ class WalletScanner:
     def __init__(self):
         self.config = get_config()
         self.db_manager = get_database_manager()
+        logger.debug(f"RPC endpoint from config: {self.config.rpc.quicknode_endpoint}")
+
         self.rpc_client = get_rpc_client()
         
         # Thread-safe operations

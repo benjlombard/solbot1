@@ -24,8 +24,9 @@ from rpc.batch_manager import BatchManager
 from wallet.priority_manager import WalletPriorityManager
 from utils.helpers import (
     get_current_timestamp, calculate_time_since, safe_divide,
-    validate_wallet_address, generate_short_hash
+    generate_short_hash
 )
+from utils.validators import quick_validate_address as validate_wallet_address
 from utils.formatters import (
     format_wallet_address, format_duration, format_timestamp,
     format_api_response, format_memory_usage

@@ -101,7 +101,7 @@ class BalanceTracker:
         """Add a wallet to tracking"""
         try:
             # Validate wallet address
-            if not self.validator.validate_address(wallet_address):
+            if not self.validator.solana.validate_address(wallet_address).is_valid:
                 logger.warning(f"❌ Invalid wallet address: {wallet_address}")
                 return False
             

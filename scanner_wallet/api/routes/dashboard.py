@@ -126,6 +126,310 @@ def config_debug():
     })
 
 
+
+@dashboard_bp.route('/debug/wallet-overview')
+def debug_wallet_overview():
+    """Debug détaillé pour la route wallet-overview"""
+    try:
+        debug_info = {
+            'timestamp': get_current_timestamp(),
+            'request_info': {
+                'method': request.method,
+                'url': request.url,
+                'endpoint': request.endpoint
+            },
+            'database_checks': {},
+            'wallet_data': {},
+            'errors': [],
+            'suggestions': []
+        }
+        
+        # Test de connexion à la base de données
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                debug_info['database_checks']['connection'] = 'OK'
+                
+                # 1. Vérifier la table wallet_priorities
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM wallet_priorities")
+                    total_wallets = cursor.fetchone()[0]
+                    debug_info['database_checks']['wallet_priorities_count'] = total_wallets
+                    
+                    if total_wallets == 0:
+                        debug_info['errors'].append("Table wallet_priorities est vide")
+                        debug_info['suggestions'].append("Vérifiez que vos wallets ont été ajoutés dans wallet_priorities")
+                    
+                except Exception as e:
+                    debug_info['database_checks']['wallet_priorities_error'] = str(e)
+                    debug_info['errors'].append(f"Erreur accès wallet_priorities: {e}")
+                
+                # 2. Vérifier la structure de la table
+                try:
+                    cursor.execute("PRAGMA table_info(wallet_priorities)")
+                    columns = cursor.fetchall()
+                    debug_info['database_checks']['wallet_priorities_columns'] = [col[1] for col in columns]
+                    
+                    required_columns = ['wallet_address', 'priority_score', 'last_scan_time', 'total_scans', 'activity_score', 'consecutive_empty_scans']
+                    missing_columns = [col for col in required_columns if col not in [c[1] for c in columns]]
+                    
+                    if missing_columns:
+                        debug_info['errors'].append(f"Colonnes manquantes: {missing_columns}")
+                        debug_info['suggestions'].append("Vérifiez le schéma de votre table wallet_priorities")
+                    
+                except Exception as e:
+                    debug_info['database_checks']['schema_error'] = str(e)
+                
+                # 3. Échantillon de données wallet_priorities
+                try:
+                    cursor.execute("""
+                        SELECT 
+                            wallet_address, 
+                            priority_score, 
+                            last_scan_time, 
+                            total_scans, 
+                            activity_score, 
+                            consecutive_empty_scans
+                        FROM wallet_priorities 
+                        ORDER BY priority_score DESC 
+                        LIMIT 5
+                    """)
+                    sample_wallets = cursor.fetchall()
+                    
+                    debug_info['wallet_data']['sample_wallets'] = []
+                    for row in sample_wallets:
+                        debug_info['wallet_data']['sample_wallets'].append({
+                            'wallet_address': row[0],
+                            'wallet_short': f"{row[0][:8]}...{row[0][-8:]}" if row[0] else 'None',
+                            'priority_score': row[1],
+                            'last_scan_time': row[2],
+                            'total_scans': row[3],
+                            'activity_score': row[4],
+                            'consecutive_empty_scans': row[5],
+                            'minutes_since_scan': round((get_current_timestamp() - (row[2] or 0)) / 60, 1) if row[2] else 999
+                        })
+                        
+                except Exception as e:
+                    debug_info['wallet_data']['sample_error'] = str(e)
+                
+                # 4. Vérifier la table token_accounts
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM token_accounts")
+                    token_accounts_count = cursor.fetchone()[0]
+                    debug_info['database_checks']['token_accounts_count'] = token_accounts_count
+                    
+                    # Compter par wallet
+                    cursor.execute("""
+                        SELECT 
+                            wallet_address, 
+                            COUNT(*) as account_count,
+                            COUNT(CASE WHEN is_active = 1 THEN 1 END) as active_count
+                        FROM token_accounts 
+                        GROUP BY wallet_address 
+                        ORDER BY account_count DESC 
+                        LIMIT 3
+                    """)
+                    token_stats = cursor.fetchall()
+                    debug_info['wallet_data']['token_accounts_by_wallet'] = [
+                        {
+                            'wallet': f"{row[0][:8]}...{row[0][-8:]}" if row[0] else 'None',
+                            'total_accounts': row[1],
+                            'active_accounts': row[2]
+                        } for row in token_stats
+                    ]
+                    
+                except Exception as e:
+                    debug_info['database_checks']['token_accounts_error'] = str(e)
+                
+                # 5. Vérifier la table transactions
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM transactions")
+                    transactions_count = cursor.fetchone()[0]
+                    debug_info['database_checks']['transactions_count'] = transactions_count
+                    
+                    # Transactions récentes par wallet
+                    current_time = get_current_timestamp()
+                    cursor.execute("""
+                        SELECT 
+                            wallet_address, 
+                            COUNT(*) as tx_24h
+                        FROM transactions 
+                        WHERE block_time >= ?
+                        GROUP BY wallet_address 
+                        ORDER BY tx_24h DESC 
+                        LIMIT 3
+                    """, (current_time - 86400,))
+                    tx_stats = cursor.fetchall()
+                    debug_info['wallet_data']['transactions_24h_by_wallet'] = [
+                        {
+                            'wallet': f"{row[0][:8]}...{row[0][-8:]}" if row[0] else 'None',
+                            'transactions_24h': row[1]
+                        } for row in tx_stats
+                    ]
+                    
+                except Exception as e:
+                    debug_info['database_checks']['transactions_error'] = str(e)
+                
+                # 6. Test de la requête complète wallet-overview
+                try:
+                    current_time = get_current_timestamp()
+                    cursor.execute("""
+                        SELECT 
+                            wp.wallet_address,
+                            wp.priority_score,
+                            wp.last_scan_time,
+                            wp.total_scans,
+                            wp.activity_score,
+                            wp.consecutive_empty_scans,
+                            (? - wp.last_scan_time) as seconds_since_scan,
+                            
+                            -- Stats des comptes de tokens
+                            (SELECT COUNT(*) FROM token_accounts ta 
+                             WHERE ta.wallet_address = wp.wallet_address AND ta.is_active = 1) as total_accounts,
+                            (SELECT COUNT(*) FROM token_accounts ta 
+                             WHERE ta.wallet_address = wp.wallet_address 
+                             AND ta.scan_priority >= 3) as priority_accounts,
+                            
+                            -- Stats des transactions (24h)
+                            (SELECT COUNT(*) FROM transactions t 
+                             WHERE t.wallet_address = wp.wallet_address 
+                             AND t.block_time >= ?) as transactions_24h
+                             
+                        FROM wallet_priorities wp
+                        ORDER BY wp.priority_score DESC
+                        LIMIT 3
+                    """, (current_time, current_time - 86400))
+                    
+                    test_results = cursor.fetchall()
+                    debug_info['wallet_data']['full_query_test'] = []
+                    
+                    for row in test_results:
+                        wallet_addr = row[0]
+                        priority_score = row[1]
+                        last_scan = row[2]
+                        since_scan = row[6]
+                        total_accounts = row[7] or 0
+                        priority_accounts = row[8] or 0
+                        tx_24h = row[9] or 0
+                        
+                        # Calculer le statut
+                        if since_scan <= 60:
+                            scan_status = "recent"
+                        elif since_scan <= 300:
+                            scan_status = "normal"
+                        else:
+                            scan_status = "overdue"
+                        
+                        # Calculer la priorité
+                        if priority_score >= 4.0:
+                            priority_category = "high"
+                        elif priority_score >= 2.0:
+                            priority_category = "medium"
+                        else:
+                            priority_category = "low"
+                        
+                        debug_info['wallet_data']['full_query_test'].append({
+                            'wallet_address': wallet_addr,
+                            'wallet_short': f"{wallet_addr[:8]}...{wallet_addr[-8:]}",
+                            'priority_score': round(priority_score, 2),
+                            'priority_category': priority_category,
+                            'scan_status': scan_status,
+                            'seconds_since_scan': since_scan,
+                            'total_token_accounts': total_accounts,
+                            'priority_accounts': priority_accounts,
+                            'transactions_24h': tx_24h
+                        })
+                    
+                    debug_info['wallet_data']['full_query_success'] = True
+                    debug_info['wallet_data']['processed_wallets'] = len(test_results)
+                    
+                except Exception as e:
+                    debug_info['wallet_data']['full_query_error'] = str(e)
+                    debug_info['errors'].append(f"Erreur requête complète: {e}")
+        
+        except Exception as e:
+            debug_info['database_checks']['connection_error'] = str(e)
+            debug_info['errors'].append(f"Erreur connexion base de données: {e}")
+        
+        # 7. Test de la configuration
+        try:
+            config = get_config()
+            debug_info['config_check'] = {
+                'wallet_addresses_configured': len(config.wallet.addresses),
+                'sample_configured_addresses': [
+                    f"{addr[:8]}...{addr[-8:]}" for addr in config.wallet.addresses[:3]
+                ] if hasattr(config.wallet, 'addresses') else []
+            }
+            
+            # Vérifier si les adresses configurées sont dans wallet_priorities
+            if hasattr(config.wallet, 'addresses'):
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    configured_in_db = []
+                    missing_from_db = []
+                    
+                    for addr in config.wallet.addresses[:5]:  # Test sur les 5 premiers
+                        cursor.execute("SELECT COUNT(*) FROM wallet_priorities WHERE wallet_address = ?", (addr,))
+                        count = cursor.fetchone()[0]
+                        
+                        if count > 0:
+                            configured_in_db.append(f"{addr[:8]}...{addr[-8:]}")
+                        else:
+                            missing_from_db.append(f"{addr[:8]}...{addr[-8:]}")
+                    
+                    debug_info['config_check']['configured_in_db'] = configured_in_db
+                    debug_info['config_check']['missing_from_db'] = missing_from_db
+                    
+                    if missing_from_db:
+                        debug_info['errors'].append(f"Wallets configurés mais absents de wallet_priorities: {len(missing_from_db)}")
+                        debug_info['suggestions'].append("Lancez le système de monitoring pour initialiser wallet_priorities")
+                        
+        except Exception as e:
+            debug_info['config_check'] = {'error': str(e)}
+        
+        # 8. Suggestions supplémentaires
+        if not debug_info['errors']:
+            debug_info['suggestions'].append("✅ Tout semble fonctionner correctement")
+            debug_info['suggestions'].append("Si le problème persiste, vérifiez la console JavaScript pour les erreurs d'appel API")
+        else:
+            debug_info['suggestions'].append("🔧 Corrigez les erreurs listées ci-dessus")
+            debug_info['suggestions'].append("📊 Vérifiez que le système de monitoring est démarré")
+            debug_info['suggestions'].append("🔄 Essayez de redémarrer l'application après corrections")
+        
+        # 9. Informations de cache
+        try:
+            cache_key = "wallet_overview"
+            cached_data = get_cached_result(cache_key)
+            debug_info['cache_info'] = {
+                'has_cached_data': cached_data is not None,
+                'cache_size': len(str(cached_data)) if cached_data else 0,
+                'cache_keys_count': len(_dashboard_cache)
+            }
+        except Exception as e:
+            debug_info['cache_info'] = {'error': str(e)}
+        
+        # Status final
+        debug_info['overall_status'] = 'OK' if not debug_info['errors'] else 'ERRORS_FOUND'
+        debug_info['total_errors'] = len(debug_info['errors'])
+        debug_info['total_suggestions'] = len(debug_info['suggestions'])
+        
+        return jsonify({
+            'success': True,
+            'message': f"Debug wallet-overview completed - Status: {debug_info['overall_status']}",
+            'data': debug_info
+        })
+        
+    except Exception as e:
+        logger.error(f"Debug wallet-overview failed: {e}")
+        import traceback
+        return jsonify({
+            'success': False,
+            'message': f"Debug failed: {e}",
+            'traceback': traceback.format_exc(),
+            'data': None
+        }), 500
+
 @dashboard_bp.route('/dashboard-data', methods=['GET', 'POST'])
 def debug_dashboard_data():
     """Debug de l'URL problématique"""

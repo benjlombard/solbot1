@@ -23,18 +23,19 @@ try:
     
     from wallet.priority_manager import WalletPriorityManager
     from wallet.scanner import WalletScanner
-    from wallet.balance_tracker import BalanceTracker
+    from wallet.balance_tracker import BalanceTracker, BalanceChange
     
     from models.wallet import WalletPriority, WalletStats
     from models.token import Token, TokenAccount, TokenDiscovery
-    from models.transaction import Transaction, TransactionType
+    from models.transaction import Transaction, TransactionType, TransactionStatus
     
     from utils.helpers import get_current_timestamp, safe_divide
-    from utils.validators import validate_wallet_address
+    from utils.validators import quick_validate_address as validate_wallet_address
     
 except ImportError as e:
     # Fallback implementations for development
     import logging
+    logging.warning(f"A core module import failed in monitor.py: {e}. Using fallback implementations.")
     def get_logger(name=None):
         logger = logging.getLogger(name or 'monitor')
         logger.setLevel(logging.INFO)
@@ -143,6 +144,7 @@ class SolanaWalletMonitor:
                     if address not in self.wallets:
                         self.wallets.add(address)
                         self.balance_tracker.track_wallet(address)
+                        self.priority_manager.add_wallet(address)
                         logger.info(f"✅ Added wallet: {address}")
                 
                 results[address] = True
@@ -255,10 +257,10 @@ class SolanaWalletMonitor:
         while self._running and not self._shutdown_event.is_set():
             try:
                 cycle_start = get_current_timestamp()
-                
+                scan_result = None  # Initialize scan_result to None
                 # Generate cycle ID
                 cycle_id = f"cycle_{cycle_start}"
-                self.logger.log_cycle_start(cycle_id, wallets=list(self.wallets))
+                self.logger.log_cycle_start(cycle_id)
                 
                 # Select next wallet based on priority
                 selected_wallet = self.priority_manager.select_next_wallet()
@@ -492,13 +494,19 @@ class SolanaWalletMonitor:
                 
                 # Update wallet stats
                 for wallet in self.wallets:
+                    # First, get the transaction count for the wallet
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM transactions WHERE wallet_address = ?",
+                        (wallet,)
+                    )
+                    tx_count = cursor.fetchone()[0]
+                    
+                    # Now, insert or replace the stats using the known wallet address
                     cursor.execute("""
                         INSERT OR REPLACE INTO wallet_stats 
                         (wallet_address, total_transactions, updated_at)
-                        SELECT wallet_address, COUNT(*), ? 
-                        FROM transactions 
-                        WHERE wallet_address = ?
-                    """, (get_current_timestamp(), wallet))
+                        VALUES (?, ?, ?)
+                    """, (wallet, tx_count, get_current_timestamp()))
                 
                 conn.commit()
                 

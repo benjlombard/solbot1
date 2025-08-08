@@ -22,7 +22,8 @@ try:
     
     from models.wallet import WalletPriority, WalletStats
     from utils.helpers import get_current_timestamp, clamp, safe_divide
-    from utils.validators import validate_wallet_address
+    from utils.validators import quick_validate_address as validate_wallet_address
+
     
 except ImportError as e:
     # Fallback implementations for development
@@ -33,7 +34,9 @@ except ImportError as e:
     def get_database_manager(): return None
     def get_config(): return None
     
-    def validate_wallet_address(addr): return len(addr) == 44
+    def validate_wallet_address(addr):
+        logging.getLogger('priority_manager').warning("Using fallback address validator for %s", addr)
+        return len(addr) == 44
 
 # Logger
 logger = get_logger(__name__)

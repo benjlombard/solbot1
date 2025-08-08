@@ -791,7 +791,7 @@
         // Test de santé périodique
         async function healthCheck() {
             try {
-                await apiCall('/health');
+                await apiCall('/dashboard/health');
                 updateConnectionStatus(true);
             } catch (error) {
                 updateConnectionStatus(false);

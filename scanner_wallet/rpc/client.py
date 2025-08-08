@@ -28,13 +28,13 @@ try:
     from core.exceptions import (
         RPCError, RPCTimeoutError, RPCRateLimitError, 
         RPCEndpointUnavailableError, RPCResponseError,
-        create_rpc_error, handle_rpc_errors,RPCException
+        create_rpc_error, handle_rpc_errors
     )
     from core.logger import get_logger
     from utils.helpers import exponential_backoff, CircularBuffer, get_current_timestamp,retry_with_backoff
     from utils.constants import (
-        DEFAULT_RPC_ENDPOINTS, QUICKNODE_FREE_TIER_RPS,
-        RPC_TIMEOUT_DEFAULT, RPC_TIMEOUT_BATCH, RPC_TIMEOUT_CRITICAL,
+        DEFAULT_RPC_ENDPOINTS, QUICKNODE_FREE_RPS_LIMIT,
+        RPC_TIMEOUT_DEFAULT, RPC_TIMEOUT_BATCH, CRITICAL_RPC_TIMEOUT,
         MAX_RPC_RETRIES, RPC_RETRY_DELAY_BASE
     )
     # Dépendances RPC
@@ -62,7 +62,7 @@ except ImportError as e:
     class RPCError(Exception):
         pass
 
-     class RPCRateLimitError(RPCError):
+    class RPCRateLimitError(RPCError):
         def __init__(self, endpoint, retry_after):
             self.endpoint = endpoint
             self.retry_after = retry_after
@@ -302,7 +302,7 @@ class RPCClient:
                 'url': self.config.rpc.quicknode_endpoint,
                 'type': 'premium',
                 'priority': 1,
-                'rate_limit': QUICKNODE_FREE_TIER_RPS
+                'rate_limit': QUICKNODE_FREE_RPS_LIMIT
             })
             self.logger.info(f"✅ Endpoint QuickNode configuré")
         
@@ -515,7 +515,7 @@ class RPCClient:
         ]
         
         if method in critical_methods:
-            return getattr(self.config.rpc, 'timeout', RPC_TIMEOUT_CRITICAL)
+            return getattr(self.config.rpc, 'timeout', CRITICAL_RPC_TIMEOUT_)
         elif method in batch_methods:
             return getattr(self.config.rpc, 'timeout', RPC_TIMEOUT_BATCH)
         else:
