@@ -504,7 +504,7 @@ class WalletPriorityManager:
                      scan_count_24h, activity_score, volume_score_1h, new_tokens_score_1h,
                      total_scans, avg_scan_duration, last_activity_detected, 
                      consecutive_empty_scans, priority_history, updated_at, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     priority.wallet_address,
                     priority.priority_score,

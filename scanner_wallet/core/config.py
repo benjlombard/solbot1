@@ -14,45 +14,95 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 
-# Import des utilitaires (avec fallbacks)
-try:
-    from utils.helpers import sanitize_filename
-    from utils.validators import quick_validate_address as validate_wallet_address
-    from utils.constants import (
-        DEFAULT_RPC_ENDPOINTS, SOLANA_TOKEN_PROGRAM_ID, 
-        LAMPORTS_PER_SOL, DEFAULT_TOKEN_DECIMALS
-    )
-    from core.exceptions import ConfigurationError
-except ImportError:
-    # Fallbacks si les modules ne sont pas encore disponibles
-    import logging
-    def validate_wallet_address(addr):
-        logging.getLogger('config').warning("Using fallback address validator for %s", addr)
-        if not isinstance(addr, str):
-            return False
-        # Validation Solana plus stricte
-        if len(addr) < 32 or len(addr) > 44:
-            return False
-        # Vérifier que c'est une base58 valide
+
+def validate_wallet_address(addr: str) -> bool:
+    """
+    Validation d'adresse Solana avec fallback robuste
+    """
+    if not isinstance(addr, str):
+        return False
+    
+    # Validation de base : longueur
+    if len(addr) < 32 or len(addr) > 44:
+        return False
+    
+    # Validation base58 (caractères autorisés)
+    base58_alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    if not all(c in base58_alphabet for c in addr):
+        return False
+    
+    # Tentative de validation avec base58 si disponible
+    try:
+        import base58
         try:
-            import base58
-            base58.b58decode(addr)
-            return True
-        except:
-            # Fallback basique si base58 pas disponible
-            return addr.isalnum() and len(addr) >= 32
+            decoded = base58.b58decode(addr)
+            return len(decoded) == 32  # Les clés publiques Solana font 32 bytes
+        except Exception:
+            return False
+    except ImportError:
+        # Fallback sans base58 : validation basique
+        return len(addr) >= 32 and len(addr) <= 44 and addr.isalnum()
+
+def sanitize_filename(name: str) -> str:
+    """Sanitise un nom de fichier"""
+    if not isinstance(name, str):
+        return "unnamed"
+    return "".join(c for c in name if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
+
+# Constantes par défaut
+DEFAULT_RPC_ENDPOINTS = [
+    "https://api.mainnet-beta.solana.com",
+    "https://rpc.ankr.com/solana",
+    "https://solana.public-rpc.com"
+]
+
+SOLANA_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+LAMPORTS_PER_SOL = 1_000_000_000
+DEFAULT_TOKEN_DECIMALS = 9
+
+class ConfigurationError(Exception):
+    """Exception levée lors d'erreurs de configuration"""
+    pass
+
+# Import des utilitaires (avec fallbacks)
+# try:
+#     from utils.helpers import sanitize_filename
+#     from utils.validators import quick_validate_address as validate_wallet_address
+#     from utils.constants import (
+#         DEFAULT_RPC_ENDPOINTS, SOLANA_TOKEN_PROGRAM_ID, 
+#         LAMPORTS_PER_SOL, DEFAULT_TOKEN_DECIMALS
+#     )
+#     from core.exceptions import ConfigurationError
+# except ImportError:
+#     # Fallbacks si les modules ne sont pas encore disponibles
+#     import logging
+#     def validate_wallet_address(addr):
+#         logging.getLogger('config').warning("Using fallback address validator for %s", addr)
+#         if not isinstance(addr, str):
+#             return False
+#         # Validation Solana plus stricte
+#         if len(addr) < 32 or len(addr) > 44:
+#             return False
+#         # Vérifier que c'est une base58 valide
+#         try:
+#             import base58
+#             base58.b58decode(addr)
+#             return True
+#         except:
+#             # Fallback basique si base58 pas disponible
+#             return addr.isalnum() and len(addr) >= 32
     
-    def sanitize_filename(name):
-        return "".join(c for c in name if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
+#     def sanitize_filename(name):
+#         return "".join(c for c in name if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
     
-    DEFAULT_RPC_ENDPOINTS = [
-        "https://api.mainnet-beta.solana.com",
-        "https://rpc.ankr.com/solana",
-        "https://solana.public-rpc.com"
-    ]
+    # DEFAULT_RPC_ENDPOINTS = [
+    #     "https://api.mainnet-beta.solana.com",
+    #     "https://rpc.ankr.com/solana",
+    #     "https://solana.public-rpc.com"
+    # ]
     
-    class ConfigurationError(Exception):
-        pass
+    # class ConfigurationError(Exception):
+    #     pass
 
 
 # =============================================================================

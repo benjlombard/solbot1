@@ -39,7 +39,7 @@ try:
     )
     # Dépendances RPC
     from rpc.rate_limiter import RateLimiter
-    from rpc.endpoints import EndpointManager
+    from rpc.endpoints import RPCEndpointManager
 
 except ImportError as e:
     logging.warning(f"Import error in RPC client: {e}")

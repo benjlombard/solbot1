@@ -36,11 +36,27 @@ except ImportError as e:
     logging.warning(f"A core module import failed in scanner.py: {e}. Using fallback implementations.")
 
     def get_logger(name=None):
-        return logging.getLogger(name or 'wallet_scanner')
+        logger = logging.getLogger(name or 'scanner')
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+        return logger
     
     def get_database_manager(): return None
-    def get_config(): return None
+    def get_config(): 
+        class MockConfig:
+            class rpc:
+                quicknode_endpoint = None
+        return MockConfig()
     def get_rpc_client(): return None
+    def get_current_timestamp():
+        import time
+        return int(time.time())
+    def safe_divide(a, b): return a/b if b != 0 else 0
+    def validate_wallet_address(addr): return isinstance(addr, str) and len(addr) >= 32
 
 # Logger
 logger = get_logger(__name__)
@@ -141,6 +157,11 @@ class WalletScanner:
             if not validate_wallet_address(wallet_address):
                 raise ValueError(f"Invalid wallet address: {wallet_address}")
             
+            if self.rpc_client:
+                logger.info(f"🌐 [RPC] RPC client available, endpoint: {getattr(self.config.rpc, 'quicknode_endpoint', 'Default')}")
+            else:
+                logger.warning(f"⚠️ [RPC] No RPC client available - using fallback mode")
+
             scan_start = get_current_timestamp()
             
             with self._lock:
@@ -262,9 +283,11 @@ class WalletScanner:
     
     def _get_token_accounts_batch(self, wallet_address: str) -> List[TokenAccountInfo]:
         """Get token accounts using batch manager"""
+        logger.info(f"🔗 [RPC] Making getTokenAccountsByOwner call for {wallet_address}")
         try:
             # Get token accounts via RPC
             if not self.rpc_client:
+                logger.error("❌ [RPC] No RPC client available!")
                 return []
             
             # Get token accounts by owner
