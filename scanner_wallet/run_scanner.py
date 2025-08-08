@@ -62,6 +62,17 @@ def main():
         logger.error("❌ Failed to start monitoring")
         sys.exit(1)
 
+     # In run_scanner.py, after monitor.start_monitoring()
+    print("=== DEBUG: Checking priority manager ===")
+    print(f"Wallets: {list(monitor.wallets)}")
+    print(f"Priority wallets: {list(monitor.priority_manager._wallet_priorities.keys())}")
+    print("=== Starting debug cycle ===")
+
+    # Force a quick debug scan
+    test_wallet = list(monitor.wallets)[0]
+    print(f"Testing wallet: {test_wallet}")
+    result = monitor.scanner.scan_wallet(test_wallet, "quick")
+    print(f"Test scan result: {result}")
     logger.info(f"✅ Solana Wallet Monitor is now running for {len(wallet_addresses)} wallet(s).")
     logger.info("Press Ctrl+C to stop the service.")
 

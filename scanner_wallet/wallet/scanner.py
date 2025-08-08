@@ -659,17 +659,21 @@ class WalletScanner:
         try:
             with self.db_manager.get_connection() as conn:
                 cursor = conn.cursor()
-                
+                logger.debug(f"🐛 DEBUG: Storing balance for {balance_info}")
+                ata_pubkey = balance_info.get('ata_pubkey', f"{balance_info['wallet_address']}:{balance_info['token_mint']}")
+
                 cursor.execute("""
                     INSERT OR REPLACE INTO token_accounts 
-                    (wallet_address, token_mint, balance, decimals, last_updated)
-                    VALUES (?, ?, ?, ?, ?)
+                    (wallet_address, token_mint, ata_pubkey, balance, decimals, last_updated, first_seen)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     balance_info['wallet_address'],
                     balance_info['token_mint'],
+                    ata_pubkey,  # ← This was missing!
                     str(balance_info['balance']),
                     balance_info['decimals'],
-                    balance_info['updated_at']
+                    balance_info['updated_at'],
+                    balance_info.get('first_seen', balance_info['updated_at'])
                 ))
                 
                 conn.commit()

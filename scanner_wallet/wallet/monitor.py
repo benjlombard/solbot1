@@ -306,7 +306,7 @@ class SolanaWalletMonitor:
                 cycle_id = f"cycle_{cycle_start}"
                 
                 logger.info(f"🔄 Starting cycle {cycle_id}")
-                
+                debug_scanner_status(self)
                 # Select next wallet based on priority
                 try:
                     selected_wallet = self.priority_manager.select_next_wallet()
@@ -692,6 +692,18 @@ def start_monitoring(wallets: List[str] = None) -> bool:
 def stop_monitoring() -> bool:
     """Stop default monitoring"""
     return get_default_monitor().stop_monitoring()
+
+
+def debug_scanner_status(self):
+    """Debug scanner state"""
+    scanner_status = self.scanner.get_scan_status()
+    logger.info(f"Scanner status: {scanner_status}")
+    
+    priority_status = self.priority_manager.get_priority_statistics()
+    logger.info(f"Priority status: {priority_status}")
+    
+    logger.info(f"Active scans: {len(self.scanner._active_scans)}")
+    logger.info(f"Cache size: {len(self.scanner._scan_cache)}")
 
 def get_status() -> Dict[str, any]:
     """Get status of default monitor"""
