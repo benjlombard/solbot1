@@ -1,0 +1,2309 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token {{ token_mint|truncate(8, True, '...') }} - Solana Wallet Monitor</title>
+    
+    <!-- Favicon et Meta -->
+    <meta name="description" content="Analyse détaillée du token Solana {{ token_symbol }} - Métriques, transactions et insights avancés">
+    <meta name="author" content="Solana Wallet Monitor Team">
+    
+    <!-- Styles CSS -->
+    <style>
+        :root {
+            /* Couleurs principales */
+            --primary: #14f195;
+            --primary-dark: #0fc27c;
+            --secondary: #9945ff;
+            --secondary-dark: #7f39d9;
+            
+            /* Arrière-plans */
+            --background: #0a0f1c;
+            --surface: #151c2e;
+            --surface-hover: #1f2937;
+            --surface-card: #1a1f2e;
+            
+            /* Texte */
+            --text-primary: #ffffff;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            
+            /* États */
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --info: #3b82f6;
+            
+            /* Bordures */
+            --border: #374151;
+            --border-light: #4b5563;
+            
+            /* Ombres */
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+            
+            /* Transitions */
+            --transition: all 0.3s ease;
+            --transition-fast: all 0.15s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, var(--background) 0%, #0f1419 50%, #0a0e1a 100%);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Layout principal */
+        .app-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            height: 100vh;
+            z-index: 1000;
+            transition: var(--transition);
+        }
+
+        .sidebar.collapsed {
+            width: 70px;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: bold;
+            color: white;
+            flex-shrink: 0;
+        }
+
+        .logo-text {
+            font-size: 18px;
+            font-weight: 700;
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            transition: var(--transition);
+        }
+
+        .sidebar.collapsed .logo-text {
+            display: none;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+
+        .nav-section {
+            margin-bottom: 30px;
+        }
+
+        .nav-section-title {
+            padding: 0 20px 8px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar.collapsed .nav-section-title {
+            display: none;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: var(--transition-fast);
+            border-left: 3px solid transparent;
+            gap: 12px;
+        }
+
+        .nav-item:hover {
+            background: var(--surface-hover);
+            color: var(--text-primary);
+            border-left-color: var(--primary);
+        }
+
+        .nav-item.active {
+            background: rgba(20, 241, 149, 0.1);
+            color: var(--primary);
+            border-left-color: var(--primary);
+        }
+
+        .nav-icon {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+            font-size: 18px;
+        }
+
+        .nav-text {
+            transition: var(--transition);
+        }
+
+        .sidebar.collapsed .nav-text {
+            display: none;
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--primary);
+            color: var(--background);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .sidebar.collapsed .nav-badge {
+            display: none;
+        }
+
+        /* Contenu principal */
+        .main-content {
+            flex: 1;
+            margin-left: 260px;
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar.collapsed ~ .main-content {
+            margin-left: 70px;
+        }
+
+        /* Header principal */
+        .main-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 70px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .sidebar-toggle {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 8px;
+            transition: var(--transition-fast);
+        }
+
+        .sidebar-toggle:hover {
+            background: var(--surface-hover);
+            color: var(--text-primary);
+        }
+
+        .page-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .breadcrumb-item {
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: var(--transition-fast);
+        }
+
+        .breadcrumb-item:hover {
+            color: var(--primary);
+        }
+
+        .breadcrumb-separator {
+            color: var(--text-muted);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        /* Indicateur de statut */
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(20, 241, 149, 0.1);
+            border: 1px solid var(--primary);
+            border-radius: 20px;
+            font-size: 14px;
+            color: var(--primary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* Zone de contenu */
+        .content-area {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        /* Styles spécifiques au token detail */
+        .token-detail-container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* Header du token */
+        .token-header {
+            background: linear-gradient(135deg, var(--surface-card) 0%, var(--surface-hover) 100%);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 40px;
+            margin-bottom: 32px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .token-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+        }
+
+        .token-main-info {
+            display: flex;
+            align-items: flex-start;
+            gap: 32px;
+            margin-bottom: 32px;
+        }
+
+        .token-logo-container {
+            position: relative;
+        }
+
+        .token-logo-large {
+            width: 120px;
+            height: 120px;
+            border-radius: 24px;
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 48px;
+            font-weight: 700;
+            flex-shrink: 0;
+            box-shadow: var(--shadow-xl);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .token-logo-large::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, transparent 50%);
+        }
+
+        .verified-badge {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 32px;
+            height: 32px;
+            background: var(--success);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 16px;
+            border: 3px solid var(--surface-card);
+        }
+
+        .token-identity {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .token-symbol-display {
+            font-size: 36px;
+            font-weight: 900;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            line-height: 1;
+        }
+
+        .token-name-display {
+            font-size: 20px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            font-weight: 500;
+        }
+
+        .token-mint-display {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            color: var(--text-muted);
+            background: var(--surface);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            word-break: break-all;
+            margin-bottom: 16px;
+        }
+
+        .token-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .token-tag {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .tag-verified {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+
+        .tag-popular {
+            background: rgba(255, 152, 0, 0.15);
+            color: #ffa726;
+            border: 1px solid #ffa726;
+        }
+
+        .tag-trending {
+            background: rgba(255, 82, 82, 0.15);
+            color: #ff5252;
+            border: 1px solid #ff5252;
+        }
+
+        .tag-defi {
+            background: rgba(153, 69, 255, 0.15);
+            color: var(--secondary);
+            border: 1px solid var(--secondary);
+        }
+
+        /* Price et market data */
+        .token-price-section {
+            flex-shrink: 0;
+            text-align: right;
+        }
+
+        .token-price {
+            font-size: 48px;
+            font-weight: 900;
+            color: var(--primary);
+            margin-bottom: 8px;
+            line-height: 1;
+        }
+
+        .price-change {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-bottom: 16px;
+        }
+
+        .price-change-value {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .price-change.positive {
+            color: var(--success);
+        }
+
+        .price-change.negative {
+            color: var(--error);
+        }
+
+        .price-change.neutral {
+            color: var(--text-muted);
+        }
+
+        .market-cap {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        /* Actions du token */
+        .token-actions {
+            position: absolute;
+            top: 32px;
+            right: 32px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .action-btn {
+            padding: 10px 18px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .action-btn-primary {
+            background: linear-gradient(45deg, var(--primary), var(--primary-dark));
+            color: white;
+        }
+
+        .action-btn-secondary {
+            background: var(--surface-hover);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        /* Métriques rapides */
+        .token-quick-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .quick-metric {
+            text-align: center;
+            padding: 20px;
+            background: var(--surface);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            transition: var(--transition);
+        }
+
+        .quick-metric:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
+        }
+
+        .quick-metric-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+
+        .quick-metric-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .quick-metric-sublabel {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* Grille principale */
+        .token-content-grid {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 32px;
+            margin-bottom: 32px;
+        }
+
+        /* Section des métriques */
+        .metrics-section {
+            display: grid;
+            gap: 24px;
+        }
+
+        .metrics-card {
+            background: var(--surface-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+            transition: var(--transition);
+        }
+
+        .metrics-card:hover {
+            border-color: var(--border-light);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .metrics-header {
+            padding: 24px 28px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: linear-gradient(135deg, var(--surface) 0%, var(--surface-hover) 100%);
+        }
+
+        .metrics-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .metrics-body {
+            padding: 28px;
+        }
+
+        /* Performance metrics grid */
+        .performance-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 20px;
+        }
+
+        .performance-metric {
+            text-align: center;
+            padding: 24px;
+            background: var(--surface);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            transition: var(--transition);
+        }
+
+        .performance-metric:hover {
+            border-color: var(--primary);
+            box-shadow: var(--shadow);
+            transform: translateY(-2px);
+        }
+
+        .metric-icon {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 16px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            color: white;
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .metric-change {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+
+        .change-positive {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        .change-negative {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
+        }
+
+        .change-neutral {
+            background: rgba(107, 114, 128, 0.1);
+            color: var(--text-muted);
+        }
+
+        /* Sidebar d'informations */
+        .info-sidebar {
+            display: grid;
+            gap: 24px;
+        }
+
+        .info-card {
+            background: var(--surface-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        /* Top holders */
+        .holders-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .holder-item {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            transition: var(--transition);
+        }
+
+        .holder-item:hover {
+            background: var(--surface-hover);
+        }
+
+        .holder-item:last-child {
+            border-bottom: none;
+        }
+
+        .holder-rank {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: var(--surface);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .holder-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .holder-address {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .holder-percentage {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .holder-amount {
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .amount-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 2px;
+        }
+
+        .amount-usd {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* Section des transactions */
+        .transactions-section {
+            grid-column: 1 / -1;
+            margin-top: 32px;
+        }
+
+        .transactions-filters {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-select {
+            padding: 8px 12px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .filter-input {
+            padding: 8px 12px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            width: 200px;
+        }
+
+        .filter-input:focus,
+        .filter-select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        /* Liste des transactions */
+        .transactions-list {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .transaction-item {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            transition: var(--transition);
+        }
+
+        .transaction-item:hover {
+            background: var(--surface-hover);
+        }
+
+        .transaction-item:last-child {
+            border-bottom: none;
+        }
+
+        .transaction-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .tx-buy {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+        }
+
+        .tx-sell {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--error);
+        }
+
+        .tx-transfer {
+            background: rgba(153, 69, 255, 0.15);
+            color: var(--secondary);
+        }
+
+        .tx-swap {
+            background: rgba(20, 241, 149, 0.15);
+            color: var(--primary);
+        }
+
+        .transaction-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .transaction-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+
+        .transaction-details {
+            font-size: 13px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .transaction-signature {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .transaction-amount {
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .amount-primary {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .amount-secondary {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .transaction-time {
+            text-align: right;
+            flex-shrink: 0;
+            color: var(--text-muted);
+            font-size: 12px;
+            min-width: 80px;
+        }
+
+        /* Charts et graphiques */
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin: 20px 0;
+        }
+
+        .chart-placeholder {
+            width: 100%;
+            height: 100%;
+            background: var(--surface);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 14px;
+            border: 1px solid var(--border);
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .token-content-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .info-sidebar {
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            }
+        }
+
+        @media (max-width: 768px) {
+            .token-main-info {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .token-price-section {
+                text-align: center;
+            }
+            
+            .token-actions {
+                position: static;
+                justify-content: center;
+                margin-top: 20px;
+            }
+            
+            .token-quick-metrics {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .transactions-filters {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .filter-input {
+                width: 100%;
+            }
+        }
+
+        /* Utilitaires */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top: 2px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error);
+            color: var(--error);
+            padding: 16px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .success-message {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--success);
+            color: var(--success);
+            padding: 16px;
+            border-radius: 12px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        /* Animations */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .slide-in-up {
+            animation: slideInUp 0.6s ease-out;
+        }
+
+        @keyframes slideInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition-fast);
+            text-decoration: none;
+            justify-content: center;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, var(--primary), var(--primary-dark));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow);
+        }
+
+        .btn-secondary {
+            background: var(--surface-hover);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <a href="/" class="logo">
+                    <div class="logo-icon">🚀</div>
+                    <div class="logo-text">Monitor</div>
+                </a>
+            </div>
+            
+            <div class="sidebar-nav">
+                <!-- Navigation principale -->
+                <div class="nav-section">
+                    <div class="nav-section-title">Principal</div>
+                    <a href="/" class="nav-item" id="nav-dashboard">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-text">Dashboard</span>
+                    </a>
+                    <a href="/wallets" class="nav-item" id="nav-wallets">
+                        <span class="nav-icon">👛</span>
+                        <span class="nav-text">Wallets</span>
+                        <span class="nav-badge" id="wallets-count">0</span>
+                    </a>
+                    <a href="/tokens" class="nav-item active" id="nav-tokens">
+                        <span class="nav-icon">🪙</span>
+                        <span class="nav-text">Tokens</span>
+                    </a>
+                    <a href="/transactions" class="nav-item" id="nav-transactions">
+                        <span class="nav-icon">💰</span>
+                        <span class="nav-text">Transactions</span>
+                    </a>
+                </div>
+
+                <!-- Analytics -->
+                <div class="nav-section">
+                    <div class="nav-section-title">Analytics</div>
+                    <a href="/analytics" class="nav-item" id="nav-analytics">
+                        <span class="nav-icon">📈</span>
+                        <span class="nav-text">Analytics</span>
+                    </a>
+                    <a href="/performance" class="nav-item" id="nav-performance">
+                        <span class="nav-icon">⚡</span>
+                        <span class="nav-text">Performance</span>
+                    </a>
+                    <a href="/alerts" class="nav-item" id="nav-alerts">
+                        <span class="nav-icon">🔔</span>
+                        <span class="nav-text">Alertes</span>
+                        <span class="nav-badge" id="alerts-count">0</span>
+                    </a>
+                </div>
+
+                <!-- Système -->
+                <div class="nav-section">
+                    <div class="nav-section-title">Système</div>
+                    <a href="/admin" class="nav-item" id="nav-admin">
+                        <span class="nav-icon">⚙️</span>
+                        <span class="nav-text">Admin</span>
+                    </a>
+                    <a href="/logs" class="nav-item" id="nav-logs">
+                        <span class="nav-icon">📋</span>
+                        <span class="nav-text">Logs</span>
+                    </a>
+                    <a href="/settings" class="nav-item" id="nav-settings">
+                        <span class="nav-icon">🔧</span>
+                        <span class="nav-text">Paramètres</span>
+                    </a>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Contenu principal -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="main-header">
+                <div class="header-left">
+                    <button class="sidebar-toggle" onclick="toggleSidebar()">
+                        <span>☰</span>
+                    </button>
+                    <div>
+                        <h1 class="page-title">Détails du Token</h1>
+                        <nav class="breadcrumb">
+                            <a href="/" class="breadcrumb-item">Home</a>
+                            <span class="breadcrumb-separator">></span>
+                            <a href="/tokens" class="breadcrumb-item">Tokens</a>
+                            <span class="breadcrumb-separator">></span>
+                            <span class="breadcrumb-item" id="token-breadcrumb">Token</span>
+                        </nav>
+                    </div>
+                </div>
+                
+                <div class="header-right">
+                    <div class="status-indicator" id="status-indicator">
+                        <div class="status-dot"></div>
+                        <span>Temps Réel</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Zone de contenu -->
+            <div class="content-area">
+                <div class="token-detail-container fade-in">
+                    
+                    <!-- Header du token -->
+                    <div class="token-header">
+                        <div class="token-actions">
+                            <button class="action-btn action-btn-secondary" onclick="refreshTokenData()">
+                                <span>🔄</span>
+                                Actualiser
+                            </button>
+                            <button class="action-btn action-btn-primary" onclick="analyzeToken()">
+                                <span>📊</span>
+                                Analyser
+                            </button>
+                            <button class="action-btn action-btn-secondary" onclick="exportTokenData()">
+                                <span>📥</span>
+                                Exporter
+                            </button>
+                        </div>
+
+                        <div class="token-main-info">
+                            <div class="token-logo-container">
+                                <div class="token-logo-large" id="token-logo">
+                                    T
+                                </div>
+                                <div class="verified-badge" id="verified-badge" style="display: none;">
+                                    ✓
+                                </div>
+                            </div>
+                            
+                            <div class="token-identity">
+                                <div class="token-symbol-display" id="token-symbol">
+                                    TOKEN
+                                </div>
+                                <div class="token-name-display" id="token-name">
+                                    Token Name
+                                </div>
+                                <div class="token-mint-display" id="token-mint">
+                                    <!-- Mint address chargée dynamiquement -->
+                                </div>
+                                <div class="token-tags" id="token-tags">
+                                    <!-- Tags générés dynamiquement -->
+                                </div>
+                            </div>
+                            
+                            <div class="token-price-section">
+                                <div class="token-price" id="token-price">
+                                    $--
+                                </div>
+                                <div class="price-change" id="price-change">
+                                    <span class="price-change-value">--%</span>
+                                    <span>24h</span>
+                                </div>
+                                <div class="market-cap" id="market-cap">
+                                    Market Cap: $--
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="token-quick-metrics" id="token-quick-metrics">
+                            <!-- Métriques rapides chargées dynamiquement -->
+                        </div>
+                    </div>
+
+                    <!-- Contenu principal -->
+                    <div class="token-content-grid">
+                        <!-- Section principale des métriques -->
+                        <div class="metrics-section">
+                            
+                            <!-- Graphique de prix -->
+                            <div class="metrics-card">
+                                <div class="metrics-header">
+                                    <h3 class="metrics-title">
+                                        <span>📈</span>
+                                        Évolution du Prix
+                                    </h3>
+                                    <select class="filter-select" id="price-period">
+                                        <option value="1h">1H</option>
+                                        <option value="24h" selected>24H</option>
+                                        <option value="7d">7J</option>
+                                        <option value="30d">30J</option>
+                                        <option value="1y">1A</option>
+                                    </select>
+                                </div>
+                                <div class="metrics-body">
+                                    <div class="chart-container">
+                                        <canvas id="price-chart" style="max-height: 300px;"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Métriques de performance -->
+                            <div class="metrics-card">
+                                <div class="metrics-header">
+                                    <h3 class="metrics-title">
+                                        <span>⚡</span>
+                                        Métriques de Performance
+                                    </h3>
+                                    <button class="btn btn-secondary btn-sm" onclick="refreshMetrics()">
+                                        <span>🔄</span>
+                                    </button>
+                                </div>
+                                <div class="metrics-body">
+                                    <div class="performance-grid" id="performance-metrics">
+                                        <!-- Métriques chargées dynamiquement -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Volume et liquidité -->
+                            <div class="metrics-card">
+                                <div class="metrics-header">
+                                    <h3 class="metrics-title">
+                                        <span>💧</span>
+                                        Volume & Liquidité
+                                    </h3>
+                                    <select class="filter-select" id="volume-period">
+                                        <option value="24h" selected>24H</option>
+                                        <option value="7d">7J</option>
+                                        <option value="30d">30J</option>
+                                    </select>
+                                </div>
+                                <div class="metrics-body">
+                                    <div class="chart-container">
+                                        <div class="chart-placeholder">
+                                            Graphique de volume - Données en cours de chargement
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <!-- Sidebar d'informations -->
+                        <div class="info-sidebar">
+                            
+                            <!-- Top Holders -->
+                            <div class="info-card">
+                                <div class="metrics-header">
+                                    <h3 class="metrics-title">
+                                        <span>👥</span>
+                                        Top Détenteurs
+                                    </h3>
+                                    <button class="btn btn-secondary btn-sm" onclick="refreshHolders()">
+                                        <span>🔄</span>
+                                    </button>
+                                </div>
+                                <div class="holders-list" id="top-holders">
+                                    <div class="loading">
+                                        <div class="spinner"></div>
+                                        Chargement des détenteurs...
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Statistiques du token -->
+                            <div class="info-card">
+                                <div class="metrics-header">
+                                    <h3 class="metrics-title">
+                                        <span>📊</span>
+                                        Statistiques
+                                    </h3>
+                                </div>
+                                <div class="metrics-body">
+                                    <div class="performance-grid" id="token-stats">
+                                        <!-- Statistiques chargées dynamiquement -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Informations techniques -->
+                            <div class="info-card">
+                                <div class="metrics-header">
+                                    <h3 class="metrics-title">
+                                        <span>🔧</span>
+                                        Informations Techniques
+                                    </h3>
+                                </div>
+                                <div class="metrics-body" id="technical-info">
+                                    <!-- Informations techniques chargées dynamiquement -->
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- Section des transactions -->
+                    <div class="transactions-section">
+                        <div class="metrics-card">
+                            <div class="metrics-header">
+                                <h3 class="metrics-title">
+                                    <span>💰</span>
+                                    Transactions Récentes
+                                </h3>
+                                <div class="transactions-filters">
+                                    <div class="filter-group">
+                                        <label>Type:</label>
+                                        <select class="filter-select" id="transaction-type-filter">
+                                            <option value="all">Toutes</option>
+                                            <option value="buy">Achats</option>
+                                            <option value="sell">Ventes</option>
+                                            <option value="transfer">Transferts</option>
+                                            <option value="swap">Swaps</option>
+                                        </select>
+                                    </div>
+                                    <div class="filter-group">
+                                        <label>Wallet:</label>
+                                        <input type="text" class="filter-input" id="wallet-filter" placeholder="Filtrer par wallet...">
+                                    </div>
+                                    <button class="btn btn-primary btn-sm" onclick="loadMoreTransactions()">
+                                        <span>📄</span>
+                                        Charger Plus
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="transactions-list" id="transactions-history">
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                    Chargement des transactions...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts de base -->
+    <script>
+        // Configuration globale
+        const API_BASE = window.location.origin + '/api';
+        const REFRESH_INTERVAL = 45000; // 45 secondes
+
+        // État global de l'application
+        const AppState = {
+            sidebarCollapsed: false,
+            currentTokenMint: '',
+            refreshTimer: null,
+            priceChart: null,
+            volumeChart: null
+        };
+
+        // Variables globales du token detail
+        let tokenData = {};
+        let refreshTimer;
+        let lastUpdate = 0;
+
+        // Configuration
+        const MAX_TRANSACTIONS_DISPLAY = 50;
+        const MAX_HOLDERS_DISPLAY = 20;
+
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', function() {
+            // Extraire le mint du token depuis l'URL
+            const pathParts = window.location.pathname.split('/');
+            AppState.currentTokenMint = pathParts[pathParts.length - 1];
+            
+            if (!AppState.currentTokenMint || AppState.currentTokenMint.length !== 44) {
+                showMessage('Adresse de token invalide', 'error');
+                return;
+            }
+
+            console.log('🚀 Initialisation page token:', AppState.currentTokenMint);
+            
+            // Mettre à jour la navigation active
+            document.getElementById('nav-tokens').classList.add('active');
+            
+            // Charger les données initiales
+            loadTokenData();
+            startAutoRefresh();
+            
+            // Configurer les événements
+            setupEventListeners();
+            
+            // Initialiser les graphiques
+            initCharts();
+        });
+
+        // Configuration des événements
+        function setupEventListeners() {
+            // Filtres de période
+            const pricePeriod = document.getElementById('price-period');
+            if (pricePeriod) {
+                pricePeriod.addEventListener('change', updatePriceChart);
+            }
+
+            const volumePeriod = document.getElementById('volume-period');
+            if (volumePeriod) {
+                volumePeriod.addEventListener('change', updateVolumeChart);
+            }
+
+            // Filtres de transactions
+            const transactionFilter = document.getElementById('transaction-type-filter');
+            if (transactionFilter) {
+                transactionFilter.addEventListener('change', filterTransactions);
+            }
+
+            const walletFilter = document.getElementById('wallet-filter');
+            if (walletFilter) {
+                walletFilter.addEventListener('input', debounce(filterTransactionsByWallet, 500));
+            }
+        }
+
+        // Fonction principale de chargement des données
+        async function loadTokenData() {
+            try {
+                console.log('📡 Chargement données token:', AppState.currentTokenMint);
+
+                const response = await apiCall(`/analytics/tokens/analyze`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        token_address: AppState.currentTokenMint,
+                        include_historical: true
+                    })
+                });
+
+                tokenData = response.data;
+                console.log('📊 Données token chargées:', tokenData);
+
+                // Mettre à jour toutes les sections
+                updateTokenHeader();
+                updateQuickMetrics();
+                updatePerformanceMetrics();
+                updateTopHolders();
+                updateTokenStats();
+                updateTechnicalInfo();
+                updateTransactionsHistory();
+                updatePriceChart();
+
+                lastUpdate = Date.now();
+                updateConnectionStatus(true);
+
+            } catch (error) {
+                console.error('❌ Erreur chargement token:', error);
+                showMessage('Erreur de chargement: ' + error.message, 'error');
+                updateConnectionStatus(false);
+            }
+        }
+
+        // Mise à jour de l'en-tête du token
+        function updateTokenHeader() {
+            if (!tokenData.token_mint) return;
+
+            // Logo et symbole
+            const logoElement = document.getElementById('token-logo');
+            const symbolElement = document.getElementById('token-symbol');
+            const nameElement = document.getElementById('token-name');
+            const mintElement = document.getElementById('token-mint');
+            
+            const symbol = tokenData.symbol || 'UNKNOWN';
+            const name = tokenData.name || 'Unknown Token';
+            
+            logoElement.textContent = symbol.charAt(0) || 'T';
+            symbolElement.textContent = symbol;
+            nameElement.textContent = name;
+            mintElement.textContent = tokenData.token_mint;
+
+            // Breadcrumb
+            document.getElementById('token-breadcrumb').textContent = symbol;
+
+            // Prix
+            const priceElement = document.getElementById('token-price');
+            const changeElement = document.getElementById('price-change');
+            const marketCapElement = document.getElementById('market-cap');
+
+            const price = tokenData.price_usd || 0;
+            const change24h = tokenData.price_change_24h || 0;
+            const marketCap = tokenData.market_cap || 0;
+
+            priceElement.textContent = price > 0 ? `${formatNumber(price, 6)}` : '$--';
+            
+            // Changement de prix
+            changeElement.className = 'price-change';
+            if (change24h > 0) {
+                changeElement.classList.add('positive');
+                changeElement.querySelector('.price-change-value').textContent = `+${change24h.toFixed(2)}%`;
+            } else if (change24h < 0) {
+                changeElement.classList.add('negative');
+                changeElement.querySelector('.price-change-value').textContent = `${change24h.toFixed(2)}%`;
+            } else {
+                changeElement.classList.add('neutral');
+                changeElement.querySelector('.price-change-value').textContent = '0.00%';
+            }
+
+            marketCapElement.textContent = marketCap > 0 ? `Market Cap: ${formatNumber(marketCap)}` : 'Market Cap: --';
+
+            // Tags
+            const tagsContainer = document.getElementById('token-tags');
+            const tags = [];
+
+            if (tokenData.is_verified) {
+                tags.push({ text: 'Vérifié', class: 'tag-verified' });
+                document.getElementById('verified-badge').style.display = 'flex';
+            }
+
+            if (tokenData.volume_24h > 1000000) {
+                tags.push({ text: 'Populaire', class: 'tag-popular' });
+            }
+
+            if (tokenData.price_change_24h > 10) {
+                tags.push({ text: 'Trending', class: 'tag-trending' });
+            }
+
+            if (tokenData.categories && tokenData.categories.includes('defi')) {
+                tags.push({ text: 'DeFi', class: 'tag-defi' });
+            }
+
+            tagsContainer.innerHTML = tags.map(tag => 
+                `<span class="token-tag ${tag.class}">${tag.text}</span>`
+            ).join('');
+        }
+
+        // Mise à jour des métriques rapides
+        function updateQuickMetrics() {
+            const metrics = [
+                {
+                    value: formatNumber(tokenData.volume_24h || 0),
+                    label: 'Volume 24h',
+                    sublabel: 'En USD'
+                },
+                {
+                    value: formatNumber(tokenData.holder_count || 0),
+                    label: 'Détenteurs',
+                    sublabel: 'Wallets uniques'
+                },
+                {
+                    value: formatNumber(tokenData.transaction_count_24h || 0),
+                    label: 'TX 24h',
+                    sublabel: 'Transactions'
+                },
+                {
+                    value: `${tokenData.decimals || 9}`,
+                    label: 'Décimales',
+                    sublabel: 'Précision'
+                },
+                {
+                    value: tokenData.supply ? formatNumber(tokenData.supply) : '--',
+                    label: 'Supply Total',
+                    sublabel: 'Tokens émis'
+                },
+                {
+                    value: formatTimeAgo(tokenData.created_at),
+                    label: 'Créé',
+                    sublabel: 'Depuis'
+                }
+            ];
+
+            document.getElementById('token-quick-metrics').innerHTML = metrics.map(metric => `
+                <div class="quick-metric slide-in-up">
+                    <div class="quick-metric-value">${metric.value}</div>
+                    <div class="quick-metric-label">${metric.label}</div>
+                    <div class="quick-metric-sublabel">${metric.sublabel}</div>
+                </div>
+            `).join('');
+        }
+
+        // Mise à jour des métriques de performance
+        function updatePerformanceMetrics() {
+            const metrics = [
+                {
+                    icon: '💎',
+                    value: formatNumber(tokenData.market_cap || 0),
+                    label: 'Market Cap',
+                    change: tokenData.market_cap_change_24h ? `${tokenData.market_cap_change_24h > 0 ? '+' : ''}${tokenData.market_cap_change_24h.toFixed(1)}%` : '--',
+                    changeType: tokenData.market_cap_change_24h > 0 ? 'positive' : tokenData.market_cap_change_24h < 0 ? 'negative' : 'neutral'
+                },
+                {
+                    icon: '📊',
+                    value: formatNumber(tokenData.volume_24h || 0),
+                    label: 'Volume 24h',
+                    change: tokenData.volume_change_24h ? `${tokenData.volume_change_24h > 0 ? '+' : ''}${tokenData.volume_change_24h.toFixed(1)}%` : '--',
+                    changeType: tokenData.volume_change_24h > 0 ? 'positive' : tokenData.volume_change_24h < 0 ? 'negative' : 'neutral'
+                },
+                {
+                    icon: '💰',
+                    value: tokenData.price_usd ? `${formatNumber(tokenData.price_usd, 6)}` : '--',
+                    label: 'Prix Actuel',
+                    change: tokenData.price_change_24h ? `${tokenData.price_change_24h > 0 ? '+' : ''}${tokenData.price_change_24h.toFixed(2)}%` : '--',
+                    changeType: tokenData.price_change_24h > 0 ? 'positive' : tokenData.price_change_24h < 0 ? 'negative' : 'neutral'
+                },
+                {
+                    icon: '⚡',
+                    value: formatNumber(tokenData.transaction_count_24h || 0),
+                    label: 'Transactions',
+                    change: '24h',
+                    changeType: 'neutral'
+                },
+                {
+                    icon: '👥',
+                    value: formatNumber(tokenData.holder_count || 0),
+                    label: 'Détenteurs',
+                    change: tokenData.holder_change_24h ? `${tokenData.holder_change_24h > 0 ? '+' : ''}${tokenData.holder_change_24h}` : '--',
+                    changeType: tokenData.holder_change_24h > 0 ? 'positive' : tokenData.holder_change_24h < 0 ? 'negative' : 'neutral'
+                },
+                {
+                    icon: '🔥',
+                    value: tokenData.liquidity ? formatNumber(tokenData.liquidity) : '--',
+                    label: 'Liquidité',
+                    change: 'Total',
+                    changeType: 'neutral'
+                }
+            ];
+
+            document.getElementById('performance-metrics').innerHTML = metrics.map(metric => `
+                <div class="performance-metric slide-in-up">
+                    <div class="metric-icon">${metric.icon}</div>
+                    <div class="metric-value">${metric.value}</div>
+                    <div class="metric-label">${metric.label}</div>
+                    <div class="metric-change change-${metric.changeType}">${metric.change}</div>
+                </div>
+            `).join('');
+        }
+
+        // Mise à jour des top holders
+        function updateTopHolders() {
+            const container = document.getElementById('top-holders');
+            
+            // Utiliser les données de distribution des wallets
+            const holders = tokenData.wallet_distribution || [];
+            
+            if (!holders.length) {
+                container.innerHTML = '<div class="loading">Aucun détenteur trouvé</div>';
+                return;
+            }
+
+            const displayHolders = holders.slice(0, MAX_HOLDERS_DISPLAY);
+
+            container.innerHTML = displayHolders.map((holder, index) => {
+                const percentage = holder.percentage || 0;
+                const amount = holder.balance || holder.amount || 0;
+                const usdValue = holder.usd_value || (amount * (tokenData.price_usd || 0));
+
+                return `
+                    <div class="holder-item">
+                        <div class="holder-rank">${index + 1}</div>
+                        <div class="holder-info">
+                            <div class="holder-address">${formatAddress(holder.wallet_address, 6)}</div>
+                            <div class="holder-percentage">${percentage.toFixed(2)}% du supply</div>
+                        </div>
+                        <div class="holder-amount">
+                            <div class="amount-value">${formatNumber(amount)}</div>
+                            <div class="amount-usd">${formatNumber(usdValue)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Mise à jour des statistiques du token
+        function updateTokenStats() {
+            const stats = [
+                {
+                    icon: '📈',
+                    value: tokenData.all_time_high ? `${formatNumber(tokenData.all_time_high)}` : '--',
+                    label: 'ATH'
+                },
+                {
+                    icon: '📉',
+                    value: tokenData.all_time_low ? `${formatNumber(tokenData.all_time_low)}` : '--',
+                    label: 'ATL'
+                },
+                {
+                    icon: '🎯',
+                    value: tokenData.circulating_supply ? formatNumber(tokenData.circulating_supply) : '--',
+                    label: 'Supply Circ.'
+                },
+                {
+                    icon: '⏰',
+                    value: formatTimeAgo(tokenData.last_updated),
+                    label: 'Dernière MAJ'
+                }
+            ];
+
+            document.getElementById('token-stats').innerHTML = stats.map(stat => `
+                <div class="performance-metric">
+                    <div class="metric-icon">${stat.icon}</div>
+                    <div class="metric-value">${stat.value}</div>
+                    <div class="metric-label">${stat.label}</div>
+                </div>
+            `).join('');
+        }
+
+        // Mise à jour des informations techniques
+        function updateTechnicalInfo() {
+            const container = document.getElementById('technical-info');
+            
+            const technicalData = [
+                { label: 'Mint Address', value: tokenData.token_mint, type: 'address' },
+                { label: 'Décimales', value: tokenData.decimals || 9, type: 'number' },
+                { label: 'Program ID', value: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', type: 'address' },
+                { label: 'Freeze Authority', value: tokenData.freeze_authority || 'Aucune', type: 'address' },
+                { label: 'Mint Authority', value: tokenData.mint_authority || 'Aucune', type: 'address' },
+                { label: 'Supply Type', value: tokenData.supply_type || 'Fixe', type: 'text' }
+            ];
+
+            container.innerHTML = technicalData.map(item => `
+                <div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+                    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">${item.label}</div>
+                    <div style="font-family: ${item.type === 'address' ? "'Courier New', monospace" : 'inherit'}; font-size: 13px; color: var(--text-primary); word-break: break-all;">
+                        ${item.type === 'address' && item.value.length > 20 ? formatAddress(item.value, 8) : item.value}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Mise à jour de l'historique des transactions
+        function updateTransactionsHistory() {
+            const container = document.getElementById('transactions-history');
+            
+            // Utiliser les transactions du token depuis les données chargées
+            const transactions = tokenData.recent_transactions || [];
+            
+            if (!transactions.length) {
+                container.innerHTML = '<div class="loading">Aucune transaction récente</div>';
+                return;
+            }
+
+            const displayTransactions = transactions.slice(0, MAX_TRANSACTIONS_DISPLAY);
+
+            container.innerHTML = displayTransactions.map(tx => {
+                const typeIcons = {
+                    'buy': { icon: '📈', class: 'tx-buy' },
+                    'sell': { icon: '📉', class: 'tx-sell' },
+                    'transfer': { icon: '↔️', class: 'tx-transfer' },
+                    'swap': { icon: '🔄', class: 'tx-swap' }
+                };
+
+                const typeInfo = typeIcons[tx.transaction_type] || { icon: '💰', class: 'tx-transfer' };
+                const amount = tx.token_amount || 0;
+                const solAmount = tx.sol_amount || tx.amount || 0;
+                const usdValue = amount * (tokenData.price_usd || 0);
+
+                return `
+                    <div class="transaction-item">
+                        <div class="transaction-icon ${typeInfo.class}">
+                            ${typeInfo.icon}
+                        </div>
+                        <div class="transaction-content">
+                            <div class="transaction-title">
+                                ${tx.transaction_type.toUpperCase()} ${tokenData.symbol}
+                            </div>
+                            <div class="transaction-details">
+                                <span>Wallet: ${formatAddress(tx.wallet_address, 4)}</span>
+                                <span>•</span>
+                                <span class="transaction-signature">${formatAddress(tx.signature, 6)}</span>
+                                ${tx.dex_name ? `<span>• ${tx.dex_name}</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="transaction-amount">
+                            <div class="amount-primary">${formatNumber(amount)} ${tokenData.symbol}</div>
+                            <div class="amount-secondary">
+                                ${solAmount ? `${formatNumber(Math.abs(solAmount))} SOL` : `${formatNumber(usdValue)}`}
+                            </div>
+                        </div>
+                        <div class="transaction-time">
+                            ${formatTimeAgo(tx.block_time)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Initialisation des graphiques
+        function initCharts() {
+            // Graphique de prix
+            const priceCanvas = document.getElementById('price-chart');
+            if (priceCanvas && typeof Chart !== 'undefined') {
+                const ctx = priceCanvas.getContext('2d');
+                
+                AppState.priceChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Prix ($)',
+                            data: [],
+                            borderColor: '#14f195',
+                            backgroundColor: 'rgba(20, 241, 149, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: false,
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)'
+                                },
+                                ticks: {
+                                    color: '#9ca3af'
+                                }
+                            },
+                            x: {
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)'
+                                },
+                                ticks: {
+                                    color: '#9ca3af'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Mise à jour du graphique de prix
+        function updatePriceChart() {
+            const period = document.getElementById('price-period').value;
+            
+            if (!AppState.priceChart) {
+                initCharts();
+                return;
+            }
+
+            // Données simulées pour le graphique de prix
+            const generatePriceData = (period) => {
+                const points = period === '1h' ? 60 : period === '24h' ? 24 : period === '7d' ? 7 : period === '30d' ? 30 : 365;
+                const basePrice = tokenData.price_usd || 1;
+                const labels = [];
+                const data = [];
+
+                for (let i = points - 1; i >= 0; i--) {
+                    const date = new Date();
+                    if (period === '1h') {
+                        date.setMinutes(date.getMinutes() - i);
+                        labels.push(date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+                    } else if (period === '24h') {
+                        date.setHours(date.getHours() - i);
+                        labels.push(date.toLocaleTimeString([], { hour: '2-digit' }));
+                    } else if (period === '7d') {
+                        date.setDate(date.getDate() - i);
+                        labels.push(date.toLocaleDateString([], { month: 'short', day: 'numeric' }));
+                    } else {
+                        date.setDate(date.getDate() - i);
+                        labels.push(date.toLocaleDateString([], { month: 'short', day: 'numeric' }));
+                    }
+
+                    // Simulation de variation de prix
+                    const variation = (Math.random() - 0.5) * 0.1; // ±5% de variation
+                    const price = basePrice * (1 + variation);
+                    data.push(Math.max(0, price));
+                }
+
+                return { labels, data };
+            };
+
+            const { labels, data } = generatePriceData(period);
+            
+            AppState.priceChart.data.labels = labels;
+            AppState.priceChart.data.datasets[0].data = data;
+            AppState.priceChart.update();
+        }
+
+        // Filtrage des transactions
+        function filterTransactions() {
+            const filterValue = document.getElementById('transaction-type-filter').value;
+            console.log('🔍 Filtrage transactions par type:', filterValue);
+            
+            // Recharger avec filtre
+            updateTransactionsHistory();
+        }
+
+        function filterTransactionsByWallet() {
+            const searchTerm = document.getElementById('wallet-filter').value.toLowerCase();
+            console.log('🔍 Filtrage transactions par wallet:', searchTerm);
+            
+            // Recharger avec filtre wallet
+            updateTransactionsHistory();
+        }
+
+        // Fonctions d'action
+        async function refreshTokenData() {
+            const button = event.target.closest('button');
+            const originalText = button.innerHTML;
+            
+            button.innerHTML = '<div class="spinner"></div>';
+            button.disabled = true;
+            
+            try {
+                await loadTokenData();
+                showMessage('Données mises à jour', 'success', 2000);
+            } catch (error) {
+                showMessage('Erreur lors de la mise à jour', 'error');
+            } finally {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        async function analyzeToken() {
+            const button = event.target.closest('button');
+            const originalText = button.innerHTML;
+            
+            button.innerHTML = '<div class="spinner"></div> Analyse...';
+            button.disabled = true;
+            
+            try {
+                const response = await apiCall(`/analytics/tokens/analyze`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        token_address: AppState.currentTokenMint,
+                        deep_analysis: true
+                    })
+                });
+                
+                showMessage('Analyse complète terminée', 'success');
+                
+                // Mettre à jour les données avec l'analyse complète
+                tokenData = { ...tokenData, ...response.data };
+                updateTokenHeader();
+                updatePerformanceMetrics();
+                
+            } catch (error) {
+                showMessage('Erreur lors de l\'analyse: ' + error.message, 'error');
+            } finally {
+                button.innerHTML = originalText;
+                button.disabled = false;
+            }
+        }
+
+        async function exportTokenData() {
+            try {
+                const exportData = {
+                    token_info: {
+                        mint: tokenData.token_mint,
+                        symbol: tokenData.symbol,
+                        name: tokenData.name,
+                        decimals: tokenData.decimals
+                    },
+                    market_data: {
+                        price_usd: tokenData.price_usd,
+                        market_cap: tokenData.market_cap,
+                        volume_24h: tokenData.volume_24h,
+                        price_change_24h: tokenData.price_change_24h
+                    },
+                    statistics: {
+                        holder_count: tokenData.holder_count,
+                        transaction_count_24h: tokenData.transaction_count_24h,
+                        supply_data: tokenData.supply
+                    },
+                    holders: tokenData.wallet_distribution || [],
+                    recent_transactions: tokenData.recent_transactions || [],
+                    export_timestamp: new Date().toISOString()
+                };
+                
+                // Créer un blob et télécharger
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+                    type: 'application/json'
+                });
+                
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `token_${tokenData.symbol}_${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                
+                URL.revokeObjectURL(url);
+                showMessage('Export téléchargé', 'success');
+                
+            } catch (error) {
+                showMessage('Erreur lors de l\'export: ' + error.message, 'error');
+            }
+        }
+
+        function refreshMetrics() {
+            updatePerformanceMetrics();
+            showMessage('Métriques mises à jour', 'success', 1500);
+        }
+
+        function refreshHolders() {
+            updateTopHolders();
+            showMessage('Détenteurs mis à jour', 'success', 1500);
+        }
+
+        function loadMoreTransactions() {
+            // Simuler le chargement de plus de transactions
+            showMessage('Chargement de plus de transactions...', 'info', 2000);
+        }
+
+        // Auto-refresh
+        function startAutoRefresh() {
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+            }
+            
+            refreshTimer = setInterval(async () => {
+                try {
+                    await loadTokenData();
+                    console.log('🔄 Données token rafraîchies automatiquement');
+                } catch (error) {
+                    console.error('❌ Erreur rafraîchissement auto:', error);
+                }
+            }, REFRESH_INTERVAL);
+            
+            console.log(`⏰ Rafraîchissement automatique démarré (${REFRESH_INTERVAL/1000}s)`);
+        }
+
+        function stopAutoRefresh() {
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+                refreshTimer = null;
+            }
+        }
+
+        // Fonctions utilitaires
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            AppState.sidebarCollapsed = !AppState.sidebarCollapsed;
+            
+            if (AppState.sidebarCollapsed) {
+                sidebar.classList.add('collapsed');
+            } else {
+                sidebar.classList.remove('collapsed');
+            }
+            
+            // Sauvegarder l'état
+            localStorage.setItem('sidebarCollapsed', AppState.sidebarCollapsed);
+        }
+
+        // Restaurer l'état de la sidebar
+        function restoreSidebarState() {
+            const saved = localStorage.getItem('sidebarCollapsed');
+            if (saved === 'true') {
+                toggleSidebar();
+            }
+        }
+
+        // Mettre à jour le statut de connexion
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('status-indicator');
+            const dot = indicator.querySelector('.status-dot');
+            const text = indicator.querySelector('span');
+            
+            if (connected) {
+                indicator.style.background = 'rgba(20, 241, 149, 0.1)';
+                indicator.style.borderColor = 'var(--primary)';
+                indicator.style.color = 'var(--primary)';
+                text.textContent = 'Temps Réel';
+                dot.style.background = 'var(--primary)';
+            } else {
+                indicator.style.background = 'rgba(239, 68, 68, 0.1)';
+                indicator.style.borderColor = 'var(--error)';
+                indicator.style.color = 'var(--error)';
+                text.textContent = 'Déconnecté';
+                dot.style.background = 'var(--error)';
+            }
+        }
+
+        // Faire un appel API sécurisé
+        async function apiCall(endpoint, options = {}) {
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (!data.success) {
+                    throw new Error(data.message || 'Erreur API');
+                }
+
+                return data;
+            } catch (error) {
+                console.error(`Erreur API ${endpoint}:`, error);
+                throw error;
+            }
+        }
+
+        // Afficher les messages
+        function showMessage(message, type = 'info', duration = 5000) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `${type}-message fade-in`;
+            messageDiv.textContent = message;
+            
+            const container = document.querySelector('.content-area');
+            container.insertBefore(messageDiv, container.firstChild);
+            
+            setTimeout(() => {
+                messageDiv.remove();
+            }, duration);
+        }
+
+        // Formater les nombres
+        function formatNumber(num, decimals = 2) {
+            if (num === null || num === undefined) return '--';
+            
+            const absNum = Math.abs(num);
+            
+            if (absNum >= 1000000000) {
+                return (num / 1000000000).toFixed(1) + 'B';
+            } else if (absNum >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            } else if (absNum >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            } else if (absNum < 0.01 && absNum > 0) {
+                return num.toFixed(6);
+            } else {
+                return num.toFixed(decimals);
+            }
+        }
+
+        // Formater les adresses
+        function formatAddress(address, length = 8) {
+            if (!address) return 'N/A';
+            if (address.length <= length * 2) return address;
+            return `${address.slice(0, length)}...${address.slice(-length)}`;
+        }
+
+        // Formater le temps relatif
+        function formatTimeAgo(timestamp) {
+            if (!timestamp) return 'Jamais';
+            
+            const now = Date.now() / 1000;
+            const diff = now - timestamp;
+            
+            if (diff < 60) return `${Math.floor(diff)}s`;
+            if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+            if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+            return `${Math.floor(diff / 86400)}j`;
+        }
+
+        // Fonction debounce pour la recherche
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // Restaurer l'état au chargement
+        document.addEventListener('DOMContentLoaded', () => {
+            restoreSidebarState();
+        });
+
+        // Nettoyage à la fermeture
+        window.addEventListener('beforeunload', () => {
+            stopAutoRefresh();
+            if (AppState.priceChart) {
+                AppState.priceChart.destroy();
+            }
+            if (AppState.volumeChart) {
+                AppState.volumeChart.destroy();
+            }
+        });
+
+        // Gestion responsive
+        window.addEventListener('resize', () => {
+            if (AppState.priceChart) {
+                AppState.priceChart.resize();
+            }
+            if (AppState.volumeChart) {
+                AppState.volumeChart.resize();
+            }
+        });
+    </script>
+
+    <!-- Chart.js pour les graphiques -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+
+</body>
+</html>
