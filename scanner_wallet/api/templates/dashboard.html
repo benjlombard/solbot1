@@ -1,0 +1,728 @@
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Wallet Monitor - Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #14f195;
+            --secondary: #9945ff;
+            --background: #0a0f1c;
+            --surface: #151c2e;
+            --surface-hover: #1f2937;
+            --text-primary: #ffffff;
+            --text-secondary: #9ca3af;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --border: #374151;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, var(--background) 0%, #0f172a 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo h1 {
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(20, 241, 149, 0.1);
+            border-radius: 20px;
+            border: 1px solid var(--primary);
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            background: var(--surface-hover);
+            transform: translateY(-2px);
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .wallets-panel {
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .refresh-btn {
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+            transition: transform 0.2s ease;
+        }
+
+        .refresh-btn:hover {
+            transform: scale(1.05);
+        }
+
+        .wallets-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .wallet-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s ease;
+            cursor: pointer;
+        }
+
+        .wallet-item:hover {
+            background: var(--surface-hover);
+        }
+
+        .wallet-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .wallet-address {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .wallet-priority {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-left: auto;
+        }
+
+        .priority-high {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+        }
+
+        .priority-medium {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fcd34d;
+        }
+
+        .priority-low {
+            background: rgba(107, 114, 128, 0.2);
+            color: #9ca3af;
+        }
+
+        .wallet-stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 8px;
+        }
+
+        .wallet-stat {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .wallet-stat span {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .activity-panel {
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .activity-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .activity-item {
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .activity-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .activity-buy {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+        }
+
+        .activity-sell {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--error);
+        }
+
+        .activity-transfer {
+            background: rgba(153, 69, 255, 0.2);
+            color: var(--secondary);
+        }
+
+        .activity-content {
+            flex: 1;
+        }
+
+        .activity-title {
+            font-size: 14px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .activity-details {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .activity-amount {
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .amount-primary {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .amount-secondary {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .tokens-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .token-card {
+            background: var(--surface);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+
+        .token-card:hover {
+            background: var(--surface-hover);
+            transform: translateY(-2px);
+        }
+
+        .token-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+
+        .token-logo {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, var(--primary), var(--secondary));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+        }
+
+        .token-info h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .token-symbol {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .token-balance {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+
+        .token-value {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            border: 2px solid var(--border);
+            border-top: 2px solid var(--primary);
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error);
+            color: var(--error);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px;
+            text-align: center;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">
+                <div style="font-size: 24px;">🚀</div>
+                <h1>Solana Wallet Monitor</h1>
+            </div>
+            <div class="status-indicator">
+                <div class="pulse"></div>
+                <span>Temps Réel</span>
+            </div>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="total-wallets">-</div>
+                <div class="stat-label">Wallets Surveillés</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="active-tokens">-</div>
+                <div class="stat-label">Tokens Actifs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="changes-1h">-</div>
+                <div class="stat-label">Changements (1h)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="last-scan">-</div>
+                <div class="stat-label">Dernier Scan</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Wallets Panel -->
+            <div class="wallets-panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">🎯 Wallets Surveillés</h2>
+                    <button class="refresh-btn" onclick="refreshWallets()">
+                        Actualiser
+                    </button>
+                </div>
+                <div class="wallets-list" id="wallets-list">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Chargement des wallets...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity Panel -->
+            <div class="activity-panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">⚡ Activité Récente</h2>
+                    <button class="refresh-btn" onclick="refreshActivity()">
+                        Actualiser
+                    </button>
+                </div>
+                <div class="activity-list" id="activity-list">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Chargement de l'activité...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Tokens Section -->
+        <div class="wallets-panel">
+            <div class="panel-header">
+                <h2 class="panel-title">🪙 Top Tokens Actifs</h2>
+                <button class="refresh-btn" onclick="refreshTokens()">
+                    Actualiser
+                </button>
+            </div>
+            <div class="tokens-grid" id="tokens-grid">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Chargement des tokens...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration API
+        const API_BASE = 'http://127.0.0.1:5000/api';
+        const REFRESH_INTERVAL = 30000; // 30 secondes
+
+        // Variables globales
+        let refreshTimer;
+        let dashboardData = {};
+
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Initialisation du dashboard');
+            loadDashboardData();
+            startAutoRefresh();
+        });
+
+        // Fonction principale de chargement des données
+        async function loadDashboardData() {
+            try {
+                console.log('📡 Chargement depuis:', `${API_BASE}/dashboard/data`);
+                // Charger les données principales
+                const response = await fetch(`${API_BASE}/dashboard/data`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const result = await response.json();
+                if (!result.success) throw new Error(result.message);
+
+                dashboardData = result.data;
+                console.log('📊 Données chargées:', dashboardData);
+
+                // Mettre à jour l'interface
+                updateStats();
+                await updateWalletsList(); // ← Maintenant async
+                updateActivity();
+                updateTopTokens();
+
+            } catch (error) {
+                console.error('❌ Erreur chargement dashboard:', error);
+                showError('Erreur de chargement des données: ' + error.message);
+            }
+        }
+
+        // Mise à jour des statistiques
+        function updateStats() {
+            const stats = dashboardData.stats || {};
+            const walletMetrics = dashboardData.wallet_metrics || {};
+            
+            document.getElementById('total-wallets').textContent = 
+                walletMetrics.total_wallets || '0';
+            
+            document.getElementById('active-tokens').textContent = 
+                stats.total_unique_tokens || '0';
+            
+            document.getElementById('changes-1h').textContent = 
+                stats.balance_changes_1h || '0';
+            
+            // Dernier scan
+            if (stats.last_scan_time) {
+                const minutesAgo = Math.floor((Date.now() / 1000 - stats.last_scan_time) / 60);
+                document.getElementById('last-scan').textContent = 
+                    minutesAgo < 1 ? 'Maintenant' : `${minutesAgo}min`;
+            } else {
+                document.getElementById('last-scan').textContent = 'N/A';
+            }
+        }
+
+        // Mise à jour de la liste des wallets
+        async function updateWalletsList() {
+            const container = document.getElementById('wallets-list');
+            
+            try {
+                // Charger les vraies données des wallets depuis l'API
+                const response = await fetch(`${API_BASE}/dashboard/wallet-overview`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const result = await response.json();
+                if (!result.success) throw new Error(result.message);
+                
+                const wallets = result.data.wallets || [];
+                console.log('👛 Wallets chargés:', wallets);
+                
+                if (!wallets.length) {
+                    container.innerHTML = '<div class="loading">Aucun wallet surveillé</div>';
+                    return;
+                }
+
+                container.innerHTML = wallets.map(wallet => `
+                    <div class="wallet-item" onclick="selectWallet('${wallet.wallet_address}')">
+                        <div class="wallet-header">
+                            <div class="wallet-address">${wallet.wallet_short}</div>
+                            <div class="wallet-priority priority-${wallet.priority_category}">
+                                ${wallet.priority_category.toUpperCase()}
+                            </div>
+                        </div>
+                        <div class="wallet-stats">
+                            <div class="wallet-stat">
+                                Score: <span>${wallet.priority_score}</span>
+                            </div>
+                            <div class="wallet-stat">
+                                Tokens: <span>${wallet.total_token_accounts || 0}</span>
+                            </div>
+                            <div class="wallet-stat">
+                                TX 24h: <span>${wallet.transactions_24h || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('❌ Erreur chargement wallets:', error);
+                // Fallback en cas d'erreur
+                container.innerHTML = `<div class="error-message">Erreur: ${error.message}</div>`;
+            }
+        }
+
+        // Mise à jour de l'activité récente
+        function updateActivity() {
+            const container = document.getElementById('activity-list');
+            const topTokens = dashboardData.top_tokens || [];
+            
+            if (!topTokens.length) {
+                container.innerHTML = '<div class="loading">Aucune activité récente</div>';
+                return;
+            }
+
+            container.innerHTML = topTokens.slice(0, 10).map(token => {
+                const isPositive = token.net_position > 0;
+                const activityType = isPositive ? 'buy' : 'sell';
+                const icon = isPositive ? '📈' : '📉';
+                
+                return `
+                    <div class="activity-item">
+                        <div class="activity-icon activity-${activityType}">
+                            ${icon}
+                        </div>
+                        <div class="activity-content">
+                            <div class="activity-title">
+                                ${token.symbol} - ${token.wallet_short}
+                            </div>
+                            <div class="activity-details">
+                                ${token.hours_ago}h ago • ${token.transaction_count} TX
+                            </div>
+                        </div>
+                        <div class="activity-amount">
+                            <div class="amount-primary">
+                                ${token.sol_volume} SOL
+                            </div>
+                            <div class="amount-secondary">
+                                ${token.activity_score}/100
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Mise à jour des top tokens
+        function updateTopTokens() {
+            const container = document.getElementById('tokens-grid');
+            const topTokens = dashboardData.top_tokens || [];
+            
+            if (!topTokens.length) {
+                container.innerHTML = '<div class="loading">Aucun token actif</div>';
+                return;
+            }
+
+            container.innerHTML = topTokens.slice(0, 8).map(token => `
+                <div class="token-card" onclick="selectToken('${token.mint}')">
+                    <div class="token-header">
+                        <div class="token-logo">
+                            ${token.symbol.charAt(0)}
+                        </div>
+                        <div class="token-info">
+                            <h3>${token.symbol}</h3>
+                            <div class="token-symbol">${token.mint_short}</div>
+                        </div>
+                    </div>
+                    <div class="token-balance">
+                        ${formatNumber(token.total_bought - token.total_sold)}
+                    </div>
+                    <div class="token-value">
+                        Volume: ${token.sol_volume} SOL • TX: ${token.transaction_count}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Sélection wallet/token
+        function selectWallet(address) {
+            console.log('👛 Wallet sélectionné:', address);
+            // Implémenter la vue détaillée du wallet
+            window.open(`${API_BASE}/dashboard/wallet/${address}`, '_blank');
+        }
+
+        function selectToken(mint) {
+            console.log('🪙 Token sélectionné:', mint);
+            // Implémenter la vue détaillée du token
+            window.open(`${API_BASE}/dashboard/token/${mint}`, '_blank');
+        }
+
+        // Utilitaires
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toFixed(2);
+        }
+
+        function showError(message) {
+            const container = document.querySelector('.container');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.textContent = message;
+            container.insertBefore(errorDiv, container.firstChild);
+            
+            // Supprimer après 5 secondes
+            setTimeout(() => errorDiv.remove(), 5000);
+        }
+
+        // Nettoyage à la fermeture
+        window.addEventListener('beforeunload', () => {
+            if (refreshTimer) clearInterval(refreshTimer);
+        });
+    </script>
+</body>
+</html>

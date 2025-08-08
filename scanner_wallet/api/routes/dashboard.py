@@ -82,7 +82,8 @@ def clear_expired_cache():
 
 # ============= ROUTES PRINCIPALES DU DASHBOARD =============
 
-@dashboard_bp.route('/')
+@dashboard_bp.route('/', methods=['GET'])
+@dashboard_bp.route('/index', methods=['GET'])  # Route alternative
 def dashboard_home():
     """Page principale du dashboard"""
     try:
@@ -91,6 +92,51 @@ def dashboard_home():
         logger.error(f"Erreur template dashboard: {e}")
         return jsonify({'error': 'Dashboard template not found'}), 500
 
+@dashboard_bp.route('/debug', methods=['GET', 'POST'])
+def debug_routes():
+    """Debug des routes disponibles"""
+    from flask import current_app
+    routes = []
+    for rule in current_app.url_map.iter_rules():
+        if 'dashboard' in rule.endpoint:
+            routes.append({
+                'endpoint': rule.endpoint,
+                'methods': list(rule.methods),
+                'rule': str(rule.rule)
+            })
+    return jsonify({
+        'dashboard_routes': routes,
+        'request_method': request.method,
+        'request_url': request.url
+    })
+
+@dashboard_bp.route('/config-debug')
+def config_debug():
+    """Debug de la configuration des wallets"""
+    from core.config import get_config
+    
+    config = get_config()
+    
+    return jsonify({
+        'wallets_configured': config.wallet.addresses,
+        'total_wallets': len(config.wallet.addresses),
+        'primary_wallet': config.wallet.primary_address,
+        'selection_mode': config.wallet.selection_mode.value,
+        'database_path': config.database.get_full_path()
+    })
+
+
+@dashboard_bp.route('/dashboard-data', methods=['GET', 'POST'])
+def debug_dashboard_data():
+    """Debug de l'URL problématique"""
+    from flask import request
+    return jsonify({
+        'message': 'URL dashboard-data appelée (avec tiret)',
+        'method': request.method,
+        'url': request.url,
+        'redirect_to': '/api/dashboard/data',
+        'note': 'Cette URL devrait être /dashboard/data avec un slash'
+    })
 
 @dashboard_bp.route('/data')
 def get_dashboard_data():

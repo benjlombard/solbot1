@@ -165,7 +165,7 @@ def create_app():
         config = get_config()  # Fallback
 
     # Création de l'application Flask
-    app = Flask(__name__)
+    app = Flask(__name__, template_folder='templates', static_folder='static')
     
     # Configuration Flask
     app.config.update({
