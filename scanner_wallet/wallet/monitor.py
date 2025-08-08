@@ -484,6 +484,7 @@ class SolanaWalletMonitor:
         try:
             with self.db_manager.get_connection() as conn:
                 cursor = conn.cursor()
+                current_timestamp = get_current_timestamp()
                 
                 # Store scan history
                 cursor.execute("""
@@ -496,8 +497,17 @@ class SolanaWalletMonitor:
                     len(scan_data.get('all_accounts', [])),
                     len(scan_data.get('new_accounts', [])),
                     scan_data.get('duration', 0),
-                    get_current_timestamp()
+                    current_timestamp
                 ))
+
+                # Mettre à jour la table des priorités avec le temps du dernier scan
+                cursor.execute("""
+                    UPDATE wallet_priorities
+                    SET
+                        last_scan_time = ?,
+                        total_scans = total_scans + 1
+                    WHERE wallet_address = ?
+                """, (current_timestamp, wallet_address))
                 
                 # Store token discoveries
                 for account in scan_data.get('new_accounts', []):
@@ -508,15 +518,16 @@ class SolanaWalletMonitor:
                     """, (
                         account.get('mint'),
                         wallet_address,
-                        get_current_timestamp(),
+                        current_timestamp,
                         account.get('balance', 0),
                         account.get('decimals', 9)
                     ))
                 
                 conn.commit()
+                logger.info(f"✅ Scan results and last_scan_time stored for {wallet_address}")
                 
         except Exception as e:
-            logger.error(f"❌ Error storing scan results: {e}")
+            logger.error(f"❌ Error storing scan results for {wallet_address}: {e}")
     
     def _update_cycle_stats(self, cycle_start: int, scan_result: Optional[ScanResult]):
         """Update monitoring statistics"""
