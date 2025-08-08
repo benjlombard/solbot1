@@ -415,6 +415,23 @@ class DatabaseManager:
             )
         ''')
         
+        # Table des découvertes de tokens
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS token_discoveries (
+                token_mint TEXT NOT NULL,
+                wallet_address TEXT NOT NULL,
+                discovered_at INTEGER NOT NULL,
+                ata_pubkey TEXT,
+                initial_balance REAL,
+                decimals INTEGER,
+                symbol TEXT,
+                name TEXT,
+                discovery_method TEXT,
+                confidence_score REAL,
+                PRIMARY KEY (token_mint, wallet_address)
+            )
+        ''')
+
         # Table des priorités des wallets
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS wallet_priorities (
@@ -464,6 +481,7 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS scan_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 wallet_address TEXT NOT NULL,
+                cycle_id TEXT,
                 scan_type TEXT NOT NULL,
                 total_accounts INTEGER DEFAULT 0,
                 new_accounts INTEGER DEFAULT 0,
