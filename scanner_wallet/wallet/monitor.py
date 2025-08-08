@@ -23,11 +23,11 @@ try:
     
     from wallet.priority_manager import WalletPriorityManager
     from wallet.scanner import WalletScanner
-    from wallet.balance_tracker import BalanceTracker
+    from wallet.balance_tracker import BalanceTracker, BalanceChange
     
     from models.wallet import WalletPriority, WalletStats
     from models.token import Token, TokenAccount, TokenDiscovery
-    from models.transaction import Transaction, TransactionType
+    from models.transaction import Transaction, TransactionType, TransactionStatus
     
     from utils.helpers import get_current_timestamp, safe_divide
     from utils.validators import validate_wallet_address
@@ -40,6 +40,9 @@ except ImportError as e:
         logger.setLevel(logging.INFO)
         return logger
     
+    def get_default_logger():
+        return get_logger('default')
+
     def get_database_manager(): return None
     def get_config(): return None
     
@@ -55,6 +58,21 @@ except ImportError as e:
     class BalanceTracker:
         def __init__(self): pass
         def track_wallet(self, wallet): return True
+
+    class BalanceChange:
+        pass
+
+    # Fallback utils
+    def get_current_timestamp():
+        return int(time.time())
+
+    def safe_divide(numerator, denominator):
+        if denominator == 0:
+            return 0
+        return numerator / denominator
+
+    def validate_wallet_address(address):
+        return len(address) == 44
 
 # Logger
 logger = get_logger(__name__)
