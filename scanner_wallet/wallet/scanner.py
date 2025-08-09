@@ -163,7 +163,8 @@ class WalletScanner:
                 logger.warning(f"⚠️ [RPC] No RPC client available - using fallback mode")
 
             scan_start = get_current_timestamp()
-            
+            initial_qn_requests = self._get_quicknode_requests()
+
             with self._lock:
                 if wallet_address in self._active_scans:
                     logger.warning(f"⚠️ Scan already in progress for {wallet_address}")
@@ -209,7 +210,24 @@ class WalletScanner:
                 "scan_duration": 0
             }
         finally:
-            # This will always run, ensuring the lock is released.
+            # Log QuickNode API query count for the scan
+            final_qn_requests = self._get_quicknode_requests()
+            queries_for_scan = final_qn_requests - initial_qn_requests
+            
+            if queries_for_scan >= 0:
+                with self._lock:
+                    active_scans_count = len(self._active_scans)
+
+                per_scan_msg = f"📊 QuickNode API queries for scan of {wallet_address}: {queries_for_scan}"
+                total_msg = f"📊 Total QuickNode API queries since start: {final_qn_requests}"
+
+                if active_scans_count > 1:
+                    per_scan_msg += f" (Warning: {active_scans_count} scans were active, count may be shared)"
+                    logger.warning(per_scan_msg)
+                else:
+                    logger.info(per_scan_msg)
+                logger.info(total_msg)
+
             with self._lock:
                 self._active_scans.pop(wallet_address, None)
                 logger.debug(f"Scan lock released for {wallet_address}")
@@ -794,6 +812,25 @@ class WalletScanner:
                 'cached_at': get_current_timestamp()
             }
     
+    def _get_quicknode_requests(self) -> int:
+        """Helper to get current request count for QuickNode endpoint."""
+        if not (self.rpc_client and hasattr(self.config, 'rpc') and self.config.rpc.quicknode_endpoint):
+            return 0
+            
+        try:
+            stats = self.rpc_client.get_stats()
+            qn_endpoint = self.config.rpc.quicknode_endpoint
+            
+            if qn_endpoint and 'endpoints' in stats:
+                for endpoint_stat in stats.get('endpoints', []):
+                    # The url in stats might be truncated, so we compare the beginning
+                    if qn_endpoint.startswith(endpoint_stat['url'].replace('...', '')):
+                        return endpoint_stat.get('total_requests', 0)
+        except Exception as e:
+            logger.warning(f"Could not retrieve RPC stats for QuickNode request count: {e}")
+            
+        return 0
+
     def get_scan_status(self) -> Dict[str, Any]:
         """Get current scanning status"""
         with self._lock:
