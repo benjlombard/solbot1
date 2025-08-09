@@ -613,6 +613,37 @@ def get_dashboard_data():
                 'scans_per_hour': round((perf_stats[0] or 0) / 24, 1)
             }
 
+            # === VUE D'ENSEMBLE DES WALLETS ===
+            cursor.execute("""
+                SELECT 
+                    wp.wallet_address, wp.priority_score, wp.last_scan_time,
+                    wp.total_scans, wp.activity_score, wp.consecutive_empty_scans,
+                    (? - wp.last_scan_time) as seconds_since_scan,
+                    (SELECT COUNT(*) FROM token_accounts ta WHERE ta.wallet_address = wp.wallet_address AND ta.is_active = 1) as total_accounts,
+                    (SELECT COUNT(*) FROM token_accounts ta WHERE ta.wallet_address = wp.wallet_address AND ta.scan_priority >= 3) as priority_accounts,
+                    (SELECT COUNT(*) FROM transactions t WHERE t.wallet_address = wp.wallet_address AND t.block_time >= ?) as transactions_24h
+                FROM wallet_priorities wp
+                ORDER BY wp.priority_score DESC, wp.last_scan_time ASC
+            """, (current_time, current_time - 86400))
+            
+            wallets_data = cursor.fetchall()
+            wallets_overview = []
+            for row in wallets_data:
+                # ... (traitement similaire à l'ancienne route get_wallet_overview)
+                wallets_overview.append({
+                    'wallet_address': row[0],
+                    'wallet_short': f"{row[0][:8]}...{row[0][-8:]}",
+                    'priority_score': round(row[1], 2),
+                    'last_scan_time': row[2],
+                    'total_scans': row[3],
+                    'activity_score': round(row[4], 1),
+                    'consecutive_empty_scans': row[5],
+                    'seconds_since_scan': row[6],
+                    'total_token_accounts': row[7] or 0,
+                    'priority_accounts': row[8] or 0,
+                    'transactions_24h': row[9] or 0
+                })
+
             # === RÉSUMÉ FINAL ===
             dashboard_data = {
                 'timestamp': current_time,
@@ -626,10 +657,10 @@ def get_dashboard_data():
                 },
                 'wallet_metrics': wallet_metrics,
                 'performance_metrics': performance_metrics,
-                'top_tokens': top_tokens[:8],  # Top 8 pour affichage principal
+                'top_tokens': top_tokens[:8],
                 'new_gems': new_gems,
                 'volume_alerts': volume_alerts,
-                'active_tokens_list': top_tokens  # Liste complète pour modal
+                'wallets_overview': wallets_overview
             }
 
             # Mise en cache
@@ -644,151 +675,17 @@ def get_dashboard_data():
         return jsonify(create_error_response("Failed to load dashboard data", [str(e)])), 500
 
 
-@dashboard_bp.route('/wallet-overview')
-def get_wallet_overview():
-    """Vue d'ensemble de tous les wallets monitorés"""
-    try:
-        cache_key = "wallet_overview"
-        cached_data = get_cached_result(cache_key)
-        if cached_data:
-            return jsonify(create_success_response("Wallet overview from cache", cached_data))
-
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            current_time = int(time.time())
-
-            # Récupérer les informations de tous les wallets
-            cursor.execute("""
-                SELECT 
-                    wp.wallet_address,
-                    wp.priority_score,
-                    wp.last_scan_time,
-                    wp.total_scans,
-                    wp.activity_score,
-                    wp.consecutive_empty_scans,
-                    (? - wp.last_scan_time) as seconds_since_scan,
-                    
-                    -- Stats des comptes de tokens
-                    (SELECT COUNT(*) FROM token_accounts ta 
-                     WHERE ta.wallet_address = wp.wallet_address AND ta.is_active = 1) as total_accounts,
-                    (SELECT COUNT(*) FROM token_accounts ta 
-                     WHERE ta.wallet_address = wp.wallet_address 
-                     AND ta.scan_priority >= 3) as priority_accounts,
-                    
-                    -- Stats des transactions (24h)
-                    (SELECT COUNT(*) FROM transactions t 
-                     WHERE t.wallet_address = wp.wallet_address 
-                     AND t.block_time >= ?) as transactions_24h,
-                    (SELECT COUNT(*) FROM transactions t 
-                     WHERE t.wallet_address = wp.wallet_address 
-                     AND t.is_token_transaction = 1 
-                     AND t.block_time >= ?) as token_transactions_24h
-                     
-                FROM wallet_priorities wp
-                ORDER BY wp.priority_score DESC, wp.last_scan_time ASC
-            """, (current_time, current_time - 86400, current_time - 86400))
-
-            wallets_data = cursor.fetchall()
-            wallets_overview = []
-
-            for row in wallets_data:
-                wallet_addr = row[0]
-                priority_score = row[1]
-                last_scan = row[2]
-                total_scans = row[3]
-                activity_score = row[4]
-                empty_scans = row[5]
-                since_scan = row[6]
-                total_accounts = row[7] or 0
-                priority_accounts = row[8] or 0
-                tx_24h = row[9] or 0
-                token_tx_24h = row[10] or 0
-
-                # Calculer le statut du wallet
-                if since_scan <= 60:
-                    scan_status = "recent"
-                elif since_scan <= 300:
-                    scan_status = "normal"
-                else:
-                    scan_status = "overdue"
-
-                # Calculer la catégorie de priorité
-                if priority_score >= 4.0:
-                    priority_category = "high"
-                elif priority_score >= 2.0:
-                    priority_category = "medium"
-                else:
-                    priority_category = "low"
-
-                # Calculer le niveau d'activité
-                if tx_24h > 10:
-                    activity_level = "high"
-                elif tx_24h > 2:
-                    activity_level = "medium"
-                else:
-                    activity_level = "low"
-
-                wallets_overview.append({
-                    'wallet_address': wallet_addr,
-                    'wallet_short': f"{wallet_addr[:8]}...{wallet_addr[-8:]}",
-                    'priority_score': round(priority_score, 2),
-                    'priority_category': priority_category,
-                    'last_scan_time': last_scan,
-                    'seconds_since_scan': since_scan,
-                    'scan_status': scan_status,
-                    'total_scans': total_scans,
-                    'activity_score': round(activity_score, 1),
-                    'consecutive_empty_scans': empty_scans,
-                    'total_token_accounts': total_accounts,
-                    'priority_accounts': priority_accounts,
-                    'transactions_24h': tx_24h,
-                    'token_transactions_24h': token_tx_24h,
-                    'activity_level': activity_level
-                })
-
-            # Statistiques globales
-            total_wallets = len(wallets_overview)
-            high_priority_count = len([w for w in wallets_overview if w['priority_category'] == 'high'])
-            overdue_count = len([w for w in wallets_overview if w['scan_status'] == 'overdue'])
-            active_count = len([w for w in wallets_overview if w['activity_level'] != 'low'])
-
-            overview_data = {
-                'wallets': wallets_overview,
-                'summary': {
-                    'total_wallets': total_wallets,
-                    'high_priority_wallets': high_priority_count,
-                    'overdue_scans': overdue_count,
-                    'active_wallets': active_count,
-                    'avg_priority': round(sum(w['priority_score'] for w in wallets_overview) / max(total_wallets, 1), 2)
-                }
-            }
-
-            cache_result(cache_key, overview_data, 45)  # Cache 45 secondes
-            
-            return jsonify(create_success_response("Wallet overview retrieved", overview_data))
-
-    except Exception as e:
-        logger.error(f"Erreur wallet overview: {e}")
-        return jsonify(create_error_response("Failed to load wallet overview", [str(e)])), 500
-
-import asyncio
-from utils.dexscreener_api import get_dexscreener_data_for_mints
-
 @dashboard_bp.route('/recent-activity')
-async def get_recent_activity():
+def get_recent_activity():
     """Activité récente - transactions et découvertes"""
     try:
         hours = request.args.get('hours', 24, type=int)
         limit = min(request.args.get('limit', 50, type=int), 200)  # Max 200
-        logger.info(f"--- Fetching recent activity for the last {hours} hours (limit: {limit}) ---")
-
+        
         cache_key = f"recent_activity_{hours}h_{limit}"
         cached_data = get_cached_result(cache_key)
         if cached_data:
-            logger.info(f"Cache hit for key: {cache_key}. Returning cached data.")
             return jsonify(create_success_response("Recent activity from cache", cached_data))
-
-        logger.info(f"Cache miss for key: {cache_key}. Fetching from DB.")
 
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -808,8 +705,6 @@ async def get_recent_activity():
             """, (start_time, limit))
 
             transactions_data = cursor.fetchall()
-            logger.info(f"Found {len(transactions_data)} recent transactions in the database.")
-
             recent_transactions = []
 
             for row in transactions_data:
@@ -849,36 +744,28 @@ async def get_recent_activity():
 
             # === DÉCOUVERTES RÉCENTES DE TOKENS ===
             cursor.execute("""
-                SELECT
-                    td.token_mint, td.wallet_address, td.discovered_at,
-                    td.symbol as token_symbol,
-                    ta.balance,
-                    td.name as token_name,
-                    td.decimals,
-                    td.ata_pubkey
-                FROM token_discoveries td
-                LEFT JOIN token_accounts ta ON td.token_mint = ta.token_mint AND td.wallet_address = ta.wallet_address
-                WHERE td.discovered_at >= ?
-                ORDER BY td.discovered_at DESC
+                SELECT 
+                    ta.token_mint, ta.wallet_address, ta.first_seen, ta.balance,
+                    t.token_symbol
+                FROM token_accounts ta
+                LEFT JOIN transactions t ON ta.token_mint = t.token_mint 
+                    AND t.wallet_address = ta.wallet_address
+                WHERE ta.first_seen >= ?
+                GROUP BY ta.token_mint, ta.wallet_address, ta.first_seen, ta.balance
+                ORDER BY ta.first_seen DESC
                 LIMIT ?
-            """, (start_time, limit // 2))
+            """, (start_time, limit // 2))  # Moins de découvertes que de transactions
 
             discoveries_data = cursor.fetchall()
-            logger.info(f"Found {len(discoveries_data)} recent token discoveries in the database.")
-            # Asynchronously fetch DexScreener data for all discovered tokens
-            discovery_mints = [row[0] for row in discoveries_data]
-            dexscreener_data = await get_dexscreener_data_for_mints(discovery_mints)
-            
             recent_discoveries = []
-            for row in discoveries_data:
-                mint, wallet, discovered_at, symbol, balance, name, decimals, ata_pubkey = row
-                symbol = symbol or f"TOKEN_{mint[:6]}"
-                balance = balance or 0.0
-                name = name or "Unknown Token"
-                decimals = decimals or 9
 
-                # Get enriched data
-                enriched_data = dexscreener_data.get(mint, {})
+            for row in discoveries_data:
+                mint = row[0]
+                wallet = row[1]
+                discovered_at = row[2]
+                balance = row[3]
+                symbol = row[4] or f"TOKEN_{mint[:6]}"
+
                 recent_discoveries.append({
                     'type': 'discovery',
                     'token_mint': mint,
@@ -886,28 +773,19 @@ async def get_recent_activity():
                     'wallet_address': wallet,
                     'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
                     'token_symbol': symbol,
-                    'token_name': name,
-                    'decimals': decimals,
-                    'ata_pubkey': ata_pubkey,
                     'initial_balance': round(balance, 6),
                     'discovered_at': discovered_at,
-                    'hours_ago': round((int(time.time()) - discovered_at) / 3600, 1),
-                    'price_usd': enriched_data.get('price_usd'),
-                    'liquidity_usd': enriched_data.get('liquidity_usd'),
-                    'solscan_url': f"https://solscan.io/token/{mint}",
-                    'dexscreener_url': f"https://dexscreener.com/solana/{mint}",
-                    'pumpfun_url': f"https://pump.fun/{mint}"
+                    'hours_ago': round((int(time.time()) - discovered_at) / 3600, 1)
                 })
 
             # === COMBINER ET TRIER PAR TEMPS ===
             all_activity = recent_transactions + recent_discoveries
             
+            # Trier par timestamp (block_time pour transactions, discovered_at pour découvertes)
             all_activity.sort(key=lambda x: x.get('block_time') or x.get('discovered_at', 0), reverse=True)
             
+            # Limiter au nombre demandé
             all_activity = all_activity[:limit]
-            logger.info(f"Combined and sorted activity. Total items: {len(all_activity)}")
-            if all_activity:
-                logger.debug(f"Sample activity item: {all_activity[0]}")
 
             activity_data = {
                 'period_hours': hours,
@@ -916,14 +794,13 @@ async def get_recent_activity():
                 'discoveries_count': len(recent_discoveries),
                 'activity': all_activity
             }
-            logger.info(f"Returning {len(all_activity)} activity items to frontend.")
 
-            cache_result(cache_key, activity_data, 30)
+            cache_result(cache_key, activity_data, 30)  # Cache 30 secondes
             
             return jsonify(create_success_response("Recent activity retrieved", activity_data))
 
     except Exception as e:
-        logger.error(f"Erreur recent activity: {e}", exc_info=True)
+        logger.error(f"Erreur recent activity: {e}")
         return jsonify(create_error_response("Failed to load recent activity", [str(e)])), 500
 
 
