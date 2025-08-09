@@ -517,8 +517,11 @@ class WalletScanner:
         max_abs_change = 0.0
 
         for mint, changes in all_changes.items():
-            pre_amount = changes.get('pre', {}).get('uiAmount', 0.0)
-            post_amount = changes.get('post', {}).get('uiAmount', 0.0)
+            pre_balance_data = changes.get('pre')
+            post_balance_data = changes.get('post')
+
+            pre_amount = float(pre_balance_data.get('uiAmount')) if pre_balance_data and pre_balance_data.get('uiAmount') is not None else 0.0
+            post_amount = float(post_balance_data.get('uiAmount')) if post_balance_data and post_balance_data.get('uiAmount') is not None else 0.0
             change = post_amount - pre_amount
 
             if abs(change) > max_abs_change:
