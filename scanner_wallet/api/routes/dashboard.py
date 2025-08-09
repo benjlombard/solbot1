@@ -673,18 +673,19 @@ async def get_dashboard_data():
             usd_to_eur_rate = 0.92 
             sol_price_eur = sol_price_usd * usd_to_eur_rate
             
-            # Get balances
-            balance_tasks = [get_balance(rpc_client, addr) for addr in wallet_addresses]
-            balance_results = await asyncio.gather(*balance_tasks, return_exceptions=True)
+
 
             balances = {}
-            for i, balance in enumerate(balance_results):
-                addr = wallet_addresses[i]
-                if isinstance(balance, Exception):
-                    logger.warning(f"Exception lors de la récupération de balance pour {addr}: {balance}")
+            for addr in wallet_addresses:
+                try:
+                    result = rpc_client.call('getBalance', [addr])
+                    if result and 'result' in result and 'value' in result['result']:
+                        balances[addr] = result['result']['value'] / 1_000_000_000  # Lamports to SOL
+                    else:
+                        balances[addr] = 0
+                except Exception as e:
+                    logger.warning(f"Erreur récupération balance pour {addr}: {e}")
                     balances[addr] = 0
-                else:
-                    balances[addr] = balance
 
             # Add balances to wallets_overview
             for wallet in wallets_overview:
