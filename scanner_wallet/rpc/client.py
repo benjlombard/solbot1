@@ -304,20 +304,23 @@ class RPCClient:
                 'priority': 1,
                 'rate_limit': QUICKNODE_FREE_RPS_LIMIT
             })
-            self.logger.info(f"✅ Endpoint QuickNode configuré")
+            self.logger.info(f"✅ Endpoint QuickNode configuré: {self.config.rpc.quicknode_endpoint}")
+
         
-        # Ajouter les endpoints de fallback
-        fallback_endpoints = getattr(self.config.rpc, 'fallback_endpoints', DEFAULT_RPC_ENDPOINTS)
-        for endpoint in fallback_endpoints:
-            self.endpoints.append({
-                'url': endpoint,
-                'type': 'public',
-                'priority': 2,
-                'rate_limit': 5  # RPS conservateur pour endpoints publics
-            })
+        # Ajouter les endpoints de fallback configurés
+        if hasattr(self.config.rpc, 'fallback_endpoints') and self.config.rpc.fallback_endpoints:
+            fallback_endpoints = self.config.rpc.fallback_endpoints
+            self.logger.info(f"Configuring {len(fallback_endpoints)} fallback endpoints from config.")
+            for endpoint in fallback_endpoints:
+                self.endpoints.append({
+                    'url': endpoint,
+                    'type': 'public',
+                    'priority': 2,
+                    'rate_limit': 5
+                })
         
         if not self.endpoints:
-            # Utiliser les endpoints par défaut si aucun n'est configuré
+            self.logger.warning("⚠️ No RPC endpoints configured. Using default public endpoints.")
             for endpoint in DEFAULT_RPC_ENDPOINTS:
                 self.endpoints.append({
                     'url': endpoint,
@@ -325,7 +328,7 @@ class RPCClient:
                     'priority': 3,
                     'rate_limit': 5
                 })
-            self.logger.warning("⚠️ Utilisation des endpoints RPC par défaut")
+
     
     def _initialize_metrics(self):
         """Initialise les métriques pour chaque endpoint"""

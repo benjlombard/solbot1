@@ -195,17 +195,11 @@ class WalletScanner:
             # Cache results
             self._cache_result(wallet_address, scan_type, result)
             
-            # Clean up
-            with self._lock:
-                self._active_scans.pop(wallet_address, None)
-            
             logger.info(f"✅ Scan completed for {wallet_address}: {len(result.get('tokens_discovered', []))} tokens, {len(result.get('transactions_found', []))} transactions")
             
             return result
             
         except Exception as e:
-            with self._lock:
-                self._active_scans.pop(wallet_address, None)
             
             logger.error(f"❌ Scan failed for {wallet_address}: {e}")
             return {
@@ -214,6 +208,11 @@ class WalletScanner:
                 "error_message": str(e),
                 "scan_duration": 0
             }
+        finally:
+            # This will always run, ensuring the lock is released.
+            with self._lock:
+                self._active_scans.pop(wallet_address, None)
+                logger.debug(f"Scan lock released for {wallet_address}")
     
     def _perform_full_scan(self, wallet_address: str) -> Dict[str, Any]:
         """Perform comprehensive wallet scan"""
@@ -416,27 +415,57 @@ class WalletScanner:
     
     def _parse_transaction(self, wallet_address: str, tx_data: Dict[str, Any]) -> Optional[Transaction]:
         """Parse transaction data into Transaction model"""
+        signature = tx_data.get('signature', 'N/A')
         try:
-            if not tx_data['transaction']:
+            logger.debug(f"Parsing transaction with signature: {signature}")
+            tx = tx_data.get('transaction')
+            if not tx:
+                logger.warning(f"Transaction data missing for signature {signature}")
+                return None
+
+            meta = tx.get('meta', {})
+            if not meta:
+                logger.warning(f"Transaction meta data missing for signature {signature}")
                 return None
             
-            tx = tx_data['transaction']
-            signature = tx_data['signature']
-            
-            # Extract basic info
+            # Basic info
             slot = tx.get('slot', 0)
             block_time = tx.get('blockTime', 0)
+            fee = meta.get('fee', 0) / 1_000_000_000  # Lamports to SOL
+            status = TransactionStatus.SUCCESS if not meta.get('err') else TransactionStatus.FAILED
+
+            # --- Balance Change Calculation ---
+            account_keys = tx['transaction']['message']['accountKeys']
+
             
-            # Parse transaction details
-            meta = tx.get('meta', {})
-            transaction = tx.get('transaction', {})
+            # Find wallet's SOL balance change
+            sol_change = 0.0
+            try:
+                wallet_index = account_keys.index(wallet_address)
+                sol_pre = meta['preBalances'][wallet_index]
+                sol_post = meta['postBalances'][wallet_index]
+                sol_change = (sol_post - sol_pre) / 1_000_000_000
+            except (ValueError, IndexError, KeyError) as e:
+                logger.debug(f"Could not calculate SOL balance change for {signature}: {e}")
+
+            # Find primary token balance change for the wallet
+            token_change_details = self._find_primary_token_change(wallet_address, meta)
+
+            if not token_change_details:
+                logger.debug(f"No direct token balance change for wallet {wallet_address} in tx {signature}. Skipping as non-token-related for this wallet.")
+                return None
+
+            # Extract details from the identified token balance change
+            token_mint = token_change_details['mint']
+            token_change = token_change_details['uiTokenAmount']['uiAmount']
+            decimals = token_change_details['uiTokenAmount']['decimals']
             
-            # Calculate amounts and fees
-            amount = 0.0
-            fee = float(meta.get('fee', 0)) / 1_000_000_000  # Convert lamports to SOL
+            # Use the helper from the model to classify the transaction
+            from models.transaction import classify_transaction_from_amounts
+            tx_type = classify_transaction_from_amounts(token_change, sol_change)
             
-            # Determine transaction type
-            tx_type = TransactionType.TRANSFER
+            logger.info(f"Parsed transaction {signature}: Type={tx_type.value}, SOL Change={sol_change:.4f}, Token Change={token_change:.4f} ({token_mint})")
+
             
             # Create transaction record
             transaction_obj = Transaction(
@@ -444,19 +473,66 @@ class WalletScanner:
                 wallet_address=wallet_address,
                 slot=slot,
                 block_time=block_time,
-                amount=amount,
+                amount=sol_change,
                 fee=fee,
+                status=status,
+                token_mint=token_mint,
+                token_amount=abs(token_change),
                 transaction_type=tx_type,
-                status=TransactionStatus.SUCCESS if not meta.get('err') else TransactionStatus.FAILED,
+                is_token_transaction=True,
                 source="wallet_scanner"
             )
             
             return transaction_obj
             
         except Exception as e:
-            logger.error(f"❌ Error parsing transaction {signature}: {e}")
+            logger.error(f"❌ Error parsing transaction {signature}: {e}", exc_info=True)
             return None
     
+    def _find_primary_token_change(self, wallet_address: str, meta: Dict[str, Any]) -> Optional[Dict]:
+        """Find the most relevant token balance change for the specified wallet."""
+        pre_token_balances = meta.get('preTokenBalances', [])
+        post_token_balances = meta.get('postTokenBalances', [])
+
+        all_changes = {}
+
+        # Process pre-balances
+        for balance in pre_token_balances:
+            if balance.get('owner') == wallet_address:
+                mint = balance.get('mint')
+                if not mint: continue
+                all_changes[mint] = {'pre': balance['uiTokenAmount']}
+
+        # Process post-balances and calculate change
+        for balance in post_token_balances:
+            if balance.get('owner') == wallet_address:
+                mint = balance.get('mint')
+                if not mint: continue
+                if mint not in all_changes:
+                    all_changes[mint] = {}
+                all_changes[mint]['post'] = balance['uiTokenAmount']
+        
+        # Find the change with the largest magnitude
+        primary_change = None
+        max_abs_change = 0.0
+
+        for mint, changes in all_changes.items():
+            pre_amount = changes.get('pre', {}).get('uiAmount', 0.0)
+            post_amount = changes.get('post', {}).get('uiAmount', 0.0)
+            change = post_amount - pre_amount
+
+            if abs(change) > max_abs_change:
+                max_abs_change = abs(change)
+                primary_change = {
+                    'mint': mint,
+                    'uiTokenAmount': {
+                        'uiAmount': change,
+                        'decimals': changes.get('post', changes.get('pre', {})).get('decimals', 9)
+                    }
+                }
+        
+        return primary_change
+
     def _update_balances(self, wallet_address: str, accounts: List[TokenAccountInfo]) -> List[Dict[str, Any]]:
         """Update wallet balance information"""
         updated_balances = []

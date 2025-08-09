@@ -778,11 +778,15 @@ def get_recent_activity():
     try:
         hours = request.args.get('hours', 24, type=int)
         limit = min(request.args.get('limit', 50, type=int), 200)  # Max 200
-        
+        logger.info(f"--- Fetching recent activity for the last {hours} hours (limit: {limit}) ---")
+
         cache_key = f"recent_activity_{hours}h_{limit}"
         cached_data = get_cached_result(cache_key)
         if cached_data:
+            logger.info(f"Cache hit for key: {cache_key}. Returning cached data.")
             return jsonify(create_success_response("Recent activity from cache", cached_data))
+
+        logger.info(f"Cache miss for key: {cache_key}. Fetching from DB.")
 
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -802,6 +806,8 @@ def get_recent_activity():
             """, (start_time, limit))
 
             transactions_data = cursor.fetchall()
+            logger.info(f"Found {len(transactions_data)} recent transactions in the database.")
+
             recent_transactions = []
 
             for row in transactions_data:
@@ -841,19 +847,20 @@ def get_recent_activity():
 
             # === DÉCOUVERTES RÉCENTES DE TOKENS ===
             cursor.execute("""
-                SELECT 
-                    ta.token_mint, ta.wallet_address, ta.first_seen, ta.balance,
-                    t.token_symbol
-                FROM token_accounts ta
-                LEFT JOIN transactions t ON ta.token_mint = t.token_mint 
-                    AND t.wallet_address = ta.wallet_address
-                WHERE ta.first_seen >= ?
-                GROUP BY ta.token_mint, ta.wallet_address, ta.first_seen, ta.balance
-                ORDER BY ta.first_seen DESC
+                SELECT
+                    td.token_mint, td.wallet_address, td.discovered_at,
+                    td.symbol as token_symbol,
+                    ta.balance
+                FROM token_discoveries td
+                LEFT JOIN token_accounts ta ON td.token_mint = ta.token_mint AND td.wallet_address = ta.wallet_address
+                WHERE td.discovered_at >= ?
+                ORDER BY td.discovered_at DESC
                 LIMIT ?
-            """, (start_time, limit // 2))  # Moins de découvertes que de transactions
+            """, (start_time, limit // 2))
 
             discoveries_data = cursor.fetchall()
+            logger.info(f"Found {len(discoveries_data)} recent token discoveries in the database.")
+
             recent_discoveries = []
 
             for row in discoveries_data:
@@ -861,7 +868,8 @@ def get_recent_activity():
                 wallet = row[1]
                 discovered_at = row[2]
                 balance = row[3]
-                symbol = row[4] or f"TOKEN_{mint[:6]}"
+                symbol = row[3] or f"TOKEN_{mint[:6]}"
+                balance = row[4] or 0.0 # Fallback if no balance found in token_accounts
 
                 recent_discoveries.append({
                     'type': 'discovery',
@@ -883,6 +891,9 @@ def get_recent_activity():
             
             # Limiter au nombre demandé
             all_activity = all_activity[:limit]
+            logger.info(f"Combined and sorted activity. Total items: {len(all_activity)}")
+            if all_activity:
+                logger.debug(f"Sample activity item: {all_activity[0]}")
 
             activity_data = {
                 'period_hours': hours,
@@ -891,13 +902,14 @@ def get_recent_activity():
                 'discoveries_count': len(recent_discoveries),
                 'activity': all_activity
             }
+            logger.info(f"Returning {len(all_activity)} activity items to frontend.")
 
             cache_result(cache_key, activity_data, 30)  # Cache 30 secondes
             
             return jsonify(create_success_response("Recent activity retrieved", activity_data))
 
     except Exception as e:
-        logger.error(f"Erreur recent activity: {e}")
+        logger.error(f"Erreur recent activity: {e}", exc_info=True)
         return jsonify(create_error_response("Failed to load recent activity", [str(e)])), 500
 
 

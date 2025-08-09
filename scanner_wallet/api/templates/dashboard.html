@@ -797,7 +797,7 @@
             // Mettre à jour toutes les sections
             updateStats();
             await updateWalletsList();
-            updateActivity();
+            await updateActivity();
             updateTopTokens();
             
             lastUpdate = Date.now();
@@ -933,75 +933,70 @@
     }
 
     // Mise à jour de l'activité récente
-    function updateActivity() {
+    async function updateActivity() {
         const container = document.getElementById('activity-list');
         if (!container) return;
         
-        const topTokens = dashboardData.top_tokens || [];
-        const newGems = dashboardData.new_gems || [];
-        const volumeAlerts = dashboardData.volume_alerts || [];
+        container.innerHTML = `<div class="loading"><div class="spinner"></div> Chargement de l'activité...</div>`;
+
+        try {
+            const response = await apiCall('/dashboard/recent-activity?limit=50');
+            console.log('📦 [Activity] Raw API response:', response);
+
+            const activities = response.data.activity || [];
+            console.log(`📊 [Activity] Found ${activities.length} activity items.`);
+
         
-        // Combiner différents types d'activité
-        let activities = [];
-        
-        // Ajouter les tokens actifs
-        topTokens.slice(0, 5).forEach(token => {
-            activities.push({
-                type: token.net_position > 0 ? 'buy' : 'sell',
-                icon: token.net_position > 0 ? '📈' : '📉',
-                title: `${token.symbol} - ${token.wallet_short}`,
-                details: `${token.transaction_count} TX • ${token.sol_volume} SOL`,
-                time: `${token.hours_ago}h`,
-                value: token.activity_score
-            });
-        });
-        
-        // Ajouter les nouvelles découvertes
-        newGems.forEach(gem => {
-            activities.push({
-                type: 'discovery',
-                icon: '🆕',
-                title: `Nouveau token: ${gem.symbol}`,
-                details: `${gem.wallet_short} • Confiance: ${gem.confidence}`,
-                time: `${gem.hours_ago}h`,
-                value: 100
-            });
-        });
-        
-        // Ajouter les alertes de volume
-        volumeAlerts.forEach(alert => {
-            activities.push({
-                type: 'transfer',
-                icon: '🔥',
-                title: `Volume élevé: ${alert.symbol}`,
-                details: `${alert.sol_volume} SOL • ${alert.alert_level}`,
-                time: `${alert.hours_ago}h`,
-                value: alert.sol_volume
-            });
-        });
-        
-        // Trier par temps et limiter
-        activities = activities
-            .sort((a, b) => parseFloat(a.time) - parseFloat(b.time))
-            .slice(0, MAX_ACTIVITY_DISPLAY);
+       
         
         if (!activities.length) {
             container.innerHTML = '<div class="loading">Aucune activité récente</div>';
+            console.log('- [Activity] No activities to display.');
+
             return;
         }
 
-        container.innerHTML = activities.map(activity => `
-            <div class="activity-item fade-in-up">
-                <div class="activity-icon activity-${activity.type}">
-                    ${activity.icon}
-                </div>
-                <div class="activity-content">
-                    <div class="activity-title">${activity.title}</div>
-                    <div class="activity-details">${activity.details}</div>
-                </div>
-                <div class="activity-time">${activity.time} ago</div>
-            </div>
-        `).join('');
+       container.innerHTML = activities.map(activity => {
+                let icon = '🔄';
+                let title = '';
+                let details = '';
+                let activityType = 'transfer'; // default
+
+                if (activity.type === 'transaction') {
+                    activityType = activity.transaction_type.toLowerCase();
+                    if (activityType === 'buy') {
+                        icon = '📈';
+                    } else if (activityType === 'sell') {
+                        icon = '📉';
+                    }
+                    title = `<b>${activity.transaction_type.toUpperCase()}</b> ${activity.token_symbol} par ${activity.wallet_short}`;
+                    details = `Montant: ${formatNumber(activity.token_amount)} ${activity.token_symbol} pour ${formatNumber(activity.sol_amount)} SOL`;
+                } else if (activity.type === 'discovery') {
+                    activityType = 'discovery';
+                    icon = '🆕';
+                    title = `Nouveau token découvert: ${activity.token_symbol}`;
+                    details = `Wallet: ${activity.wallet_short} • Balance: ${formatNumber(activity.initial_balance)}`;
+                }
+
+                return `
+                    <div class="activity-item fade-in-up">
+                        <div class="activity-icon activity-${activityType}">
+                            ${icon}
+                        </div>
+                        <div class="activity-content">
+                            <div class="activity-title">${title}</div>
+                            <div class="activity-details">${details}</div>
+                        </div>
+                        <div class="activity-time">${activity.hours_ago.toFixed(1)}h ago</div>
+                    </div>
+                `;
+            }).join('');
+            console.log(`✅ [Activity] Rendered ${activities.length} items.`);
+
+        } catch (error) {
+            console.error('❌ Erreur chargement activité:', error);
+            container.innerHTML = `<div class="error-message">Erreur: ${error.message}</div>`;
+        }
     }
 
     // Mise à jour des tokens populaires
@@ -1098,7 +1093,7 @@
         button.disabled = true;
         
         try {
-            await loadDashboardData();
+            await updateActivity(); // Changed from loadDashboardData()
             showMessage('Activité mise à jour', 'success', 2000);
         } catch (error) {
             showMessage('Erreur lors de la mise à jour', 'error');

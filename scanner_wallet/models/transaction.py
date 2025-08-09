@@ -70,8 +70,8 @@ class Transaction:
 
     def __post_init__(self):
         """Validation après initialisation"""
-        if not self.signature or len(self.signature) != 88:
-            raise ValueError("Invalid transaction signature format")
+        if not validate_transaction_signature(self.signature):
+            raise ValueError(f"Invalid transaction signature format: {self.signature}")
         
         if not self.wallet_address or len(self.wallet_address) != 44:
             raise ValueError("Invalid wallet address format")
@@ -395,7 +395,7 @@ class BalanceChange:
 
 def validate_transaction_signature(signature: str) -> bool:
     """Valide une signature de transaction Solana"""
-    if not signature or len(signature) != 88:
+    if not isinstance(signature, str) or not signature:
         return False
     
     # Validation Base58 basique
@@ -404,10 +404,8 @@ def validate_transaction_signature(signature: str) -> bool:
         decoded = base58.b58decode(signature)
         return len(decoded) == 64
     except:
-        # Fallback sans base58
-        import re
-        base58_pattern = r'^[1-9A-HJ-NP-Za-km-z]{88}$'
-        return bool(re.match(base58_pattern, signature))
+        
+        return False
 
 
 def classify_transaction_from_amounts(token_change: float, sol_change: float, 

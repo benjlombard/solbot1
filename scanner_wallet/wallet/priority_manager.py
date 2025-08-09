@@ -100,7 +100,7 @@ class WalletPriorityManager:
         self._priority_scores: Dict[str, PriorityScore] = {}
         self._selection_queue: List[Tuple[float, str, int]] = []
         self._last_selection_time: Dict[str, int] = {}
-        
+        self._last_tied_selection_index: int = 0
         # Configuration constants
         self.MAX_PRIORITY = 10.0
         self.MIN_PRIORITY = 0.1
@@ -279,7 +279,7 @@ class WalletPriorityManager:
                 f"Penalty={score.penalty:.2f} -> "
                 f"Final={score.final_score:.2f}"
             )
-            
+
             return score
             
         except Exception as e:
@@ -377,42 +377,64 @@ class WalletPriorityManager:
         
         # Penalty for consecutive empty scans
         if priority.consecutive_empty_scans > 5:
-            penalty += min(3.0, priority.consecutive_empty_scans * 0.3)
+            penalty += min(2.0, priority.consecutive_empty_scans * 0.2)
         
-        # Penalty for no activity in long time
-        now = get_current_timestamp()
-        days_since_activity = safe_divide(now - priority.last_activity_detected, 86400)
-        if days_since_activity > 7:
-            penalty += min(2.0, days_since_activity / 7.0)
         
         return penalty
     
     def select_next_wallet(self) -> Optional[str]:
         """Select the next wallet to scan based on priority"""
         try:
-            available_wallets = []
-            
             with self._lock:
+                if not self._wallet_priorities:
+                    logger.warning("No wallets available in priority manager.")
+                    return None
+
                 # Calculate scores for all wallets
+                all_wallets_scores = []
                 for wallet_address in self._wallet_priorities:
                     score = self.calculate_priority_score(wallet_address)
-                    available_wallets.append((score.final_score, wallet_address))
-            
-            if not available_wallets:
+                    all_wallets_scores.append(score)
+
+            if not all_wallets_scores:
                 return None
+
+            # Log the priority scores for all wallets for transparency
+            log_message = "--- Wallet Priority Ranking ---\n"
+            sorted_scores = sorted(all_wallets_scores, key=lambda s: s.final_score, reverse=True)
             
-            # Sort by priority score (descending)
-            available_wallets.sort(key=lambda x: x[0], reverse=True)
-            
-            # Select highest priority wallet
-            selected_wallet = available_wallets[0][1]
-            
-            logger.debug(f"🎯 Selected wallet {selected_wallet} with score {available_wallets[0][0]}")
+            for score in sorted_scores:
+                log_message += (
+                    f"  - Wallet: {score.wallet_address[:8]}...{score.wallet_address[-8:]} | "
+                    f"Score: {score.final_score:.2f} | "
+                    f"Breakdown: (Base: {score.base_score:.2f}, "
+                    f"Activity: {score.activity_bonus:.2f}, "
+                    f"Volume: {score.volume_bonus:.2f}, "
+                    f"Recency: {score.recency_bonus:.2f}, "
+                    f"Discovery: {score.discovery_bonus:.2f}, "
+                    f"Penalty: {score.penalty:.2f})\n"
+                )
+            logger.info(log_message)
+            # Tie-breaking logic
+            highest_score = sorted_scores[0].final_score
+            top_wallets = [s for s in sorted_scores if s.final_score == highest_score]
+
+            if len(top_wallets) > 1:
+                # Round-robin selection for ties
+                self._last_tied_selection_index %= len(top_wallets)
+                selected_score = top_wallets[self._last_tied_selection_index]
+                selected_wallet = selected_score.wallet_address
+                self._last_tied_selection_index += 1
+                logger.info(f"Tie-break: {len(top_wallets)} wallets with score {highest_score:.2f}. Selecting index {self._last_tied_selection_index - 1} via round-robin.")
+            else:
+                # No tie, just pick the top one
+                selected_wallet = sorted_scores[0].wallet_address
+            logger.debug(f"🎯 Selected wallet {selected_wallet} with score {sorted_scores[0].final_score}")
             
             return selected_wallet
             
         except Exception as e:
-            logger.error(f"❌ Error selecting next wallet: {e}")
+            logger.error(f"❌ Error selecting next wallet: {e}", exc_info=True)
             return None
     
     def update_priority(self, wallet_address: str, new_score: float, reason: str = "manual") -> bool:
