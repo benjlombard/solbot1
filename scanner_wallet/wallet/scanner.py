@@ -570,7 +570,7 @@ class WalletScanner:
                 """, (wallet_address,))
                 
                 for row in cursor.fetchall():
-                    existing_mints.add(row['token_mint'])
+                    existing_mints.add(row[0])
         
         except Exception as e:
             logger.error(f"❌ Error getting existing tokens: {e}")

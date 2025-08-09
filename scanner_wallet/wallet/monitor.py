@@ -165,9 +165,15 @@ class SolanaWalletMonitor:
         self.scan_queue: queue.Queue = queue.Queue()
         self.results_queue: queue.Queue = queue.Queue()
         
-        # Initialize wallets
-        if wallet_addresses:
-            self.add_wallets(wallet_addresses)
+        # Initialize wallets by combining wallets from the DB and the config file
+        db_wallets = list(self.priority_manager.get_wallet_priorities().keys())
+        config_wallets = wallet_addresses if wallet_addresses else []
+        
+        # Create a single, unique list of all known wallets
+        unique_wallets = set(db_wallets + config_wallets)
+        
+        if unique_wallets:
+            self.add_wallets(list(unique_wallets))
         
         # Signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -298,71 +304,59 @@ class SolanaWalletMonitor:
     
     def _monitoring_loop(self):
         """Main monitoring loop running in background thread"""
-        logger.info("🔄 Starting monitoring loop")
+        logger.info("--- MONITORING LOOP STARTED ---")
         
         while self._running and not self._shutdown_event.is_set():
             try:
                 cycle_start = get_current_timestamp()
                 cycle_id = f"cycle_{cycle_start}"
+                logger.info(f"--- Starting Cycle {cycle_id} ---")
                 
-                logger.info(f"🔄 Starting cycle {cycle_id}")
-                debug_scanner_status(self)
-                # Select next wallet based on priority
-                try:
-                    selected_wallet = self.priority_manager.select_next_wallet()
-                    logger.info(f"🎯 Selected wallet for scan: {selected_wallet}")
-                except Exception as e:
-                    logger.error(f"❌ Error selecting wallet: {e}")
-                    selected_wallet = None
-
+                logger.debug("Attempting to select wallet...")
+                selected_wallet = self.priority_manager.select_next_wallet()
+                
                 if not selected_wallet:
-                    logger.warning(f"⚠️ Priority manager returned None. Available wallets: {list(self.wallets)[:5]}")  # Show first 5
-                    # Fallback: select first wallet
+                    logger.warning("No wallet selected by priority manager. Checking for any available wallet.")
                     if self.wallets:
                         selected_wallet = list(self.wallets)[0]
-                        logger.info(f"🔄 Using fallback wallet: {selected_wallet}")
+                        logger.info(f"Using fallback wallet: {selected_wallet}")
+                    else:
+                        logger.error("No wallets available to scan. Stopping loop.")
+                        break
                 
-                if selected_wallet and selected_wallet in self.wallets:
-                    logger.info(f"✅ Wallet {selected_wallet} is valid, starting scan...")
+                logger.info(f"Selected wallet for scan: {selected_wallet}")
+
+                if selected_wallet in self.wallets:
+                    logger.debug(f"Scanning wallet: {selected_wallet}")
+                    scan_result = self._scan_wallet(selected_wallet, cycle_id)
                     
-                    # Perform wallet scan
-                    try:
-                        scan_result = self._scan_wallet(selected_wallet, cycle_id)
-                        
-                        if scan_result:
-                            logger.info(f"📊 Scan result: Success={scan_result.success}, New accounts={scan_result.new_accounts_found}, Transactions={scan_result.transactions_detected}")
-                        else:
-                            logger.warning(f"⚠️ Scan result is None for {selected_wallet}")
-                    except Exception as e:
-                        logger.error(f"❌ Error during wallet scan: {e}")
-                        scan_result = None
+                    if scan_result and scan_result.success:
+                        logger.info(f"Scan successful for {selected_wallet}. Discoveries: {scan_result.new_accounts_found}")
+                        # Provide feedback to the priority manager
+                        self.priority_manager.increment_scan_count(
+                            wallet_address=scan_result.wallet_address,
+                            duration=scan_result.scan_duration,
+                            discoveries=scan_result.new_accounts_found
+                        )
+                    else:
+                        logger.warning(f"Scan failed or returned no result for {selected_wallet}")
                     
-                    # Update priority and track changes...
                     self._update_cycle_stats(cycle_start, scan_result)
                 else:
-                    logger.warning(f"⚠️ No valid wallet selected or wallet not in list. Selected: {selected_wallet}, Wallets count: {len(self.wallets)}")
-                    scan_result = None
-                    # Update stats even for failed cycles
+                    logger.warning(f"Selected wallet {selected_wallet} not in the active list. Skipping.")
                     self._update_cycle_stats(cycle_start, None)
-                
-                # Log cycle completion with detailed info
+
                 duration = get_current_timestamp() - cycle_start
-                discoveries = scan_result.new_accounts_found if scan_result else 0
-                transactions = scan_result.transactions_detected if scan_result else 0
-                logger.info(f"✅ Cycle {cycle_id} completed - Duration: {duration:.2f}s, Discoveries: {discoveries}, Transactions: {transactions}")
-                # Get sleep interval safely
-                try:
-                    sleep_interval = self.config.monitoring.update_interval if self.config else 45
-                except:
-                    sleep_interval = 45
-                # Sleep with countdown log
-                logger.debug(f"😴 Sleeping for {self.config.monitoring.update_interval} seconds until next cycle...")
-                time.sleep(self.config.monitoring.update_interval)
+                logger.info(f"--- Cycle {cycle_id} Finished. Duration: {duration:.2f}s ---")
+                
+                sleep_interval = getattr(self.config.monitoring, 'update_interval', 45)
+                logger.debug(f"Sleeping for {sleep_interval} seconds.")
+                time.sleep(sleep_interval)
                 
             except Exception as e:
-                logger.error(f"❌ Monitoring loop error: {e}", exc_info=True)  # exc_info=True pour la stack trace
+                logger.error(f"FATAL ERROR in monitoring loop: {e}", exc_info=True)
                 self.stats.failed_scans += 1
-                time.sleep(5)
+                time.sleep(15) # Longer sleep after a fatal error
     
     def _scan_wallet(self, wallet_address: str, cycle_id: str) -> ScanResult:
         """Scan a single wallet for changes"""
@@ -380,8 +374,9 @@ class SolanaWalletMonitor:
                 }
             
             # Process results
-            new_accounts = scan_data.get('new_accounts', [])
-            transactions = scan_data.get('transactions', [])
+            new_accounts_count = scan_data.get('new_accounts', 0)
+            transactions_count = len(scan_data.get('transactions_found', []))
+            total_accounts_count = scan_data.get('total_accounts', 0)
             
             # Store results
             if self.db_manager:
@@ -393,13 +388,13 @@ class SolanaWalletMonitor:
                 wallet_address=wallet_address,
                 cycle_id=cycle_id,
                 scan_duration=scan_duration,
-                new_accounts_found=len(new_accounts),
-                total_accounts=len(scan_data.get('all_accounts', [])),
-                transactions_detected=len(transactions),
+                new_accounts_found=new_accounts_count,
+                total_accounts=total_accounts_count,
+                transactions_detected=transactions_count,
                 success=True
             )
             
-            logger.info(f"✅ Scan completed for {wallet_address}: {len(new_accounts)} new accounts")
+            logger.info(f"✅ Scan completed for {wallet_address}: {new_accounts_count} new accounts found.")
             return result
             
         except Exception as e:
@@ -413,7 +408,7 @@ class SolanaWalletMonitor:
                 error_message=str(e)
             )
             
-            logger.error(f"❌ Scan failed for {wallet_address}: {e}")
+            logger.error(f"❌ Scan failed for {wallet_address}: {e}", exc_info=True)
             return result
     
     def _update_wallet_priority(self, wallet_address: str, scan_result: ScanResult):
@@ -479,9 +474,11 @@ class SolanaWalletMonitor:
     def _store_scan_results(self, wallet_address: str, cycle_id: str, scan_data: Dict):
         """Store scan results in database"""
         if not self.db_manager:
+            self.logger.warning("Database manager not available, skipping result storage.")
             return
             
         try:
+            ts = get_current_timestamp()
             with self.db_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 
@@ -493,10 +490,10 @@ class SolanaWalletMonitor:
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     wallet_address, cycle_id, "full_scan",
-                    len(scan_data.get('all_accounts', [])),
-                    len(scan_data.get('new_accounts', [])),
+                    scan_data.get('total_accounts', 0),
+                    scan_data.get('new_accounts', 0),
                     scan_data.get('duration', 0),
-                    get_current_timestamp()
+                    ts
                 ))
                 
                 # Mettre à jour la table des priorités avec le temps du dernier scan
@@ -506,22 +503,28 @@ class SolanaWalletMonitor:
                         last_scan_time = ?,
                         total_scans = total_scans + 1
                     WHERE wallet_address = ?
-                """, (current_timestamp, wallet_address))
+                """, (ts, wallet_address))
 
                 # Store token discoveries
-                for account in scan_data.get('new_accounts', []):
+                for discovery in scan_data.get('tokens_discovered', []):
                     cursor.execute("""
-                        INSERT INTO token_discoveries 
-                        (token_mint, wallet_address, discovered_at, initial_balance, decimals)
-                        VALUES (?, ?, ?, ?, ?)
+                        INSERT OR IGNORE INTO token_discoveries 
+                        (token_mint, wallet_address, discovered_at, ata_pubkey, 
+                         initial_balance, decimals, symbol, name, discovery_method, confidence_score)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        account.get('mint'),
-                        wallet_address,
-                        current_timestamp,
-                        account.get('balance', 0),
-                        account.get('decimals', 9)
+                        discovery.token_mint,
+                        discovery.wallet_address,
+                        discovery.discovered_at,
+                        discovery.ata_pubkey,
+                        str(discovery.initial_balance),
+                        discovery.decimals,
+                        discovery.symbol,
+                        discovery.name,
+                        discovery.discovery_method,
+                        discovery.confidence_score
                     ))
-                
+                logger.debug(f"Committing scan results for {wallet_address} to database.")
                 conn.commit()
                 logger.info(f"✅ Scan results and last_scan_time stored for {wallet_address}")
 

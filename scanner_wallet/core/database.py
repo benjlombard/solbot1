@@ -367,6 +367,7 @@ class DatabaseManager:
                 detection_delay REAL DEFAULT 0.0,
                 wallet_priority_at_detection REAL DEFAULT 1.0,
                 scan_cycle_id TEXT,
+                source TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )

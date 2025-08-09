@@ -95,7 +95,7 @@ class WalletPriorityManager:
         self.config = get_config()
         
         # Thread-safe storage
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._wallet_priorities: Dict[str, WalletPriority] = {}
         self._priority_scores: Dict[str, PriorityScore] = {}
         self._selection_queue: List[Tuple[float, str, int]] = []
@@ -267,6 +267,18 @@ class WalletPriorityManager:
             # Cache the score
             with self._lock:
                 self._priority_scores[wallet_address] = score
+            
+
+            logger.debug(
+                f"Score for {wallet_address[:6]}...: "
+                f"Base={score.base_score:.2f}, "
+                f"Activity={score.activity_bonus:.2f}, "
+                f"Volume={score.volume_bonus:.2f}, "
+                f"Recency={score.recency_bonus:.2f}, "
+                f"Discovery={score.discovery_bonus:.2f}, "
+                f"Penalty={score.penalty:.2f} -> "
+                f"Final={score.final_score:.2f}"
+            )
             
             return score
             

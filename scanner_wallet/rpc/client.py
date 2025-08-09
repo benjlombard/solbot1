@@ -515,7 +515,7 @@ class RPCClient:
         ]
         
         if method in critical_methods:
-            return getattr(self.config.rpc, 'timeout', CRITICAL_RPC_TIMEOUT_)
+            return getattr(self.config.rpc, 'timeout', CRITICAL_RPC_TIMEOUT)
         elif method in batch_methods:
             return getattr(self.config.rpc, 'timeout', RPC_TIMEOUT_BATCH)
         else:
