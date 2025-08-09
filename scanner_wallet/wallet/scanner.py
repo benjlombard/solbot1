@@ -9,7 +9,7 @@ import threading
 from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, Context
 
 # Core imports with fallbacks
 try:
@@ -19,11 +19,12 @@ try:
     from core.exceptions import MonitoringError
     
     from models.token import Token, TokenAccount, TokenDiscovery
-    from models.transaction import Transaction, TransactionType, TransactionStatus
+    from models.transaction import Transaction, TransactionType, TransactionStatus, classify_transaction_from_amounts
     from models.wallet import WalletStats
     
     from utils.helpers import get_current_timestamp, safe_divide
     from utils.validators import quick_validate_address as validate_wallet_address
+    from utils.constants import SOLANA_TOKEN_PROGRAM_ID
 
     
     # RPC imports
@@ -123,7 +124,7 @@ class WalletScanner:
         self.MAX_RETRIES = 3
         self.SCAN_TIMEOUT = 30
         self.RATE_LIMIT_DELAY = 0.1
-        
+        self.RECENT_TRANSACTIONS_LIMIT = 20
         # Initialize batch manager
         self.batch_manager = None
         self._initialize_batch_manager()
@@ -312,7 +313,7 @@ class WalletScanner:
             # Get token accounts by owner
             response = self.rpc_client.call(
                 "getTokenAccountsByOwner",
-                [wallet_address, {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"}, {"encoding": "jsonParsed"}]
+                [wallet_address, {"programId": SOLANA_TOKEN_PROGRAM_ID}, {"encoding": "jsonParsed"}]
             )
             
             accounts = []
@@ -356,15 +357,16 @@ class WalletScanner:
         transactions = []
         
         try:
-            # Get recent signatures
+            # Get recent signatures, using the defined constant
             response = self.rpc_client.call(
                 "getSignaturesForAddress",
-                [wallet_address, {"limit": 50}]
+                [wallet_address, {"limit": self.RECENT_TRANSACTIONS_LIMIT}]
             )
             
             if response and 'result' in response:
-                signatures = [sig['signature'] for sig in response['result'][:20]]  # Limit to 20
-                
+                # The slicing is no longer needed as we fetch the exact number
+                signatures = [sig['signature'] for sig in response['result']]
+
                 # Get transaction details
                 for signature in signatures:
                     tx_response = self.rpc_client.call(
@@ -481,7 +483,6 @@ class WalletScanner:
             decimals = token_change_details['uiTokenAmount']['decimals']
             
             # Use the helper from the model to classify the transaction
-            from models.transaction import classify_transaction_from_amounts
             tx_type = classify_transaction_from_amounts(token_change, sol_change)
             
             logger.info(f"Parsed transaction {signature}: Type={tx_type.value}, SOL Change={sol_change:.4f}, Token Change={token_change:.4f} ({token_mint})")
@@ -532,24 +533,34 @@ class WalletScanner:
                     all_changes[mint] = {}
                 all_changes[mint]['post'] = balance['uiTokenAmount']
         
-        # Find the change with the largest magnitude
+        # Find the change with the largest magnitude using Decimal for precision
         primary_change = None
-        max_abs_change = 0.0
+        max_abs_change = Decimal('0.0')
 
         for mint, changes in all_changes.items():
             pre_balance_data = changes.get('pre')
             post_balance_data = changes.get('post')
+            try:
+                # Prefer uiAmountString for precision, fallback to uiAmount
+                pre_amount_val = pre_balance_data.get('uiAmountString', pre_balance_data.get('uiAmount')) if pre_balance_data else '0'
+                post_amount_val = post_balance_data.get('uiAmountString', post_balance_data.get('uiAmount')) if post_balance_data else '0'
 
-            pre_amount = float(pre_balance_data.get('uiAmount')) if pre_balance_data and pre_balance_data.get('uiAmount') is not None else 0.0
-            post_amount = float(post_balance_data.get('uiAmount')) if post_balance_data and post_balance_data.get('uiAmount') is not None else 0.0
-            change = post_amount - pre_amount
+                pre_amount = Decimal(str(pre_amount_val or '0'))
+                post_amount = Decimal(str(post_amount_val or '0'))
+
+                change = post_amount - pre_amount
+
+            except (InvalidOperation, TypeError, KeyError) as e:
+                logger.warning(f"Could not parse token amount as Decimal for mint {mint}: {e}")
+                continue
 
             if abs(change) > max_abs_change:
                 max_abs_change = abs(change)
                 primary_change = {
                     'mint': mint,
                     'uiTokenAmount': {
-                        'uiAmount': change,
+                        # Convert back to float for compatibility with the rest of the system
+                        'uiAmount': float(change),
                         'decimals': changes.get('post', changes.get('pre', {})).get('decimals', 9)
                     }
                 }
@@ -825,8 +836,8 @@ class WalletScanner:
             
             if qn_endpoint and 'endpoints' in stats:
                 for endpoint_stat in stats.get('endpoints', []):
-                    # The url in stats might be truncated, so we compare the beginning
-                    if qn_endpoint.startswith(endpoint_stat['url'].replace('.', '')):
+                    # Direct comparison now that the full URL is available in stats
+                    if qn_endpoint == endpoint_stat.get('url'):
                         return endpoint_stat.get('total_requests', 0)
         except Exception as e:
             logger.warning(f"Could not retrieve RPC stats for QuickNode request count: {e}")

@@ -12,6 +12,7 @@ import logging
 import asyncio
 from datetime import datetime, timedelta
 from dataclasses import asdict
+from cachetools import TTLCache
 
 # Imports des modèles et utilitaires
 try:
@@ -28,8 +29,9 @@ try:
         format_sol_amount, format_token_amount, format_timestamp,
         format_percentage, format_duration
     )
-    from utils.helpers import safe_get, calculate_moving_average, get_current_timestamp
+    from utils.helpers import safe_get, calculate_moving_average, get_current_timestamp, load_query
     from utils.dexscreener_api import get_dexscreener_data_for_mints
+    from utils.currency_api import get_usd_to_eur_rate
     from utils.security_analyzer import get_security_scores_for_mints
 except ImportError as e:
     logging.warning(f"Import error in dashboard routes: {e}")
@@ -56,10 +58,11 @@ async def get_balance(client, address):
 # Création du blueprint
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/dashboard')
 
-# Variables globales pour cache et configuration
-_dashboard_cache = {}
-_cache_expiry = {}
-CACHE_DURATION = 30  # 30 secondes
+# Remplacement du cache manuel par une solution robuste
+# TTLCache: Time To Live Cache, thread-safe
+# maxsize: nombre maximum d'éléments
+# ttl: durée de vie en secondes pour tous les éléments du cache
+dashboard_cache = TTLCache(maxsize=500, ttl=60)
 
 
 def get_db_connection():
@@ -70,28 +73,6 @@ def get_db_connection():
     except Exception as e:
         logger.error(f"Erreur connexion DB: {e}")
         raise
-
-
-def cache_result(key: str, data: Any, duration: int = CACHE_DURATION):
-    """Met en cache un résultat"""
-    _dashboard_cache[key] = data
-    _cache_expiry[key] = time.time() + duration
-
-
-def get_cached_result(key: str) -> Optional[Any]:
-    """Récupère un résultat du cache s'il est valide"""
-    if key in _dashboard_cache and time.time() < _cache_expiry.get(key, 0):
-        return _dashboard_cache[key]
-    return None
-
-
-def clear_expired_cache():
-    """Nettoie le cache expiré"""
-    current_time = time.time()
-    expired_keys = [k for k, exp_time in _cache_expiry.items() if current_time > exp_time]
-    for key in expired_keys:
-        _dashboard_cache.pop(key, None)
-        _cache_expiry.pop(key, None)
 
 
 # ============= ROUTES PRINCIPALES DU DASHBOARD =============
@@ -414,11 +395,11 @@ def debug_wallet_overview():
         # 9. Informations de cache
         try:
             cache_key = "wallet_overview"
-            cached_data = get_cached_result(cache_key)
+            cached_data = dashboard_cache.get(cache_key)
             debug_info['cache_info'] = {
                 'has_cached_data': cached_data is not None,
                 'cache_size': len(str(cached_data)) if cached_data else 0,
-                'cache_keys_count': len(_dashboard_cache)
+                'cache_keys_count': dashboard_cache.currsize
             }
         except Exception as e:
             debug_info['cache_info'] = {'error': str(e)}
@@ -462,7 +443,7 @@ async def get_dashboard_data():
     try:
         # Vérifier le cache
         cache_key = "dashboard_main_data"
-        cached_data = get_cached_result(cache_key)
+        cached_data = dashboard_cache.get(cache_key)
         if cached_data:
             return jsonify(create_success_response("Dashboard data retrieved from cache", cached_data))
 
@@ -510,27 +491,15 @@ async def get_dashboard_data():
             total_wallets = cursor.fetchone()[0] or 0
             
             # === TOKENS LES PLUS ACTIFS (24H) ===
-            cursor.execute("""
-                SELECT 
-                    t.token_symbol, 
-                    t.token_mint, 
-                    t.wallet_address,
-                    COUNT(*) as tx_count,
-                    SUM(CASE WHEN t.transaction_type = 'buy' THEN t.token_amount ELSE 0 END) as total_bought,
-                    SUM(CASE WHEN t.transaction_type = 'sell' THEN t.token_amount ELSE 0 END) as total_sold,
-                    AVG(CASE WHEN t.price_per_token > 0 THEN t.price_per_token ELSE NULL END) as avg_price,
-                    MAX(t.block_time) as last_activity,
-                    SUM(ABS(t.amount)) as total_sol_volume
-                FROM transactions t
-                WHERE t.is_token_transaction = 1 
-                AND t.block_time >= ?
-                GROUP BY t.token_mint, t.token_symbol, t.wallet_address
-                HAVING tx_count >= 1
-                ORDER BY tx_count DESC, last_activity DESC
-                LIMIT 20
-            """, (current_time - 86400,))
-
-            top_tokens_raw = cursor.fetchall()
+            top_tokens_query = load_query('get_top_active_tokens.sql')
+            if not top_tokens_query:
+                # Gérer le cas où la requête ne peut être chargée
+                logger.error("Impossible de charger la requête get_top_active_tokens.sql")
+                top_tokens_raw = []
+            else:
+                cursor.execute(top_tokens_query, (current_time - 86400,))
+                top_tokens_raw = cursor.fetchall()
+                
             top_tokens = []
             
             for row in top_tokens_raw:
@@ -669,8 +638,8 @@ async def get_dashboard_data():
             sol_price_data = await get_dexscreener_data_for_mints([SOLANA_NATIVE_MINT])
             sol_price_usd = sol_price_data.get(SOLANA_NATIVE_MINT, {}).get('price_usd', 0)
             
-            # Using a fixed rate for EUR for now
-            usd_to_eur_rate = 0.92 
+            # Fetch USD to EUR rate dynamically
+            usd_to_eur_rate = await get_usd_to_eur_rate()
             sol_price_eur = sol_price_usd * usd_to_eur_rate
             
 
@@ -766,7 +735,7 @@ async def get_dashboard_data():
             }
 
             # Mise en cache
-            cache_result(cache_key, dashboard_data, 60)
+            dashboard_cache[cache_key] = dashboard_data
             
             return jsonify(create_success_response("Dashboard data retrieved", dashboard_data))
 
@@ -784,7 +753,7 @@ def get_performance_metrics():
         hours = request.args.get('hours', 24, type=int)
         
         cache_key = f"performance_metrics_{hours}h"
-        cached_data = get_cached_result(cache_key)
+        cached_data = dashboard_cache.get(cache_key)
         if cached_data:
             return jsonify(create_success_response("Performance metrics from cache", cached_data))
 
@@ -890,7 +859,7 @@ def get_performance_metrics():
                 'hourly_trends': hourly_metrics
             }
 
-            cache_result(cache_key, performance_data, 120)  # Cache 2 minutes
+            dashboard_cache[cache_key] = performance_data
             
             return jsonify(create_success_response("Performance metrics retrieved", performance_data))
 
@@ -1038,7 +1007,7 @@ def get_wallet_detail(wallet_address):
             return jsonify(create_error_response("Invalid wallet address format")), 400
 
         cache_key = f"wallet_detail_{wallet_address}"
-        cached_data = get_cached_result(cache_key)
+        cached_data = dashboard_cache.get(cache_key)
         if cached_data:
             return jsonify(create_success_response("Wallet details from cache", cached_data))
 
@@ -1205,7 +1174,7 @@ def get_wallet_detail(wallet_address):
                 'recent_activity': recent_activity
             }
 
-            cache_result(cache_key, wallet_detail, 60)  # Cache 1 minute
+            dashboard_cache[cache_key] = wallet_detail
             
             return jsonify(create_success_response("Wallet details retrieved", wallet_detail))
 
@@ -1223,7 +1192,7 @@ def get_token_detail(token_mint):
             return jsonify(create_error_response("Invalid token mint format")), 400
 
         cache_key = f"token_detail_{token_mint}"
-        cached_data = get_cached_result(cache_key)
+        cached_data = dashboard_cache.get(cache_key)
         if cached_data:
             return jsonify(create_success_response("Token details from cache", cached_data))
 
@@ -1371,7 +1340,7 @@ def get_token_detail(token_mint):
                 'recent_transactions': recent_transactions
             }
 
-            cache_result(cache_key, token_detail, 90)  # Cache 90 secondes
+            dashboard_cache[cache_key] = token_detail
             
             return jsonify(create_success_response("Token details retrieved", token_detail))
 
@@ -1397,7 +1366,7 @@ def dashboard_health():
     health_data = {
         'status': 'healthy' if db_status == 'ok' else 'degraded',
         'database': db_status,
-        'cache_size': len(_dashboard_cache),
+        'cache_size': dashboard_cache.currsize,
         'timestamp': int(time.time())
     }
 
@@ -1408,9 +1377,8 @@ def dashboard_health():
 def clear_cache():
     """Vide le cache du dashboard"""
     try:
-        cleared_items = len(_dashboard_cache)
-        _dashboard_cache.clear()
-        _cache_expiry.clear()
+        cleared_items = len(dashboard_cache)
+        dashboard_cache.clear()
         
         return jsonify(create_success_response(f"Cache cleared: {cleared_items} items removed"))
     except Exception as e:
@@ -1422,10 +1390,10 @@ def clear_cache():
 def dashboard_stats():
     """Statistiques d'usage du dashboard"""
     try:
-        clear_expired_cache()  # Nettoyer avant de compter
+        # clear_expired_cache() n'est plus nécessaire avec TTLCache
         
         stats = {
-            'cache_entries': len(_dashboard_cache),
+            'cache_entries': dashboard_cache.currsize,
             'cache_hit_ratio': 'N/A',  # À implémenter avec compteurs
             'active_connections': 'N/A',  # À implémenter
             'avg_response_time': 'N/A'  # À implémenter
@@ -1460,19 +1428,11 @@ def init_dashboard_routes(app):
     logger.info("✅ Routes dashboard enregistrées")
 
 
-# Nettoyage automatique du cache (appelé périodiquement)
-def cleanup_dashboard_cache():
-    """Fonction de nettoyage du cache (à appeler périodiquement)"""
-    try:
-        clear_expired_cache()
-        logger.debug(f"Cache nettoyé: {len(_dashboard_cache)} entrées restantes")
-    except Exception as e:
-        logger.error(f"Erreur nettoyage cache dashboard: {e}")
+# La fonction cleanup_dashboard_cache n'est plus nécessaire avec TTLCache
 
 
 # Export des fonctions principales
 __all__ = [
     'dashboard_bp',
-    'init_dashboard_routes',
-    'cleanup_dashboard_cache'
+    'init_dashboard_routes'
 ]

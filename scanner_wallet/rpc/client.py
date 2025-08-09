@@ -33,7 +33,7 @@ try:
     from core.logger import get_logger
     from utils.helpers import exponential_backoff, CircularBuffer, get_current_timestamp,retry_with_backoff
     from utils.constants import (
-        DEFAULT_RPC_ENDPOINTS, QUICKNODE_FREE_RPS_LIMIT,
+        SYSTEM_INFO, DEFAULT_RPC_ENDPOINTS, QUICKNODE_FREE_RPS_LIMIT,
         RPC_TIMEOUT_DEFAULT, RPC_TIMEOUT_BATCH, CRITICAL_RPC_TIMEOUT,
         MAX_RPC_RETRIES, RPC_RETRY_DELAY_BASE
     )
@@ -279,10 +279,11 @@ class RPCClient:
         self.session_timeout = getattr(self.config.rpc, 'session_timeout', 30.0)
         
         # Headers par défaut pour toutes les requêtes
+        user_agent = f"SolanaWalletMonitor/{SYSTEM_INFO.get('version', '2.0.0')}"
         self.session.headers.update({
             'Content-Type': 'application/json',
             'Accept': 'application/json',
-            'User-Agent': 'SolanaWalletMonitor/2.0',
+            'User-Agent': user_agent,
             'Connection': 'keep-alive'  # Forcer keep-alive
         })
         
@@ -790,7 +791,7 @@ class RPCClient:
                 metrics = self.endpoints_metrics[url]
                 
                 endpoints_stats.append({
-                    'url': url[:50] + '.' if len(url) > 50 else url,
+                    'url': url,
                     'type': endpoint_config['type'],
                     'health_score': round(metrics.health_score, 1),
                     'success_rate': round(metrics.success_rate, 1),

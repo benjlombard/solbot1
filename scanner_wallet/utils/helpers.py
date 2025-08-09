@@ -11,6 +11,7 @@ import secrets
 import re
 import json
 import math
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Union, Tuple, Callable
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
@@ -949,6 +950,52 @@ def safe_json_dumps(obj: Any, default: Any = "N/A", **kwargs) -> str:
 
 
 # =============================================================================
+# UTILITAIRES DE FICHIERS
+# =============================================================================
+
+_QUERIES_DIR = None
+
+def load_query(query_name: str) -> Optional[str]:
+    """
+    Charge une requête SQL depuis le répertoire des requêtes.
+
+    Args:
+        query_name: Le nom du fichier de requête (ex: 'get_top_tokens.sql').
+
+    Returns:
+        Le contenu de la requête sous forme de chaîne, ou None si non trouvée.
+    """
+    global _QUERIES_DIR
+    if _QUERIES_DIR is None:
+        # Construit le chemin vers le dossier 'queries' relatif à ce fichier
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # Remonte d'un niveau (de utils à scanner_wallet) puis va dans api/queries
+        _QUERIES_DIR = os.path.join(current_dir, '..', 'api', 'queries')
+
+    query_file_path = os.path.join(_QUERIES_DIR, query_name)
+
+    try:
+        with open(query_file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        # Utiliser logger si disponible, sinon print
+        try:
+            from core.logger import get_logger
+            logger = get_logger(__name__)
+            logger.error(f"Fichier de requête non trouvé: {query_file_path}")
+        except (ImportError, NameError):
+            print(f"ERROR: Query file not found: {query_file_path}")
+        return None
+    except Exception as e:
+        try:
+            from core.logger import get_logger
+            logger = get_logger(__name__)
+            logger.error(f"Erreur lors de la lecture du fichier de requête {query_name}: {e}")
+        except (ImportError, NameError):
+            print(f"ERROR: Could not read query file {query_name}: {e}")
+        return None
+
+# =============================================================================
 # EXPORT DES FONCTIONS PRINCIPALES
 # =============================================================================
 
@@ -984,7 +1031,10 @@ __all__ = [
     'exponential_backoff', 'should_retry',
    
     # JSON
-    'safe_json_loads', 'safe_json_dumps'
+   'safe_json_loads', 'safe_json_dumps',
+
+   # Fichiers
+   'load_query'
 ]
 
 

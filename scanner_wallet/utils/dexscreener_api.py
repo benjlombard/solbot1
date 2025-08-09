@@ -22,7 +22,10 @@ async def get_dexscreener_data_for_mints(token_addresses: list[str]) -> Dict[str
     if not token_addresses:
         return {}
 
-    url = f"https://api.dexscreener.com/latest/dex/pairs/solana/{','.join(token_addresses)}"
+    # The original URL was incorrect for fetching by token mints.
+    # It was /dex/pairs/solana/{mints}, which expects pair addresses.
+    # The correct endpoint is /dex/tokens/{mints}.
+    url = f"https://api.dexscreener.com/latest/dex/tokens/{','.join(token_addresses)}"
     
     async with aiohttp.ClientSession() as session:
         try:
@@ -30,9 +33,11 @@ async def get_dexscreener_data_for_mints(token_addresses: list[str]) -> Dict[str
                 if response.status == 200:
                     data = await response.json()
                     if data and data.get('pairs'):
-                        return _process_pairs_data(data['pairs'])
+                        # The response for /tokens endpoint also contains a 'pairs' key.
+                        # The logic to find the best pair remains the same.
+                        return _find_best_pairs_for_tokens(data['pairs'])
                     else:
-                        logger.debug("No pairs found in DexScreener response.")
+                        logger.debug("No pairs found in DexScreener response for tokens: %s", token_addresses)
                         return {}
                 else:
                     logger.warning(f"DexScreener API error: {response.status} for tokens {token_addresses}")
@@ -44,8 +49,10 @@ async def get_dexscreener_data_for_mints(token_addresses: list[str]) -> Dict[str
             logger.error(f"Error fetching DexScreener data: {e}", exc_info=True)
             return {}
 
-def _process_pairs_data(pairs: list[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Processes a list of pairs to find the best one for each base token."""
+def _find_best_pairs_for_tokens(pairs: list[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """
+    Processes a list of pairs to find the best one (highest liquidity) for each base token.
+    """
     best_pairs_by_mint = {}
     for pair in pairs:
         base_token_address = pair.get('baseToken', {}).get('address')
