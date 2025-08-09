@@ -80,7 +80,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 # Import de la nouvelle route trading
-from api.routes.trading import trading_bp, init_trading_routes
+#from api.routes.trading import trading_bp, init_trading_routes
 # Imports de configuration avec fallbacks
 try:
     from core.config import get_config, init_config

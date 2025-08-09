@@ -140,6 +140,9 @@ function updateWalletsList() {
             clone.querySelector('[data-stat="transactions_24h"]').textContent = formatNumber(wallet.transactions_24h || 0);
             clone.querySelector('[data-stat="last_scan_time"]').textContent = formatTimeAgo(wallet.last_scan_time);
 
+            const balance_text = `${formatNumber(wallet.sol_balance)} SOL ($${formatNumber(wallet.usd_balance)} / €${formatNumber(wallet.eur_balance)})`;
+            clone.querySelector('[data-stat="balance"]').textContent = balance_text;
+
             container.appendChild(clone);
         });
 

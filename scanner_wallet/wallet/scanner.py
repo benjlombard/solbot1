@@ -163,6 +163,7 @@ class WalletScanner:
                 logger.warning(f"⚠️ [RPC] No RPC client available - using fallback mode")
 
             scan_start = get_current_timestamp()
+            
             initial_qn_requests = self._get_quicknode_requests()
 
             with self._lock:
@@ -228,6 +229,7 @@ class WalletScanner:
                     logger.info(per_scan_msg)
                 logger.info(total_msg)
 
+            # This will always run, ensuring the lock is released.
             with self._lock:
                 self._active_scans.pop(wallet_address, None)
                 logger.debug(f"Scan lock released for {wallet_address}")
@@ -824,13 +826,13 @@ class WalletScanner:
             if qn_endpoint and 'endpoints' in stats:
                 for endpoint_stat in stats.get('endpoints', []):
                     # The url in stats might be truncated, so we compare the beginning
-                    if qn_endpoint.startswith(endpoint_stat['url'].replace('...', '')):
+                    if qn_endpoint.startswith(endpoint_stat['url'].replace('.', '')):
                         return endpoint_stat.get('total_requests', 0)
         except Exception as e:
             logger.warning(f"Could not retrieve RPC stats for QuickNode request count: {e}")
             
         return 0
-
+    
     def get_scan_status(self) -> Dict[str, Any]:
         """Get current scanning status"""
         with self._lock:
@@ -910,7 +912,7 @@ def scan_multiple_wallets(wallet_addresses: List[str]) -> Dict[str, Dict[str, An
 
 # Development testing
 if __name__ == "__main__":
-    logger.info("🧪 Testing Wallet Scanner...")
+    logger.info("🧪 Testing Wallet Scanner.")
     
     # Create test instance
     scanner = get_wallet_scanner()
@@ -922,7 +924,7 @@ if __name__ == "__main__":
     scan_types = ["full", "quick", "tokens", "balances"]
     
     for scan_type in scan_types:
-        logger.info(f"🔍 Testing {scan_type} scan...")
+        logger.info(f"🔍 Testing {scan_type} scan.")
         result = scanner.scan_wallet(test_wallet, scan_type)
         logger.info(f"📊 {scan_type} scan result: {len(result.get('tokens_discovered', []))} tokens, {len(result.get('transactions_found', []))} transactions")
     

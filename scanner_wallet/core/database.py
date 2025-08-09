@@ -18,8 +18,8 @@ import queue
 import json
 
 # Imports depuis la nouvelle structure
-from core.config import get_config
-from core.exceptions import (
+from .config import get_config
+from .exceptions import (
     DatabaseError, DatabaseConnectionError, DatabaseLockError, 
     DatabaseSchemaError, DatabaseIntegrityError
 )
@@ -627,7 +627,7 @@ class DatabaseManager:
             try:
                 cursor.execute(index_sql)
             except sqlite3.Error as e:
-                self.logger.warning(f"Failed to create index: {index_sql[:50]}... Error: {e}")
+                self.logger.warning(f"Failed to create index: {index_sql[:50]}. Error: {e}")
     
     def _cleanup_connection_pool(self):
         """Délègue le nettoyage du pool"""
@@ -669,7 +669,7 @@ class DatabaseManager:
                     return cursor
                     
         except sqlite3.Error as e:
-            self.logger.error(f"Query execution failed: {query[:100]}... Error: {e}")
+            self.logger.error(f"Query execution failed: {query[:100]}. Error: {e}")
             raise DatabaseError(f"Query execution failed: {e}")
     
     def execute_many(self, query: str, params_list: List[tuple]) -> int:
@@ -682,7 +682,7 @@ class DatabaseManager:
                 return cursor.rowcount
                 
         except sqlite3.Error as e:
-            self.logger.error(f"Batch execution failed: {query[:100]}... Error: {e}")
+            self.logger.error(f"Batch execution failed: {query[:100]}. Error: {e}")
             raise DatabaseError(f"Batch execution failed: {e}")
     
     def transaction(self) -> 'DatabaseTransaction':

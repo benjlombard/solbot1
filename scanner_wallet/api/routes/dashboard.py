@@ -42,6 +42,17 @@ except ImportError as e:
 # Configuration du logger
 logger = logging.getLogger(__name__)
 
+async def get_balance(client, address):
+    """Récupère la balance SOL d'une adresse de manière async"""
+    try:
+        result = await client.call('getBalance', [address])
+        if result and 'result' in result and 'value' in result['result']:
+            return result['result']['value'] / 1_000_000_000  # Lamports to SOL
+        return 0
+    except Exception as e:
+        logger.warning(f"Erreur récupération balance pour {address}: {e}")
+        return 0
+
 # Création du blueprint
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/dashboard')
 
@@ -203,7 +214,7 @@ def debug_wallet_overview():
                     for row in sample_wallets:
                         debug_info['wallet_data']['sample_wallets'].append({
                             'wallet_address': row[0],
-                            'wallet_short': f"{row[0][:8]}...{row[0][-8:]}" if row[0] else 'None',
+                            'wallet_short': f"{row[0][:8]}.{row[0][-8:]}" if row[0] else 'None',
                             'priority_score': row[1],
                             'last_scan_time': row[2],
                             'total_scans': row[3],
@@ -235,7 +246,7 @@ def debug_wallet_overview():
                     token_stats = cursor.fetchall()
                     debug_info['wallet_data']['token_accounts_by_wallet'] = [
                         {
-                            'wallet': f"{row[0][:8]}...{row[0][-8:]}" if row[0] else 'None',
+                            'wallet': f"{row[0][:8]}.{row[0][-8:]}" if row[0] else 'None',
                             'total_accounts': row[1],
                             'active_accounts': row[2]
                         } for row in token_stats
@@ -265,7 +276,7 @@ def debug_wallet_overview():
                     tx_stats = cursor.fetchall()
                     debug_info['wallet_data']['transactions_24h_by_wallet'] = [
                         {
-                            'wallet': f"{row[0][:8]}...{row[0][-8:]}" if row[0] else 'None',
+                            'wallet': f"{row[0][:8]}.{row[0][-8:]}" if row[0] else 'None',
                             'transactions_24h': row[1]
                         } for row in tx_stats
                     ]
@@ -333,7 +344,7 @@ def debug_wallet_overview():
                         
                         debug_info['wallet_data']['full_query_test'].append({
                             'wallet_address': wallet_addr,
-                            'wallet_short': f"{wallet_addr[:8]}...{wallet_addr[-8:]}",
+                            'wallet_short': f"{wallet_addr[:8]}.{wallet_addr[-8:]}",
                             'priority_score': round(priority_score, 2),
                             'priority_category': priority_category,
                             'scan_status': scan_status,
@@ -360,7 +371,7 @@ def debug_wallet_overview():
             debug_info['config_check'] = {
                 'wallet_addresses_configured': len(config.wallet.addresses),
                 'sample_configured_addresses': [
-                    f"{addr[:8]}...{addr[-8:]}" for addr in config.wallet.addresses[:3]
+                    f"{addr[:8]}.{addr[-8:]}" for addr in config.wallet.addresses[:3]
                 ] if hasattr(config.wallet, 'addresses') else []
             }
             
@@ -377,9 +388,9 @@ def debug_wallet_overview():
                         count = cursor.fetchone()[0]
                         
                         if count > 0:
-                            configured_in_db.append(f"{addr[:8]}...{addr[-8:]}")
+                            configured_in_db.append(f"{addr[:8]}.{addr[-8:]}")
                         else:
-                            missing_from_db.append(f"{addr[:8]}...{addr[-8:]}")
+                            missing_from_db.append(f"{addr[:8]}.{addr[-8:]}")
                     
                     debug_info['config_check']['configured_in_db'] = configured_in_db
                     debug_info['config_check']['missing_from_db'] = missing_from_db
@@ -539,9 +550,9 @@ async def get_dashboard_data():
                 top_tokens.append({
                     'symbol': symbol,
                     'mint': mint,
-                    'mint_short': f"{mint[:6]}...{mint[-6:]}" if mint else "Unknown",
+                    'mint_short': f"{mint[:6]}.{mint[-6:]}" if mint else "Unknown",
                     'wallet_address': wallet,
-                    'wallet_short': f"{wallet[:4]}...{wallet[-4:]}" if wallet else "Unknown",
+                    'wallet_short': f"{wallet[:4]}.{wallet[-4:]}" if wallet else "Unknown",
                     'transaction_count': tx_count,
                     'total_bought': round(bought, 4),
                     'total_sold': round(sold, 4),
@@ -631,11 +642,13 @@ async def get_dashboard_data():
             
             wallets_data = cursor.fetchall()
             wallets_overview = []
+            wallet_addresses = []
             for row in wallets_data:
-                # ... (traitement similaire à l'ancienne route get_wallet_overview)
+                wallet_address = row[0]
+                wallet_addresses.append(wallet_address)
                 wallets_overview.append({
-                    'wallet_address': row[0],
-                    'wallet_short': f"{row[0][:8]}...{row[0][-8:]}",
+                    'wallet_address': wallet_address,
+                    'wallet_short': f"{wallet_address[:8]}.{wallet_address[-8:]}",
                     'priority_score': round(row[1], 2),
                     'last_scan_time': row[2],
                     'total_scans': row[3],
@@ -646,6 +659,39 @@ async def get_dashboard_data():
                     'priority_accounts': row[8] or 0,
                     'transactions_24h': row[9] or 0
                 })
+
+            # Fetch balances and prices
+            from rpc.client import get_default_rpc_client
+            from utils.constants import SOLANA_NATIVE_MINT
+            rpc_client = get_default_rpc_client()
+            
+            # Get SOL price
+            sol_price_data = await get_dexscreener_data_for_mints([SOLANA_NATIVE_MINT])
+            sol_price_usd = sol_price_data.get(SOLANA_NATIVE_MINT, {}).get('price_usd', 0)
+            
+            # Using a fixed rate for EUR for now
+            usd_to_eur_rate = 0.92 
+            sol_price_eur = sol_price_usd * usd_to_eur_rate
+            
+            # Get balances
+            balance_tasks = [get_balance(rpc_client, addr) for addr in wallet_addresses]
+            balance_results = await asyncio.gather(*balance_tasks, return_exceptions=True)
+
+            balances = {}
+            for i, balance in enumerate(balance_results):
+                addr = wallet_addresses[i]
+                if isinstance(balance, Exception):
+                    logger.warning(f"Exception lors de la récupération de balance pour {addr}: {balance}")
+                    balances[addr] = 0
+                else:
+                    balances[addr] = balance
+
+            # Add balances to wallets_overview
+            for wallet in wallets_overview:
+                sol_balance = balances.get(wallet['wallet_address'], 0)
+                wallet['sol_balance'] = round(sol_balance, 4)
+                wallet['usd_balance'] = round(sol_balance * sol_price_usd, 2)
+                wallet['eur_balance'] = round(sol_balance * sol_price_eur, 2)
 
             # === ACTIVITÉ RÉCENTE (avec enrichissement) ===
             cursor.execute("""
@@ -779,7 +825,7 @@ def get_performance_metrics():
             for row in cursor.fetchall():
                 wallet_metrics.append({
                     'wallet_address': row[0],
-                    'wallet_short': f"{row[0][:6]}...{row[0][-6:]}",
+                    'wallet_short': f"{row[0][:6]}.{row[0][-6:]}",
                     'scan_count': row[1],
                     'avg_duration': round(row[2], 2) if row[2] else 0,
                     'discoveries': row[3] or 0,
@@ -883,7 +929,7 @@ def search_data():
                 for row in cursor.fetchall():
                     results['wallets'].append({
                         'wallet_address': row[0],
-                        'wallet_short': f"{row[0][:8]}...{row[0][-8:]}",
+                        'wallet_short': f"{row[0][:8]}.{row[0][-8:]}",
                         'priority_score': round(row[1], 2),
                         'total_scans': row[3],
                         'match_type': 'wallet_address'
@@ -917,11 +963,11 @@ def search_data():
                     
                     results['tokens'].append({
                         'token_mint': mint,
-                        'mint_short': f"{mint[:6]}...{mint[-6:]}",
+                        'mint_short': f"{mint[:6]}.{mint[-6:]}",
                         'token_symbol': symbol,
                         'token_name': name,
                         'wallet_address': wallet,
-                        'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
+                        'wallet_short': f"{wallet[:6]}.{wallet[-6:]}",
                         'transaction_count': tx_count,
                         'last_activity': last_activity,
                         'match_type': match_type
@@ -952,12 +998,12 @@ def search_data():
                     
                     results['transactions'].append({
                         'signature': signature,
-                        'signature_short': f"{signature[:16]}...",
+                        'signature_short': f"{signature[:16]}.",
                         'wallet_address': wallet,
-                        'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
+                        'wallet_short': f"{wallet[:6]}.{wallet[-6:]}",
                         'token_symbol': symbol,
                         'token_mint': mint,
-                        'mint_short': f"{mint[:6]}...{mint[-6:]}",
+                        'mint_short': f"{mint[:6]}.{mint[-6:]}",
                         'transaction_type': tx_type,
                         'token_amount': round(amount, 6),
                         'block_time': block_time,
@@ -1084,7 +1130,7 @@ def get_wallet_detail(wallet_address):
 
                 top_tokens.append({
                     'token_mint': mint,
-                    'mint_short': f"{mint[:6]}...{mint[-6:]}",
+                    'mint_short': f"{mint[:6]}.{mint[-6:]}",
                     'token_symbol': symbol,
                     'token_name': name,
                     'balance': balance,
@@ -1112,7 +1158,7 @@ def get_wallet_detail(wallet_address):
             for row in cursor.fetchall():
                 recent_activity.append({
                     'signature': row[0],
-                    'signature_short': f"{row[0][:16]}...",
+                    'signature_short': f"{row[0][:16]}.",
                     'token_symbol': row[1] or 'UNKNOWN',
                     'token_mint': row[2],
                     'transaction_type': row[3],
@@ -1126,7 +1172,7 @@ def get_wallet_detail(wallet_address):
             # === ASSEMBLAGE FINAL ===
             wallet_detail = {
                 'wallet_address': wallet_address,
-                'wallet_short': f"{wallet_address[:8]}...{wallet_address[-8:]}",
+                'wallet_short': f"{wallet_address[:8]}.{wallet_address[-8:]}",
                 'priority_info': {
                     'priority_score': round(wallet_info[0], 2),
                     'priority_category': 'high' if wallet_info[0] >= 4.0 else 'medium' if wallet_info[0] >= 2.0 else 'low',
@@ -1255,7 +1301,7 @@ def get_token_detail(token_mint):
 
                 wallet_distribution.append({
                     'wallet_address': wallet,
-                    'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
+                    'wallet_short': f"{wallet[:6]}.{wallet[-6:]}",
                     'transaction_count': tx_count,
                     'total_bought': round(bought, 6),
                     'total_sold': round(sold, 6),
@@ -1287,14 +1333,14 @@ def get_token_detail(token_mint):
 
                 recent_transactions.append({
                     'wallet_address': wallet,
-                    'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
+                    'wallet_short': f"{wallet[:6]}.{wallet[-6:]}",
                     'transaction_type': tx_type,
                     'token_amount': round(token_amount, 6),
                     'sol_amount': round(sol_amount, 6),
                     'price_per_token': round(price, 8) if price else None,
                     'block_time': block_time,
                     'signature': signature,
-                    'signature_short': f"{signature[:16]}...",
+                    'signature_short': f"{signature[:16]}.",
                     'hours_ago': round((current_time - block_time) / 3600, 1) if block_time else 999
                 })
 
@@ -1304,7 +1350,7 @@ def get_token_detail(token_mint):
 
             token_detail = {
                 'token_mint': token_mint,
-                'mint_short': f"{token_mint[:6]}...{token_mint[-6:]}",
+                'mint_short': f"{token_mint[:6]}.{token_mint[-6:]}",
                 'token_symbol': token_symbol,
                 'token_name': token_name,
                 'global_stats': {

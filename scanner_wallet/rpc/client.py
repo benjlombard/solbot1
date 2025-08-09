@@ -38,8 +38,8 @@ try:
         MAX_RPC_RETRIES, RPC_RETRY_DELAY_BASE
     )
     # Dépendances RPC
-    from rpc.rate_limiter import RateLimiter
-    from rpc.endpoints import RPCEndpointManager
+    from .rate_limiter import RateLimiter
+    from .endpoints import RPCEndpointManager
 
 except ImportError as e:
     logging.warning(f"Import error in RPC client: {e}")
@@ -362,7 +362,7 @@ class RPCClient:
                 if metrics.is_available and metrics.health_score > 20:
                     self.session_stats['endpoint_switches'] += 1
                     self.logger.info(
-                        f"🔄 Switch endpoint: {old_endpoint[:50]}... → {new_endpoint['url'][:50]}... "
+                        f"🔄 Switch endpoint: {old_endpoint[:50]}. → {new_endpoint['url'][:50]}. "
                         f"(Raison: {reason})"
                     )
                     return new_endpoint
@@ -407,7 +407,7 @@ class RPCClient:
                         metrics.is_available = True
                         metrics.consecutive_errors = 0
                         metrics.health_score = 50.0  # Score de départ après reset
-                        self.logger.info(f"♻️ Endpoint réactivé: {url[:50]}...")
+                        self.logger.info(f"♻️ Endpoint réactivé: {url[:50]}.")
     
     def _get_cache_key(self, method: str, params: List) -> str:
         """Génère une clé de cache pour une requête"""
@@ -542,7 +542,7 @@ class RPCClient:
             if not rate_limiter.can_proceed():
                 wait_time = rate_limiter.get_wait_time()
                 self.logger.warning(
-                    f"⏳ Rate limit atteint pour {endpoint_url[:50]}..., "
+                    f"⏳ Rate limit atteint pour {endpoint_url[:50]}., "
                     f"attente {wait_time:.2f}s"
                 )
                 
@@ -576,7 +576,7 @@ class RPCClient:
                 else:
                     # Attendre avant de réessayer
                     wait_time = exponential_backoff(attempt, max_delay=30.0)
-                    self.logger.info(f"⏳ Attente {wait_time:.1f}s avant retry...")
+                    self.logger.info(f"⏳ Attente {wait_time:.1f}s avant retry.")
                     time.sleep(wait_time)
                 
             except RPCTimeoutError as e:
@@ -630,7 +630,7 @@ class RPCClient:
         
         try:
             # Logging de debug
-            self.logger.debug(f"🔌 RPC {request.method} vers {endpoint_url[:50]}...")
+            self.logger.debug(f"🔌 RPC {request.method} vers {endpoint_url[:50]}.")
             
             # Faire la requête HTTP
             response = self.session.post(
@@ -790,7 +790,7 @@ class RPCClient:
                 metrics = self.endpoints_metrics[url]
                 
                 endpoints_stats.append({
-                    'url': url[:50] + '...' if len(url) > 50 else url,
+                    'url': url[:50] + '.' if len(url) > 50 else url,
                     'type': endpoint_config['type'],
                     'health_score': round(metrics.health_score, 1),
                     'success_rate': round(metrics.success_rate, 1),
@@ -809,7 +809,7 @@ class RPCClient:
                     ((self.total_requests - self.total_failures) / max(self.total_requests, 1)) * 100,
                     1
                 ),
-                'current_endpoint': self.get_current_endpoint()['url'][:50] + '...',
+                'current_endpoint': self.get_current_endpoint()['url'][:50] + '.',
                 'endpoint_switches': self.session_stats['endpoint_switches'],
                 'cache_enabled': self.cache_enabled,
                 'cache_stats': {
@@ -885,7 +885,7 @@ class RPCClient:
                         'method': 'getHealth'
                     }
                     
-                    logger.debug(f"✅ Health check OK pour {url[:50]}... ({response_time:.0f}ms)")
+                    logger.debug(f"✅ Health check OK pour {url[:50]}. ({response_time:.0f}ms)")
                 else:
                     raise requests.RequestException(f"HTTP {response.status_code}")
                     
@@ -900,7 +900,7 @@ class RPCClient:
                 metrics = self.endpoints_metrics[url]
                 metrics.update_failure()
                 
-                logger.warning(f"❌ Health check failed pour {url[:50]}...: {e}")
+                logger.warning(f"❌ Health check failed pour {url[:50]}.: {e}")
         
         # Analyser les résultats globaux
         healthy_count = sum(1 for result in health_results.values() if result['status'] == 'healthy')
@@ -1223,7 +1223,7 @@ if __name__ == "__main__":
     print("=" * 50)
     
     # Test 1: Connectivité des endpoints
-    print("\n📡 Test de connectivité des endpoints...")
+    print("\n📡 Test de connectivité des endpoints.")
     connectivity_results = test_rpc_connectivity()
     
     print(f"Endpoints disponibles: {connectivity_results['summary']['available']}/{connectivity_results['summary']['total']}")
@@ -1231,23 +1231,23 @@ if __name__ == "__main__":
     
     for endpoint, result in connectivity_results['endpoints'].items():
         status_icon = "✅" if result.get('available', False) else "❌"
-        endpoint_short = endpoint[:50] + "..." if len(endpoint) > 50 else endpoint
+        endpoint_short = endpoint[:50] + "." if len(endpoint) > 50 else endpoint
         print(f"  {status_icon} {endpoint_short}: {result['status']}")
     
     # Test 2: Création du client RPC
-    print("\n🔌 Test création client RPC...")
+    print("\n🔌 Test création client RPC.")
     try:
         client = create_rpc_client()
         print(f"✅ Client créé avec {len(client.endpoints)} endpoints")
         
         # Test 3: Health check
-        print("\n🏥 Test health check...")
+        print("\n🏥 Test health check.")
         health_results = client.health_check()
         print(f"Statut global: {health_results['overall_status']}")
         print(f"Endpoints sains: {health_results['healthy_endpoints']}/{health_results['total_endpoints']}")
         
         # Test 4: Appel RPC simple
-        print("\n📞 Test appel RPC simple...")
+        print("\n📞 Test appel RPC simple.")
         
         # Test avec getHealth (méthode simple)
         result = client.call("getHealth", [])
@@ -1257,17 +1257,17 @@ if __name__ == "__main__":
             print("❌ Appel getHealth échoué")
         
         # Test 5: Statistiques
-        print("\n📊 Statistiques du client...")
+        print("\n📊 Statistiques du client.")
         stats = client.get_stats()
         print(f"Requêtes totales: {stats['total_requests']}")
         print(f"Taux de succès: {stats['success_rate']}%")
         print(f"Endpoint actuel: {stats['current_endpoint']}")
         
         # Test 6: Meilleurs endpoints
-        print("\n🏆 Meilleurs endpoints...")
+        print("\n🏆 Meilleurs endpoints.")
         best_endpoints = client.get_best_endpoints(3)
         for i, endpoint in enumerate(best_endpoints, 1):
-            print(f"  {i}. {endpoint['url'][:40]}... (Score: {endpoint['health_score']})")
+            print(f"  {i}. {endpoint['url'][:40]}. (Score: {endpoint['health_score']})")
         
         client.close()
         print("\n✅ Tests terminés avec succès!")
