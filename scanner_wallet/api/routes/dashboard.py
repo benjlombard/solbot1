@@ -852,7 +852,7 @@ async def get_recent_activity():
                 SELECT
                     td.token_mint, td.wallet_address, td.discovered_at,
                     td.symbol as token_symbol,
-                    a.balance,
+                    ta.balance,
                     td.name as token_name,
                     td.decimals,
                     td.ata_pubkey
