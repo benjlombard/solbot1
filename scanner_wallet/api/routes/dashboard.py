@@ -771,9 +771,11 @@ def get_wallet_overview():
         logger.error(f"Erreur wallet overview: {e}")
         return jsonify(create_error_response("Failed to load wallet overview", [str(e)])), 500
 
+import asyncio
+from utils.dexscreener_api import get_dexscreener_data_for_mints
 
 @dashboard_bp.route('/recent-activity')
-def get_recent_activity():
+async def get_recent_activity():
     """Activité récente - transactions et découvertes"""
     try:
         hours = request.args.get('hours', 24, type=int)
@@ -850,7 +852,10 @@ def get_recent_activity():
                 SELECT
                     td.token_mint, td.wallet_address, td.discovered_at,
                     td.symbol as token_symbol,
-                    ta.balance
+                    a.balance,
+                    td.name as token_name,
+                    td.decimals,
+                    td.ata_pubkey
                 FROM token_discoveries td
                 LEFT JOIN token_accounts ta ON td.token_mint = ta.token_mint AND td.wallet_address = ta.wallet_address
                 WHERE td.discovered_at >= ?
@@ -860,17 +865,20 @@ def get_recent_activity():
 
             discoveries_data = cursor.fetchall()
             logger.info(f"Found {len(discoveries_data)} recent token discoveries in the database.")
-
+            # Asynchronously fetch DexScreener data for all discovered tokens
+            discovery_mints = [row[0] for row in discoveries_data]
+            dexscreener_data = await get_dexscreener_data_for_mints(discovery_mints)
+            
             recent_discoveries = []
-
             for row in discoveries_data:
-                mint = row[0]
-                wallet = row[1]
-                discovered_at = row[2]
-                balance = row[3]
-                symbol = row[3] or f"TOKEN_{mint[:6]}"
-                balance = row[4] or 0.0 # Fallback if no balance found in token_accounts
+                mint, wallet, discovered_at, symbol, balance, name, decimals, ata_pubkey = row
+                symbol = symbol or f"TOKEN_{mint[:6]}"
+                balance = balance or 0.0
+                name = name or "Unknown Token"
+                decimals = decimals or 9
 
+                # Get enriched data
+                enriched_data = dexscreener_data.get(mint, {})
                 recent_discoveries.append({
                     'type': 'discovery',
                     'token_mint': mint,
@@ -878,18 +886,24 @@ def get_recent_activity():
                     'wallet_address': wallet,
                     'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
                     'token_symbol': symbol,
+                    'token_name': name,
+                    'decimals': decimals,
+                    'ata_pubkey': ata_pubkey,
                     'initial_balance': round(balance, 6),
                     'discovered_at': discovered_at,
-                    'hours_ago': round((int(time.time()) - discovered_at) / 3600, 1)
+                    'hours_ago': round((int(time.time()) - discovered_at) / 3600, 1),
+                    'price_usd': enriched_data.get('price_usd'),
+                    'liquidity_usd': enriched_data.get('liquidity_usd'),
+                    'solscan_url': f"https://solscan.io/token/{mint}",
+                    'dexscreener_url': f"https://dexscreener.com/solana/{mint}",
+                    'pumpfun_url': f"https://pump.fun/{mint}"
                 })
 
             # === COMBINER ET TRIER PAR TEMPS ===
             all_activity = recent_transactions + recent_discoveries
             
-            # Trier par timestamp (block_time pour transactions, discovered_at pour découvertes)
             all_activity.sort(key=lambda x: x.get('block_time') or x.get('discovered_at', 0), reverse=True)
             
-            # Limiter au nombre demandé
             all_activity = all_activity[:limit]
             logger.info(f"Combined and sorted activity. Total items: {len(all_activity)}")
             if all_activity:
@@ -904,7 +918,7 @@ def get_recent_activity():
             }
             logger.info(f"Returning {len(all_activity)} activity items to frontend.")
 
-            cache_result(cache_key, activity_data, 30)  # Cache 30 secondes
+            cache_result(cache_key, activity_data, 30)
             
             return jsonify(create_success_response("Recent activity retrieved", activity_data))
 

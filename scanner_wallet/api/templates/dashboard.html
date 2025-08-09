@@ -373,11 +373,39 @@
     .activity-details {
         font-size: 12px;
         color: var(--text-secondary);
-        display: flex;
-        align-items: center;
-        gap: 8px;
+    }
+    .discovery-details {
+        margin-top: 4px;
     }
 
+    .discovery-details .detail-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+    }
+
+    .discovery-details .detail-label {
+        color: var(--text-muted);
+    }
+    
+    .activity-links {
+        margin-top: 8px;
+        display: flex;
+        gap: 12px;
+    }
+
+    .activity-links a {
+        color: var(--primary);
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 11px;
+        transition: var(--transition);
+    }
+
+    .activity-links a:hover {
+        text-decoration: underline;
+        opacity: 0.8;
+    }
     .activity-time {
         color: var(--text-muted);
         font-size: 11px;
@@ -974,8 +1002,32 @@
                 } else if (activity.type === 'discovery') {
                     activityType = 'discovery';
                     icon = '🆕';
-                    title = `Nouveau token découvert: ${activity.token_symbol}`;
-                    details = `Wallet: ${activity.wallet_short} • Balance: ${formatNumber(activity.initial_balance)}`;
+                    const tokenName = activity.token_name && activity.token_name !== 'Unknown Token' ? `(${activity.token_name})` : '';
+                    title = `Nouveau token: ${activity.token_symbol} ${tokenName}`;
+                    const price = activity.price_usd ? `$${formatNumber(activity.price_usd, 8)}` : 'N/A';
+                    const liquidity = activity.liquidity_usd ? `$${formatNumber(activity.liquidity_usd, 2)}` : 'N/A';
+                    details = `
+                    <div class="discovery-details">
+                            <div class="detail-row">
+                                <span class="detail-label">Balance:</span>
+                                <span>${formatNumber(activity.initial_balance)}</span>
+                            </div>
+                            <div class="detail-row">
+                                span class="detail-label">Liquidity:</span>
+                                <span>${liquidity}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Price:</span>
+                                <span>${price}</span>
+                            </div>
+                        </div>
+                        <div class="activity-links">
+                            <a href="${activity.solscan_url}" target="_blank" title="View Token on Solscan">Token</a>
+                            <a href="https://solscan.io/account/${activity.ata_pubkey}" target="_blank" title="View Token Account (ATA) on Solscan">ATA</a>
+                            <a href="${activity.dexscreener_url}" target="_blank" title="View on DexScreener">DexScreener</a>
+                            <a href="${activity.pumpfun_url}" target="_blank" title="View on pump.fun">pump.fun</a>
+                        </div>
+                    `;
                 }
 
                 return `
@@ -992,9 +1044,8 @@
                 `;
             }).join('');
             console.log(`✅ [Activity] Rendered ${activities.length} items.`);
-
         } catch (error) {
-            console.error('❌ Erreur chargement activité:', error);
+            console.error('❌ [Activity] Error loading activity:', error);
             container.innerHTML = `<div class="error-message">Erreur: ${error.message}</div>`;
         }
     }
