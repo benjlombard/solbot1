@@ -9,6 +9,7 @@ from flask import Blueprint, request, jsonify, render_template
 from typing import Dict, List, Optional, Any, Union
 import time
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from dataclasses import asdict
 
@@ -28,6 +29,8 @@ try:
         format_percentage, format_duration
     )
     from utils.helpers import safe_get, calculate_moving_average, get_current_timestamp
+    from utils.dexscreener_api import get_dexscreener_data_for_mints
+    from utils.security_analyzer import get_security_scores_for_mints
 except ImportError as e:
     logging.warning(f"Import error in dashboard routes: {e}")
     # Fallbacks pour développement
@@ -443,7 +446,7 @@ def debug_dashboard_data():
     })
 
 @dashboard_bp.route('/data')
-def get_dashboard_data():
+async def get_dashboard_data():
     """Données principales pour le dashboard - VERSION MULTI-WALLETS AMÉLIORÉE"""
     try:
         # Vérifier le cache
@@ -644,6 +647,57 @@ def get_dashboard_data():
                     'transactions_24h': row[9] or 0
                 })
 
+            # === ACTIVITÉ RÉCENTE (avec enrichissement) ===
+            cursor.execute("""
+                SELECT * FROM (
+                    SELECT 'transaction' as type, signature, wallet_address, token_mint, token_symbol, transaction_type, token_amount, amount, block_time as timestamp FROM transactions WHERE is_token_transaction = 1 AND block_time >= ?
+                    UNION ALL
+                    SELECT 'discovery' as type, token_mint, wallet_address, ata_pubkey, symbol, null, initial_balance, null, discovered_at as timestamp FROM token_discoveries WHERE discovered_at >= ?
+                )
+                ORDER BY timestamp DESC
+                LIMIT 50
+            """, (current_time - 86400, current_time - 86400))
+            
+            recent_activity_raw = cursor.fetchall()
+            
+            # Enrichissement asynchrone
+            activity_mints = [row[3] for row in recent_activity_raw if row[3]]
+            dexscreener_task = get_dexscreener_data_for_mints(activity_mints)
+            security_task = get_security_scores_for_mints(activity_mints)
+            dexscreener_data, security_data = await asyncio.gather(dexscreener_task, security_task)
+
+            recent_activity = []
+            for row in recent_activity_raw:
+                activity_type = row[0]
+                token_mint = row[3] if activity_type == 'transaction' else row[1]
+                enriched_data = dexscreener_data.get(token_mint, {})
+                security_info = security_data.get(token_mint, {})
+                
+                if activity_type == 'transaction':
+                    activity_item = {
+                        'type': 'transaction',
+                        'signature': row[1], 'wallet_address': row[2], 'token_mint': token_mint,
+                        'token_symbol': row[4], 'transaction_type': row[5], 'token_amount': row[6],
+                        'sol_amount': row[7], 'timestamp': row[8]
+                    }
+                else:
+                    activity_item = {
+                        'type': 'discovery',
+                        'token_mint': token_mint, 'wallet_address': row[2], 'ata_pubkey': row[3],
+                        'token_symbol': row[4], 'initial_balance': row[6], 'timestamp': row[8]
+                    }
+                
+                activity_item.update({
+                    'price_usd': enriched_data.get('price_usd'),
+                    'liquidity_usd': enriched_data.get('liquidity_usd'),
+                    'security_score': security_info.get('rug_probability'),
+                    'risk_level': security_info.get('risk_level'),
+                    'solscan_url': f"https://solscan.io/token/{token_mint}",
+                    'dexscreener_url': f"https://dexscreener.com/solana/{token_mint}",
+                    'pumpfun_url': f"https://pump.fun/{token_mint}"
+                })
+                recent_activity.append(activity_item)
+
             # === RÉSUMÉ FINAL ===
             dashboard_data = {
                 'timestamp': current_time,
@@ -660,11 +714,12 @@ def get_dashboard_data():
                 'top_tokens': top_tokens[:8],
                 'new_gems': new_gems,
                 'volume_alerts': volume_alerts,
-                'wallets_overview': wallets_overview
+                'wallets_overview': wallets_overview,
+                'recent_activity': recent_activity
             }
 
             # Mise en cache
-            cache_result(cache_key, dashboard_data, 60)  # Cache 1 minute
+            cache_result(cache_key, dashboard_data, 60)
             
             return jsonify(create_success_response("Dashboard data retrieved", dashboard_data))
 
@@ -673,135 +728,6 @@ def get_dashboard_data():
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify(create_error_response("Failed to load dashboard data", [str(e)])), 500
-
-
-@dashboard_bp.route('/recent-activity')
-def get_recent_activity():
-    """Activité récente - transactions et découvertes"""
-    try:
-        hours = request.args.get('hours', 24, type=int)
-        limit = min(request.args.get('limit', 50, type=int), 200)  # Max 200
-        
-        cache_key = f"recent_activity_{hours}h_{limit}"
-        cached_data = get_cached_result(cache_key)
-        if cached_data:
-            return jsonify(create_success_response("Recent activity from cache", cached_data))
-
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            start_time = int(time.time()) - (hours * 3600)
-
-            # === TRANSACTIONS RÉCENTES ===
-            cursor.execute("""
-                SELECT 
-                    signature, wallet_address, token_mint, token_symbol, token_name,
-                    transaction_type, token_amount, amount, block_time, 
-                    is_large_token_amount, price_per_token, detection_delay
-                FROM transactions 
-                WHERE is_token_transaction = 1 
-                AND block_time >= ?
-                ORDER BY block_time DESC 
-                LIMIT ?
-            """, (start_time, limit))
-
-            transactions_data = cursor.fetchall()
-            recent_transactions = []
-
-            for row in transactions_data:
-                signature = row[0]
-                wallet = row[1]
-                mint = row[2]
-                symbol = row[3] or 'UNKNOWN'
-                name = row[4] or 'Unknown Token'
-                tx_type = row[5]
-                token_amount = row[6]
-                sol_amount = row[7]
-                block_time = row[8]
-                is_large = bool(row[9])
-                price = row[10] or 0
-                detection_delay = row[11] or 0
-
-                recent_transactions.append({
-                    'type': 'transaction',
-                    'signature': signature,
-                    'signature_short': f"{signature[:16]}..." if signature else "Unknown",
-                    'wallet_address': wallet,
-                    'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
-                    'token_symbol': symbol,
-                    'token_name': name,
-                    'token_mint': mint,
-                    'mint_short': f"{mint[:6]}...{mint[-6:]}" if mint else "Unknown",
-                    'transaction_type': tx_type,
-                    'token_amount': round(token_amount, 6),
-                    'sol_amount': round(sol_amount, 6),
-                    'price_per_token': round(price, 8) if price else None,
-                    'usd_value': round(token_amount * price, 2) if price and token_amount else None,
-                    'is_large_amount': is_large,
-                    'block_time': block_time,
-                    'detection_delay': round(detection_delay, 1),
-                    'hours_ago': round((int(time.time()) - block_time) / 3600, 1) if block_time else 999
-                })
-
-            # === DÉCOUVERTES RÉCENTES DE TOKENS ===
-            cursor.execute("""
-                SELECT 
-                    ta.token_mint, ta.wallet_address, ta.first_seen, ta.balance,
-                    t.token_symbol
-                FROM token_accounts ta
-                LEFT JOIN transactions t ON ta.token_mint = t.token_mint 
-                    AND t.wallet_address = ta.wallet_address
-                WHERE ta.first_seen >= ?
-                GROUP BY ta.token_mint, ta.wallet_address, ta.first_seen, ta.balance
-                ORDER BY ta.first_seen DESC
-                LIMIT ?
-            """, (start_time, limit // 2))  # Moins de découvertes que de transactions
-
-            discoveries_data = cursor.fetchall()
-            recent_discoveries = []
-
-            for row in discoveries_data:
-                mint = row[0]
-                wallet = row[1]
-                discovered_at = row[2]
-                balance = row[3]
-                symbol = row[4] or f"TOKEN_{mint[:6]}"
-
-                recent_discoveries.append({
-                    'type': 'discovery',
-                    'token_mint': mint,
-                    'mint_short': f"{mint[:6]}...{mint[-6:]}",
-                    'wallet_address': wallet,
-                    'wallet_short': f"{wallet[:6]}...{wallet[-6:]}",
-                    'token_symbol': symbol,
-                    'initial_balance': round(balance, 6),
-                    'discovered_at': discovered_at,
-                    'hours_ago': round((int(time.time()) - discovered_at) / 3600, 1)
-                })
-
-            # === COMBINER ET TRIER PAR TEMPS ===
-            all_activity = recent_transactions + recent_discoveries
-            
-            # Trier par timestamp (block_time pour transactions, discovered_at pour découvertes)
-            all_activity.sort(key=lambda x: x.get('block_time') or x.get('discovered_at', 0), reverse=True)
-            
-            # Limiter au nombre demandé
-            all_activity = all_activity[:limit]
-
-            activity_data = {
-                'period_hours': hours,
-                'total_items': len(all_activity),
-                'transactions_count': len(recent_transactions),
-                'discoveries_count': len(recent_discoveries),
-                'activity': all_activity
-            }
-
-            cache_result(cache_key, activity_data, 30)  # Cache 30 secondes
-            
-            return jsonify(create_success_response("Recent activity retrieved", activity_data))
-
-    except Exception as e:
-        logger.error(f"Erreur recent activity: {e}")
-        return jsonify(create_error_response("Failed to load recent activity", [str(e)])), 500
 
 
 @dashboard_bp.route('/performance-metrics')

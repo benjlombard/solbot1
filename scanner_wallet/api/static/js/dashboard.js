@@ -152,73 +152,57 @@ function updateWalletsList() {
 // Mise à jour de l'activité récente
 function updateActivity() {
     const container = document.getElementById('activity-list');
-    if (!container) return;
-    
-    const topTokens = dashboardData.top_tokens || [];
-    const newGems = dashboardData.new_gems || [];
-    const volumeAlerts = dashboardData.volume_alerts || [];
-    
-    // Combiner différents types d'activité
-    let activities = [];
-    
-    // Ajouter les tokens actifs
-    topTokens.slice(0, 5).forEach(token => {
-        activities.push({
-            type: token.net_position > 0 ? 'buy' : 'sell',
-            icon: token.net_position > 0 ? '📈' : '📉',
-            title: `${token.symbol} - ${token.wallet_short}`,
-            details: `${token.transaction_count} TX • ${token.sol_volume} SOL`,
-            time: `${token.hours_ago}h`,
-            value: token.activity_score
-        });
-    });
-    
-    // Ajouter les nouvelles découvertes
-    newGems.forEach(gem => {
-        activities.push({
-            type: 'discovery',
-            icon: '🆕',
-            title: `Nouveau token: ${gem.symbol}`,
-            details: `${gem.wallet_short} • Confiance: ${gem.confidence}`,
-            time: `${gem.hours_ago}h`,
-            value: 100
-        });
-    });
-    
-    // Ajouter les alertes de volume
-    volumeAlerts.forEach(alert => {
-        activities.push({
-            type: 'transfer',
-            icon: '🔥',
-            title: `Volume élevé: ${alert.symbol}`,
-            details: `${alert.sol_volume} SOL • ${alert.alert_level}`,
-            time: `${alert.hours_ago}h`,
-            value: alert.sol_volume
-        });
-    });
-    
-    // Trier par temps et limiter
-    activities = activities
-        .sort((a, b) => parseFloat(a.time) - parseFloat(b.time))
-        .slice(0, MAX_ACTIVITY_DISPLAY);
-    
-    if (!activities.length) {
-        container.innerHTML = '<div class="loading">Aucune activité récente</div>';
-        return;
-    }
+    const template = document.getElementById('activity-item-template');
+    if (!container || !template) return;
 
-    container.innerHTML = activities.map(activity => `
-        <div class="activity-item fade-in-up">
-            <div class="activity-icon activity-${activity.type}">
-                ${activity.icon}
-            </div>
-            <div class="activity-content">
-                <div class="activity-title">${activity.title}</div>
-                <div class="activity-details">${activity.details}</div>
-            </div>
-            <div class="activity-time">${activity.time} ago</div>
-        </div>
-    `).join('');
+    try {
+        const activities = dashboardData.recent_activity || [];
+        
+        if (!activities.length) {
+            setContainerState(container, 'empty', 'Aucune activité récente');
+            return;
+        }
+
+        container.innerHTML = ''; // Clear previous content
+        const displayActivities = activities.slice(0, MAX_ACTIVITY_DISPLAY);
+
+        displayActivities.forEach(activity => {
+            const clone = template.content.cloneNode(true);
+            const iconEl = clone.querySelector('.activity-icon');
+            const linksEl = clone.querySelector('.activity-links');
+            let icon, title, details, activityClass;
+
+            if (activity.type === 'transaction') {
+                activityClass = activity.transaction_type === 'buy' ? 'buy' : 'sell';
+                icon = activityClass === 'buy' ? '📈' : '📉';
+                title = `${activity.token_symbol || 'Unknown'} - ${activity.wallet_address.substring(0, 6)}...`;
+                details = `${activity.transaction_type.toUpperCase()}: ${formatNumber(activity.token_amount)} for ${formatNumber(activity.sol_amount)} SOL`;
+            } else { // discovery
+                activityClass = 'discovery';
+                icon = '🆕';
+                title = `Nouveau Token: ${activity.token_symbol || 'Unknown'}`;
+                details = `Découvert par ${activity.wallet_address.substring(0, 6)}... | Balance: ${formatNumber(activity.initial_balance)}`;
+            }
+            
+            iconEl.className = `activity-icon activity-${activityClass}`;
+            iconEl.textContent = icon;
+            clone.querySelector('.activity-title').textContent = title;
+            clone.querySelector('.activity-details').textContent = details;
+            clone.querySelector('.activity-time').textContent = formatTimeAgo(activity.timestamp);
+
+            if (activity.solscan_url) {
+                linksEl.innerHTML += `<a href="${activity.solscan_url}" target="_blank">Solscan</a>`;
+                linksEl.innerHTML += ` | <a href="${activity.dexscreener_url}" target="_blank">DexScreener</a>`;
+                linksEl.innerHTML += ` | <a href="${activity.pumpfun_url}" target="_blank">Pump.fun</a>`;
+            }
+
+            container.appendChild(clone);
+        });
+
+    } catch (error) {
+        console.error('Erreur dans updateActivity:', error);
+        setContainerState(container, 'error', error.message);
+    }
 }
 
 // Mise à jour des tokens populaires
