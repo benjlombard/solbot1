@@ -460,8 +460,7 @@ async def get_dashboard_data():
             # Tokens uniques découverts
             cursor.execute("""
                 SELECT COUNT(DISTINCT token_mint) 
-                FROM transactions 
-                WHERE is_token_transaction = 1
+                 FROM token_discoveries
             """)
             total_unique_tokens = cursor.fetchone()[0] or 0
             
@@ -606,7 +605,7 @@ async def get_dashboard_data():
                     (SELECT COUNT(*) FROM token_accounts ta WHERE ta.wallet_address = wp.wallet_address AND ta.scan_priority >= 3) as priority_accounts,
                     (SELECT COUNT(*) FROM transactions t WHERE t.wallet_address = wp.wallet_address AND t.block_time >= ?) as transactions_24h
                 FROM wallet_priorities wp
-                ORDER BY wp.priority_score DESC, wp.last_scan_time ASC
+                ORDER BY wp.last_scan_time DESC, wp.priority_score DESC
             """, (current_time, current_time - 86400))
             
             wallets_data = cursor.fetchall()
@@ -1349,7 +1348,42 @@ def get_token_detail(token_mint):
         logger.error(f"Erreur token detail: {e}")
         return jsonify(create_error_response("Failed to load token details", [str(e)])), 500
 
+@dashboard_bp.route('/token/<token_mint>/history')
+def get_token_price_history(token_mint):
+    """Get price history for a specific token over the last 24h"""
+    try:
+        # Validate mint address
+        if not token_mint or len(token_mint) != 44:
+            return jsonify(create_error_response("Invalid token mint format")), 400
 
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get data from the last 24 hours
+            start_time = get_current_timestamp() - 86400
+            
+            cursor.execute("""
+                SELECT block_time, price_per_token
+                FROM transactions
+                WHERE token_mint = ? 
+                  AND block_time >= ?
+                  AND price_per_token > 0
+                ORDER BY block_time ASC
+            """, (token_mint, start_time))
+            
+            history_data = cursor.fetchall()
+            
+            # Format for Chart.js
+            chart_data = [
+                {'x': row[0] * 1000, 'y': row[1]} for row in history_data
+            ]
+            
+            return jsonify(create_success_response("Price history retrieved", chart_data))
+
+    except Exception as e:
+        logger.error(f"Erreur token price history: {e}")
+        return jsonify(create_error_response("Failed to load token price history", [str(e)])), 500
+        
 # ============= ROUTES UTILITAIRES =============
 
 @dashboard_bp.route('/health')

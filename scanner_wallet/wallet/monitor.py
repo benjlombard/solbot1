@@ -363,8 +363,14 @@ class SolanaWalletMonitor:
         scan_start = time.time()
         
         try:
+            # Determine if this is the initial scan for the wallet
+            wallet_priority_info = self.priority_manager.get_wallet_priority(wallet_address)
+            is_initial_scan = (wallet_priority_info is None) or (wallet_priority_info.total_scans == 0)
+            if is_initial_scan:
+                logger.info(f"📈 Wallet {wallet_address} identified for initial scan (total_scans=0). Baselining without creating discovery events.")
+
             # Perform actual scan
-            scan_data = self.scanner.scan_wallet(wallet_address)
+            scan_data = self.scanner.scan_wallet(wallet_address, is_initial_scan=is_initial_scan)
             if scan_data is None:
                 scan_data = {
                     'new_accounts': [],

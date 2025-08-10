@@ -27,11 +27,20 @@ initializeTheme();
 let dashboardData = {};
 let refreshTimer;
 let lastUpdate = 0;
+let portfolioPieChart = null;
+let topTokensBarChart = null;
+let tokenPriceHistoryChart = null;
+
+// State for wallets list
+let fullWalletsList = [];
+let currentSort = { key: 'last_scan_time', order: 'desc' };
+let currentFilter = '';
+let currentPage = 1;
+const WALLETS_PER_PAGE = 10;
 
 // Configuration
-const MAX_WALLETS_DISPLAY = 10;
-const MAX_ACTIVITY_DISPLAY = 15;
-const MAX_TOKENS_DISPLAY = 8;
+const MAX_ACTIVITY_DISPLAY = 35;
+const MAX_TOKENS_DISPLAY = 35;
 
 // Initialisation du dashboard
 document.addEventListener('DOMContentLoaded', function() {
@@ -49,7 +58,159 @@ document.addEventListener('DOMContentLoaded', function() {
     if (navDashboard) {
         navDashboard.classList.add('active');
     }
+    // Add event listeners for new controls
+    const searchInput = document.getElementById('wallet-search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            currentFilter = e.target.value.toLowerCase();
+            currentPage = 1; // Reset to first page on search
+            renderWalletsList();
+        });
+    }
+
+    const sortContainer = document.querySelector('.sort-container');
+    if (sortContainer) {
+        sortContainer.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                const sortKey = e.target.dataset.sort;
+                if (currentSort.key === sortKey) {
+                    // Toggle order if same key is clicked
+                    currentSort.order = currentSort.order === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentSort.key = sortKey;
+                    currentSort.order = 'desc'; // Default to descending for new sort key
+                }
+                currentPage = 1; // Reset to first page on sort
+                
+                // Update active button style
+                sortContainer.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+                e.target.classList.add('active');
+
+                renderWalletsList();
+            }
+        });
+    }
 });
+
+function updateTopTokensChart() {
+    const topTokens = dashboardData.top_tokens || [];
+    const ctx = document.getElementById('top-tokens-bar-chart');
+    const card = document.getElementById('top-tokens-volume-card');
+    if (!ctx || !card) return;
+
+    const displayTokens = topTokens.slice(0, 7).filter(t => t.sol_volume > 0);
+
+    if (displayTokens.length === 0) {
+        card.style.display = 'none';
+        return;
+    }
+    
+    card.style.display = 'block';
+
+    const labels = displayTokens.map(t => t.symbol);
+    const data = displayTokens.map(t => t.sol_volume);
+
+    if (topTokensBarChart) {
+        topTokensBarChart.destroy();
+    }
+
+    topTokensBarChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Volume (SOL)',
+                data: data,
+                backgroundColor: 'rgba(75, 192, 192, 0.7)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                title: { display: false }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: { color: getComputedStyle(document.body).getPropertyValue('--text-color') },
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' }
+                },
+                y: {
+                    ticks: { color: getComputedStyle(document.body).getPropertyValue('--text-color') },
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+}
+
+function updatePortfolioChart() {
+    const wallets = dashboardData.wallets_overview || [];
+    const ctx = document.getElementById('portfolio-pie-chart');
+    const card = document.getElementById('portfolio-distribution-card');
+    if (!ctx || !card) return;
+
+    const walletsWithBalance = wallets.filter(w => w.usd_balance > 0);
+
+    if (walletsWithBalance.length === 0) {
+        card.style.display = 'none';
+        return;
+    }
+    
+    card.style.display = 'block';
+
+    const labels = walletsWithBalance.map(w => w.wallet_short);
+    const data = walletsWithBalance.map(w => w.usd_balance);
+    const totalValue = data.reduce((a, b) => a + b, 0);
+
+    if (portfolioPieChart) {
+        portfolioPieChart.destroy();
+    }
+
+    portfolioPieChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Portfolio Value (USD)',
+                data: data,
+                backgroundColor: [
+                    'rgba(255, 99, 132, 0.7)', 'rgba(54, 162, 235, 0.7)',
+                    'rgba(255, 206, 86, 0.7)', 'rgba(75, 192, 192, 0.7)',
+                    'rgba(153, 102, 255, 0.7)', 'rgba(255, 159, 64, 0.7)',
+                    'rgba(255, 99, 255, 0.7)', 'rgba(99, 255, 132, 0.7)'
+                ],
+                borderColor: 'rgba(40, 42, 54, 0.5)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        color: getComputedStyle(document.body).getPropertyValue('--text-color') || '#fff',
+                        boxWidth: 20,
+                        padding: 15
+                    }
+                },
+                title: {
+                    display: true,
+                    text: `Total: $${totalValue.toFixed(2)} USD`,
+                    color: getComputedStyle(document.body).getPropertyValue('--text-color') || '#fff',
+                    font: { size: 16 }
+                }
+            }
+        }
+    });
+}
 
 // Fonction principale de chargement des données
 async function loadDashboardData() {
@@ -62,10 +223,13 @@ async function loadDashboardData() {
         console.log('📊 Données chargées:', dashboardData);
 
         // Mettre à jour toutes les sections
+        fullWalletsList = response.data.wallets_overview || [];
         updateStats();
-        updateWalletsList();
+        renderWalletsList(); // Use the new render function
         updateActivity();
         updateTopTokens();
+        updatePortfolioChart();
+        updateTopTokensChart();
         
         lastUpdate = Date.now();
         updateConnectionStatus(true);
@@ -131,69 +295,149 @@ function setContainerState(container, state, message = '') {
     container.innerHTML = states[state] || '';
 }
 
-// Mise à jour de la liste des wallets
-function updateWalletsList() {
+
+function renderWalletsList() {
     const container = document.getElementById('wallets-list');
     const template = document.getElementById('wallet-item-template');
     if (!container || !template) return;
 
-    try {
-        const wallets = dashboardData.wallets_overview || [];
+    // 1. Filtering
+    let processedWallets = fullWalletsList.filter(wallet => {
+        return wallet.wallet_address.toLowerCase().includes(currentFilter);
+    });
+
+    // 2. Sorting
+    processedWallets.sort((a, b) => {
+        const valA = a[currentSort.key];
+        const valB = b[currentSort.key];
         
-        if (!wallets.length) {
-            setContainerState(container, 'empty');
-            return;
+        let comparison = 0;
+        if (valA > valB) {
+            comparison = 1;
+        } else if (valA < valB) {
+            comparison = -1;
         }
+        
+        return currentSort.order === 'desc' ? comparison * -1 : comparison;
+    });
 
-        container.innerHTML = ''; // Clear previous content
-        const displayWallets = wallets.slice(0, MAX_WALLETS_DISPLAY);
+    // 3. Pagination
+    const totalPages = Math.ceil(processedWallets.length / WALLETS_PER_PAGE);
+    currentPage = Math.min(currentPage, totalPages) || 1;
+    const startIndex = (currentPage - 1) * WALLETS_PER_PAGE;
+    const walletsToDisplay = processedWallets.slice(startIndex, startIndex + WALLETS_PER_PAGE);
 
-         displayWallets.forEach(wallet => {
-            const clone = template.content.cloneNode(true);
-            const walletItem = clone.querySelector('.wallet-item');
-            
-            walletItem.onclick = () => showWalletDetails(wallet.wallet_address);
-            walletItem.dataset.address = wallet.wallet_address;
-            
-            clone.querySelector('.wallet-avatar').textContent = wallet.wallet_address ? wallet.wallet_address.substring(0, 2).toUpperCase() : 'WX';
-            
-            // Populate the link and copy button
-            const link = clone.querySelector('.wallet-address-link');
-            if (link) {
-                link.href = wallet.solscan_url || '#';
-            }
-            clone.querySelector('.wallet-address').textContent = wallet.wallet_short || 'Unknown';
+    // 4. Rendering
+    container.innerHTML = '';
+    if (walletsToDisplay.length === 0) {
+        setContainerState(container, 'empty', 'Aucun wallet ne correspond à vos critères.');
+       
+    } else {
+        walletsToDisplay.forEach(wallet => {
+        const clone = template.content.cloneNode(true);
+        const walletItem = clone.querySelector('.wallet-item');
+        
+        walletItem.onclick = () => showWalletDetails(wallet.wallet_address);
+        walletItem.dataset.address = wallet.wallet_address;
+        
+        clone.querySelector('.wallet-avatar').textContent = wallet.wallet_address ? wallet.wallet_address.substring(0, 2).toUpperCase() : 'WX';
+        
+        const link = clone.querySelector('.wallet-address-link');
+        if (link) {
+            link.href = wallet.solscan_url || '#';
+        }
+        clone.querySelector('.wallet-address').textContent = wallet.wallet_short || 'Unknown';
 
-            const copyBtn = clone.querySelector('.copy-btn');
-            if(copyBtn) {
-                copyBtn.dataset.address = wallet.wallet_address;
-            }
-            
-            const statusDot = clone.querySelector('.status-dot-small');
-            statusDot.className = 'status-dot-small ' + getWalletStatusClass(wallet);
-            clone.querySelector('.wallet-status span').textContent = getWalletStatusText(wallet);
+        const copyBtn = clone.querySelector('.copy-btn');
+        if(copyBtn) {
+            copyBtn.dataset.address = wallet.wallet_address;
+        }
+        
+        const statusDot = clone.querySelector('.status-dot-small');
+        statusDot.className = 'status-dot-small ' + getWalletStatusClass(wallet);
+        clone.querySelector('.wallet-status span').textContent = getWalletStatusText(wallet);
 
-            const priorityEl = clone.querySelector('.wallet-priority');
-            const priorityCategory = getPriorityCategory(wallet.priority_score);
-            priorityEl.className = 'wallet-priority ' + `priority-${priorityCategory}`;
-            priorityEl.textContent = priorityCategory;
+        const priorityEl = clone.querySelector('.wallet-priority');
+        const priorityCategory = getPriorityCategory(wallet.priority_score);
+        priorityEl.className = 'wallet-priority ' + `priority-${priorityCategory}`;
+        priorityEl.textContent = priorityCategory;
 
-            clone.querySelector('[data-stat="priority_score"]').textContent = formatNumber(wallet.priority_score || 0);
-            clone.querySelector('[data-stat="total_token_accounts"]').textContent = formatNumber(wallet.total_token_accounts || 0);
-            clone.querySelector('[data-stat="transactions_24h"]').textContent = formatNumber(wallet.transactions_24h || 0);
-            clone.querySelector('[data-stat="last_scan_time"]').textContent = formatTimeAgo(wallet.last_scan_time);
+        clone.querySelector('[data-stat="priority_score"]').textContent = formatNumber(wallet.priority_score || 0);
+        clone.querySelector('[data-stat="total_token_accounts"]').textContent = formatNumber(wallet.total_token_accounts || 0);
+        clone.querySelector('[data-stat="transactions_24h"]').textContent = formatNumber(wallet.transactions_24h || 0);
+        clone.querySelector('[data-stat="total_scans"]').textContent = formatNumber(wallet.total_scans || 0);
+        clone.querySelector('[data-stat="last_scan_time"]').textContent = formatTimeAgo(wallet.last_scan_time);
 
-            const balance_text = `${formatNumber(wallet.sol_balance)} SOL ($${formatNumber(wallet.usd_balance)} / €${formatNumber(wallet.eur_balance)})`;
-            clone.querySelector('[data-stat="balance"]').textContent = balance_text;
+        const balance_text = `${formatNumber(wallet.sol_balance)} SOL ($${formatNumber(wallet.usd_balance)} / €${formatNumber(wallet.eur_balance)})`;
+        clone.querySelector('[data-stat="balance"]').textContent = balance_text;
 
-            container.appendChild(clone);
-        });
-
-    } catch (error) {
-        console.error('Erreur dans updateWalletsList:', error);
-        setContainerState(container, 'error', error.message);
+        container.appendChild(clone);
+    });
     }
+
+    renderPaginationControls(totalPages, processedWallets.length);
 }
+
+function renderPaginationControls(totalPages, totalItems) {
+    const container = document.getElementById('wallets-pagination');
+    if (!container) return;
+
+    container.innerHTML = '';
+    if (totalPages <= 1) return;
+
+    const summary = document.createElement('span');
+    summary.className = 'pagination-summary';
+    summary.textContent = `Page ${currentPage} sur ${totalPages} (${totalItems} wallets)`;
+    container.appendChild(summary);
+
+    const buttonsWrapper = document.createElement('div');
+    buttonsWrapper.className = 'pagination-buttons';
+
+    // Previous button
+    const prevButton = document.createElement('button');
+    prevButton.textContent = '‹ Préc.';
+    prevButton.className = 'btn btn-sm btn-secondary';
+    prevButton.disabled = currentPage === 1;
+    prevButton.onclick = () => {
+        if (currentPage > 1) {
+            currentPage--;
+            renderWalletsList();
+        }
+    };
+    buttonsWrapper.appendChild(prevButton);
+
+    // Page buttons (simplified logic for now)
+    // We can add more complex logic later (e.g., ellipsis for many pages)
+    for (let i = 1; i <= totalPages; i++) {
+        // Simple case: show all page numbers
+        const button = document.createElement('button');
+        button.textContent = i;
+        button.className = 'btn btn-sm ' + (i === currentPage ? 'btn-primary' : 'btn-secondary');
+        button.onclick = () => {
+            if (i !== currentPage) {
+                currentPage = i;
+                renderWalletsList();
+            }
+        };
+        buttonsWrapper.appendChild(button);
+    }
+
+    // Next button
+    const nextButton = document.createElement('button');
+    nextButton.textContent = 'Suiv. ›';
+    nextButton.className = 'btn btn-sm btn-secondary';
+    nextButton.disabled = currentPage === totalPages;
+    nextButton.onclick = () => {
+        if (currentPage < totalPages) {
+            currentPage++;
+            renderWalletsList();
+        }
+    };
+    buttonsWrapper.appendChild(nextButton);
+
+    container.appendChild(buttonsWrapper);
+}
+
 
 // Mise à jour de l'activité récente
 function updateActivity() {
@@ -607,84 +851,95 @@ async function loadWalletDetails(walletAddress) {
 }
 
 async function loadTokenDetails(tokenMint) {
+    const modalBody = document.getElementById('modal-body');
+    if (!modalBody) return;
+    
     try {
-        const response = await apiCall(`/dashboard/token/${tokenMint}`);
-        const token = response.data;
-        
-        const modalBody = document.getElementById('modal-body');
-        if (!modalBody) return;
-        
+        // Fetch details and history in parallel
+        const [detailsResponse, historyResponse] = await Promise.all([
+            apiCall(`/dashboard/token/${tokenMint}`),
+            apiCall(`/dashboard/token/${tokenMint}/history`)
+        ]);
+    
+        const token = detailsResponse.data;
+        const history = historyResponse.data;
         modalBody.innerHTML = `
             <div class="token-details">
                 <div class="detail-section">
                     <h4>🪙 Informations Token</h4>
                     <div class="detail-grid">
-                        <div class="detail-item">
-                            <span class="detail-label">Symbole:</span>
-                            <span class="amount">${token.token_symbol}</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">Nom:</span>
-                            <span>${token.token_name}</span>
-                        </div>
-                        <div class="detail-item">
-                            <span class="detail-label">Mint:</span>
-                            <span class="wallet-address">${token.mint_short}</span>
-                        </div>
+                        <div class="detail-item"><span class="detail-label">Symbole:</span><span class="amount">${token.token_symbol}</span></div>
+                        <div class="detail-item"><span class="detail-label">Nom:</span><span>${token.token_name}</span></div>
+                        <div class="detail-item"><span class="detail-label">Mint:</span><span class="wallet-address">${token.mint_short}</span></div>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <h4>Prix (24h)</h4>
+                    <div class="chart-container" style="height: 200px;">
+                        <canvas id="token-price-history-chart"></canvas>
                     </div>
                 </div>
                 
                 <div class="detail-section">
                     <h4>📈 Statistiques</h4>
                     <div class="stats-grid">
-                        <div class="stat-item">
-                            <div class="stat-value">${token.global_stats?.holder_count || 0}</div>
-                            <div class="stat-label">Détenteurs</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${token.global_stats?.total_transactions || 0}</div>
-                            <div class="stat-label">Transactions</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${token.global_stats?.transactions_24h || 0}</div>
-                            <div class="stat-label">TX 24h</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${formatNumber(token.global_stats?.net_flow || 0)}</div>
-                            <div class="stat-label">Flux Net</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="detail-section">
-                    <h4>👥 Distribution</h4>
-                    <div class="wallet-distribution">
-                        ${(token.wallet_distribution || []).slice(0, 3).map(wallet => `
-                            <div class="wallet-item">
-                                <div class="wallet-address">${wallet.wallet_short}</div>
-                                <div class="wallet-balance">${formatNumber(wallet.net_position)}</div>
-                            </div>
-                        `).join('')}
+                        <div class="stat-item"><div class="stat-value">${token.global_stats?.holder_count || 0}</div><div class="stat-label">Détenteurs</div></div>
+                        <div class="stat-item"><div class="stat-value">${token.global_stats?.total_transactions || 0}</div><div class="stat-label">Transactions</div></div>
+                        <div class="stat-item"><div class="stat-value">${token.global_stats?.transactions_24h || 0}</div><div class="stat-label">TX 24h</div></div>
+                        <div class="stat-item"><div class="stat-value">${formatNumber(token.global_stats?.net_flow || 0)}</div><div class="stat-label">Flux Net</div></div>
                     </div>
                 </div>
                 
                 <div class="detail-actions">
-                    <button class="btn btn-primary" onclick="navigateTo('/token/${token.token_mint}')">
-                        Voir Détails Complets
-                    </button>
+                    <button class="btn btn-primary" onclick="navigateTo('/token/${token.token_mint}')">Voir Détails Complets</button>
                 </div>
             </div>
         `;
-        
-    } catch (error) {
-        const modalBody = document.getElementById('modal-body');
-        if (modalBody) {
-            modalBody.innerHTML = `
-                <div class="error-message">
-                    Erreur lors du chargement: ${error.message}
-                </div>
-            `;
+    
+        // Render the chart
+        const ctx = document.getElementById('token-price-history-chart');
+        if (tokenPriceHistoryChart) {
+            tokenPriceHistoryChart.destroy();
         }
+        if (ctx && history && history.length > 0) {
+            tokenPriceHistoryChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Prix (USD)',
+                        data: history,
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: 'hour' },
+                            ticks: { color: getComputedStyle(document.body).getPropertyValue('--text-color') }
+                        },
+                        y: {
+                            ticks: { 
+                                color: getComputedStyle(document.body).getPropertyValue('--text-color'),
+                                callback: function(value) { return '$' + value.toPrecision(4); }
+                            }
+                        }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        } else if (ctx) {
+            ctx.parentElement.innerHTML = '<div class="loading">Aucun historique de prix disponible.</div>';
+        }
+    
+    } catch (error) {
+        modalBody.innerHTML = `<div class="error-message">Erreur lors du chargement: ${error.message}</div>`;
     }
 }
 

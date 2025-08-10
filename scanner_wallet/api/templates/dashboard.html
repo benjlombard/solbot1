@@ -82,6 +82,32 @@
         </article>
     </section>
 
+    <!-- Visualisations -->
+    <section class="visualizations-grid">
+        <div class="card" id="portfolio-distribution-card">
+            <header class="card-header">
+                <h2 class="card-title">
+                    <span role="img" aria-label="Cible">📊</span>
+                    Répartition du Portefeuille
+                </h2>
+            </header>
+            <div class="card-body">
+                <canvas id="portfolio-pie-chart"></canvas>
+            </div>
+        </div>
+        <div class="card" id="top-tokens-volume-card">
+             <header class="card-header">
+                <h2 class="card-title">
+                    <span role="img" aria-label="Cible">🔥</span>
+                    Volume des Tokens Actifs
+                </h2>
+            </header>
+            <div class="card-body">
+                <canvas id="top-tokens-bar-chart"></canvas>
+            </div>
+        </div>
+    </section>
+
     <!-- Contenu principal -->
     <div class="main-grid">
         <!-- Panel des wallets -->
@@ -102,11 +128,28 @@
                     </button>
                 </div>
             </header>
+            <!-- Controls for filtering and sorting -->
+            <div class="wallets-controls">
+                <div class="search-container">
+                    <input type="text" id="wallet-search-input" class="form-input" placeholder="Rechercher par adresse...">
+                </div>
+                <div class="sort-container">
+                    <span>Trier par:</span>
+                    <button class="btn btn-sm btn-secondary active" data-sort="last_scan_time">Récent</button>
+                    <button class="btn btn-sm btn-secondary" data-sort="priority_score">Priorité</button>
+                    <button class="btn btn-sm btn-secondary" data-sort="sol_balance">Solde SOL</button>
+                    <button class="btn btn-sm btn-secondary" data-sort="transactions_24h">Activité</button>
+                </div>
+            </div>
             <div class="wallets-list" id="wallets-list">
                 <div class="loading">
                     <div class="spinner"></div>
                     Chargement des wallets...
                 </div>
+            </div>
+            <!-- Pagination controls -->
+            <div class="pagination-container" id="wallets-pagination">
+                <!-- Pagination buttons will be generated here by JS -->
             </div>
         </section>
 
@@ -209,12 +252,16 @@
                 <span class="wallet-stat-label">TX 24h</span>
             </div>
             <div class="wallet-stat">
+                <span class="wallet-stat-value" data-stat="total_scans"></span>
+                <span class="wallet-stat-label">Scans</span>
+            </div>
+            <div class="wallet-stat">
                 <span class="wallet-stat-value" data-stat="last_scan_time"></span>
                 <span class="wallet-stat-label">Scan</span>
             </div>
             <div class="wallet-stat">
                 <span class="wallet-stat-value" data-stat="balance"></span>
-                <span class="wallet-stat-label">Balance</span>
+                <!-- <span class="wallet-stat-label">Balance</span> -->
             </div>
         </div>
     </div>
@@ -265,6 +312,8 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
 <!-- Script pour le theme toggle (nouvelle fonctionnalité) -->
 <script>

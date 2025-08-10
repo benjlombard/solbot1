@@ -337,11 +337,16 @@ class WalletPriorityManager:
     def _calculate_recency_bonus(self, priority: WalletPriority) -> float:
         """Calculate recency bonus"""
         now = get_current_timestamp()
+        # If never scanned, give it a very high priority to ensure it gets scanned.
+        if priority.last_scan_time == 0:
+            return 10.0
+
         hours_since_scan = safe_divide(now - priority.last_scan_time, 3600)
         
-        # Bonus for long time since last scan
-        if hours_since_scan > 6:
-            return min(2.0, hours_since_scan / 12.0)
+        # Bonus for long time since last scan, starts after 1 hour and is more aggressive.
+        if hours_since_scan > 1:
+            # The bonus can now go up to 4.0, making it more significant than the activity bonus.
+            return min(4.0, hours_since_scan / 4.0)
         
         return 0.0
     
@@ -385,11 +390,32 @@ class WalletPriorityManager:
     def select_next_wallet(self) -> Optional[str]:
         """Select the next wallet to scan based on priority"""
         try:
+            # --- Absolute Priority Rule for Overdue Wallets ---
+            now = get_current_timestamp()
+            max_age_seconds = 3600  # 1 hour
+
+            overdue_wallets = []
             with self._lock:
                 if not self._wallet_priorities:
                     logger.warning("No wallets available in priority manager.")
                     return None
+                
+                for wallet_address, priority in self._wallet_priorities.items():
+                    if priority.last_scan_time == 0:  # Never scanned
+                        # Prioritize by creation time for fairness among new wallets
+                        overdue_wallets.append((priority.created_at, wallet_address))
+                    elif (now - priority.last_scan_time) > max_age_seconds:
+                        overdue_wallets.append((priority.last_scan_time, wallet_address))
 
+            if overdue_wallets:
+                # Sort by the oldest scan/creation time first
+                overdue_wallets.sort(key=lambda x: x[0])
+                selected_wallet = overdue_wallets[0][1]
+                logger.info(f"🚨 Absolute priority rule triggered. Selecting overdue wallet: {selected_wallet}")
+                return selected_wallet
+
+            # --- Score-based Selection (if no wallets are overdue) ---
+            with self._lock:
                 # Calculate scores for all wallets
                 all_wallets_scores = []
                 for wallet_address in self._wallet_priorities:
@@ -569,6 +595,11 @@ class WalletPriorityManager:
         with self._lock:
             return dict(self._wallet_priorities)
     
+    def get_wallet_priority(self, wallet_address: str) -> Optional[WalletPriority]:
+        """Get priority data for a single wallet"""
+        with self._lock:
+            return self._wallet_priorities.get(wallet_address)
+            
     def get_priority_scores(self) -> Dict[str, PriorityScore]:
         """Get current priority scores for all wallets"""
         scores = {}

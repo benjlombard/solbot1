@@ -145,12 +145,13 @@ class WalletScanner:
         except Exception as e:
             logger.warning(f"⚠️ Could not initialize batch manager: {e}")
     
-    def scan_wallet(self, wallet_address: str, scan_type: str = "full") -> Dict[str, Any]:
+    def scan_wallet(self, wallet_address: str, scan_type: str = "full", is_initial_scan: bool = False) -> Dict[str, Any]:
         """
         Comprehensive wallet scan
         Args:
             wallet_address: Solana wallet address
             scan_type: "full", "quick", "balances", "tokens"
+            is_initial_scan: If True, suppresses creation of discovery events to establish a baseline.
         Returns:
             Dictionary with scan results
         """
@@ -185,15 +186,15 @@ class WalletScanner:
             
             # Perform scan based on type
             if scan_type == "full":
-                result = self._perform_full_scan(wallet_address)
+                result = self._perform_full_scan(wallet_address, is_initial_scan)
             elif scan_type == "quick":
                 result = self._perform_quick_scan(wallet_address)
             elif scan_type == "balances":
                 result = self._perform_balance_scan(wallet_address)
             elif scan_type == "tokens":
-                result = self._perform_token_scan(wallet_address)
+                result = self._perform_token_scan(wallet_address, is_initial_scan)
             else:
-                result = self._perform_full_scan(wallet_address)
+                result = self._perform_full_scan(wallet_address, is_initial_scan)
             
             # Cache results
             self._cache_result(wallet_address, scan_type, result)
@@ -235,7 +236,7 @@ class WalletScanner:
                 self._active_scans.pop(wallet_address, None)
                 logger.debug(f"Scan lock released for {wallet_address}")
     
-    def _perform_full_scan(self, wallet_address: str) -> Dict[str, Any]:
+    def _perform_full_scan(self, wallet_address: str, is_initial_scan: bool = False) -> Dict[str, Any]:
         """Perform comprehensive wallet scan"""
         scan_start = time.time()
         
@@ -247,7 +248,7 @@ class WalletScanner:
             transactions = self._get_recent_transactions(wallet_address)
             
             # Step 3: Process token information
-            tokens_discovered = self._process_token_accounts(wallet_address, token_accounts)
+            tokens_discovered = self._process_token_accounts(wallet_address, token_accounts, is_initial_scan)
             
             # Step 4: Process transactions
             transactions_processed = self._process_transactions(wallet_address, transactions)
@@ -413,7 +414,7 @@ class WalletScanner:
         
         return transactions
     
-    def _process_token_accounts(self, wallet_address: str, accounts: List[TokenAccountInfo]) -> List[TokenDiscovery]:
+    def _process_token_accounts(self, wallet_address: str, accounts: List[TokenAccountInfo], is_initial_scan: bool = False) -> List[TokenDiscovery]:
         """Process token accounts and discover new tokens"""
         discoveries = []
         
@@ -423,24 +424,24 @@ class WalletScanner:
             
             for account in accounts:
                 if account.token_mint not in existing_mints:
-                    # Create discovery record
-                    discovery = TokenDiscovery(
-                        token_mint=account.token_mint,
-                        wallet_address=wallet_address,
-                        discovered_at=get_current_timestamp(),
-                        ata_pubkey=account.ata_pubkey,
-                        initial_balance=safe_divide(account.balance, 10**account.decimals),
-                        decimals=account.decimals,
-                        symbol=account.token_symbol,
-                        name=account.token_name,
-                        discovery_method="balance_scan",
-                        confidence_score=1.0
-                    )
+                    # For initial scans, we establish a baseline but don't create a "discovery" event.
+                    if not is_initial_scan:
+                        # Create discovery record only if it's not the first scan
+                        discovery = TokenDiscovery(
+                            token_mint=account.token_mint,
+                            wallet_address=wallet_address,
+                            discovered_at=get_current_timestamp(),
+                            ata_pubkey=account.ata_pubkey,
+                            initial_balance=safe_divide(account.balance, 10**account.decimals),
+                            decimals=account.decimals,
+                            symbol=account.token_symbol,
+                            name=account.token_name,
+                            discovery_method="balance_scan",
+                            confidence_score=1.0
+                        )
                     
-                    discoveries.append(discovery)
-                    
-                    # Store discovery
-                    self._store_discovery(discovery)
+                        # Store discovery
+                        self._store_discovery(discovery)
         
         except Exception as e:
             logger.error(f"❌ Error processing token accounts: {e}")
@@ -656,7 +657,7 @@ class WalletScanner:
         """Perform balance-focused scan"""
         return self._perform_quick_scan(wallet_address)
     
-    def _perform_token_scan(self, wallet_address: str) -> Dict[str, Any]:
+    def _perform_token_scan(self, wallet_address: str, is_initial_scan: bool = False) -> Dict[str, Any]:
         """Perform token-focused scan"""
         scan_start = time.time()
         
@@ -665,7 +666,7 @@ class WalletScanner:
             token_accounts = self._get_token_accounts(wallet_address)
             
             # Process for discoveries
-            discoveries = self._process_token_accounts(wallet_address, token_accounts)
+            discoveries = self._process_token_accounts(wallet_address, token_accounts, is_initial_scan)
             
             scan_duration = time.time() - scan_start
             

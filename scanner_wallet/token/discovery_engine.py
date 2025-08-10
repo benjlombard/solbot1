@@ -96,12 +96,14 @@ class TokenDiscoveryEngine:
         logger.info("✅ Token Discovery Engine initialized")
     
     def discover_new_tokens(self, wallet_address: str, 
-                          params: Optional[DiscoveryParams] = None) -> DiscoveryResult:
+                          params: Optional[DiscoveryParams] = None,
+                          is_initial_scan: bool = Fals) -> DiscoveryResult:
         """
         Discover new tokens for a wallet
         Args:
             wallet_address: Solana wallet address
             params: Discovery parameters
+            is_initial_scan: If True, suppresses creation of discovery events.
         Returns:
             DiscoveryResult with findings
         """
@@ -130,9 +132,11 @@ class TokenDiscoveryEngine:
             # Process discovered accounts
             for account in discovered_accounts:
                 if account.token_mint not in existing_mints:
-                    # New token discovered
-                    discovery = self._create_discovery(account, wallet_address)
-                    new_tokens.append(discovery)
+                    if not is_initial_scan:
+                        # New token discovered
+                        discovery_time = account.get('discovery_time', get_current_timestamp())
+                        discovery = self._create_discovery(account, wallet_address, discovery_time)
+                        new_tokens.append(discovery)
                     
                     # Create TokenAccount
                     token_account = self._create_token_account(account, wallet_address)
@@ -232,14 +236,20 @@ class TokenDiscoveryEngine:
             with self.db_manager.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Get recent transaction tokens
+                # Get recent transaction tokens, ensuring we get the earliest discovery time
                 cursor.execute("""
-                    SELECT DISTINCT token_mint, token_symbol, token_name, decimals
+                    SELECT
+                        token_mint, 
+                        token_symbol, 
+                        token_name, 
+                        decimals,
+                        MIN(block_time) as discovery_time
                     FROM transactions
                     WHERE wallet_address = ?
                         AND token_mint IS NOT NULL
                         AND block_time > ?
-                    ORDER BY block_time DESC
+                    GROUP BY token_mint, token_symbol, token_name, decimals
+                    ORDER BY discovery_time DESC
                     LIMIT 1000
                 """, (wallet_address, 
                       get_current_timestamp() - (params.max_age_hours * 3600)))
@@ -252,6 +262,7 @@ class TokenDiscoveryEngine:
                             'token_symbol': row['token_symbol'],
                             'token_name': row['token_name'],
                             'decimals': int(row['decimals']),
+                            'discovery_time': int(row['discovery_time']) if row['discovery_time'] else get_current_timestamp(),
                             'balance': 0.0,  # Would be fetched from blockchain
                             'ata_pubkey': f"ATA_{wallet_address[:6]}_{row['token_mint'][:6]}"
                         })
@@ -262,12 +273,12 @@ class TokenDiscoveryEngine:
             logger.error(f"❌ Error discovering accounts: {e}")
             return []
     
-    def _create_discovery(self, account: Dict[str, Any], wallet_address: str) -> TokenDiscovery:
+    def _create_discovery(self, account: Dict[str, Any], wallet_address: str, discovery_time: int) -> TokenDiscovery:
         """Create TokenDiscovery object"""
         return TokenDiscovery(
             token_mint=account['token_mint'],
             wallet_address=wallet_address,
-            discovered_at=get_current_timestamp(),
+            discovered_at=discovery_time,
             ata_pubkey=account['ata_pubkey'],
             initial_balance=account['balance'],
             decimals=account['decimals'],
@@ -344,8 +355,8 @@ class TokenDiscoveryEngine:
                     max_age_hours: int = 24) -> List[TokenDiscovery]:
         """Scan for potential gems (undervalued tokens)"""
         discoveries = []
-        
-        result = self.discover_new_tokens(wallet_address)
+        # Assuming gem scanning is not an initial scan.
+        result = self.discover_new_tokens(wallet_address, is_initial_scan=False)
         
         for discovery in result.new_tokens:
             # Evaluate gem potential
@@ -539,7 +550,8 @@ class TokenDiscoveryEngine:
         
         for wallet_address in wallet_addresses:
             if validate_wallet_address(wallet_address):
-                results[wallet_address] = self.discover_new_tokens(wallet_address, params)
+                # Assuming batch discovery is not an initial scan.
+                results[wallet_address] = self.discover_new_tokens(wallet_address, params, is_initial_scan=False)
             else:
                 results[wallet_address] = DiscoveryResult(
                     wallet_address=wallet_address,
