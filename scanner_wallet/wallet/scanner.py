@@ -343,6 +343,12 @@ class WalletScanner:
                                     logger.warning(f"Unexpected balance or decimals format for mint {info.get('mint')}. Balance: {balance_raw}, Decimals: {decimals_raw}")
                                     continue
 
+                                rent_exempt_reserve_raw = info.get('rentExemptReserve', 0)
+                                if isinstance(rent_exempt_reserve_raw, dict):
+                                    rent_exempt_reserve = int(rent_exempt_reserve_raw.get('amount', 0))
+                                else:
+                                    rent_exempt_reserve = int(rent_exempt_reserve_raw)
+
                                 accounts.append(TokenAccountInfo(
                                     ata_pubkey=pubkey,
                                     token_mint=info.get('mint'),
@@ -353,7 +359,7 @@ class WalletScanner:
                                     token_name="Unknown Token",
                                     is_frozen=info.get('state') == 'frozen',
                                     is_native=info.get('isNative', False),
-                                    rent_exempt_reserve=int(info.get('rentExemptReserve', 0))
+                                    rent_exempt_reserve=rent_exempt_reserve
                                 ))
                             except (ValueError, TypeError, KeyError) as e:
                                 logger.error(f"Could not parse token account info for mint {info.get('mint')}: {e}. Data: {info}", exc_info=True)
@@ -442,7 +448,8 @@ class WalletScanner:
                     
                         # Store discovery
                         self._store_discovery(discovery)
-        
+                        discoveries.append(discovery)
+
         except Exception as e:
             logger.error(f"❌ Error processing token accounts: {e}")
         

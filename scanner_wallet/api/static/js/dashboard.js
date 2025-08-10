@@ -610,7 +610,7 @@ async function refreshWallets() {
     button.disabled = true;
     
     try {
-        await updateWalletsList();
+        await loadDashboardData();
         showMessage('Wallets mis à jour', 'success', 2000);
     } catch (error) {
         showMessage('Erreur lors de la mise à jour', 'error');
