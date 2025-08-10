@@ -32,7 +32,7 @@ from utils.formatters import (
 from utils.constants import (
     OPTIMAL_BATCH_SIZES, CONSERVATIVE_BATCH_SIZES,
     PERFORMANCE_THRESHOLDS, ADAPTIVE_INTERVALS,
-    BATCH_RPC_TIMEOUT
+    RPC_TIMEOUT_BATCH
 )
 
 # Configuration du blueprint
@@ -537,8 +537,8 @@ def get_performance_analysis():
             'duration_percentiles': {k: round(v, 3) for k, v in duration_percentiles.items()},
             'slow_batches_threshold': round(duration_percentiles['p90'], 3),
             'very_slow_batches_count': sum(1 for d in all_durations if d > duration_percentiles['p95']),
-            'timeout_risk': 'high' if duration_percentiles['p95'] > BATCH_RPC_TIMEOUT * 0.8 else
-                          'medium' if duration_percentiles['p90'] > BATCH_RPC_TIMEOUT * 0.6 else 'low'
+            'timeout_risk': 'high' if duration_percentiles['p95'] > RPC_BATCH_TIMEOUT * 0.8 else
+                          'medium' if duration_percentiles['p90'] > RPC_BATCH_TIMEOUT * 0.6 else 'low'
         }
         
         # Comparaison avec les seuils optimaux

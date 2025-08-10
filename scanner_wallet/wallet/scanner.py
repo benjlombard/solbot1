@@ -328,18 +328,35 @@ class WalletScanner:
                         if parsed['type'] == 'account':
                             info = parsed['info']
                             
-                            accounts.append(TokenAccountInfo(
-                                ata_pubkey=pubkey,
-                                token_mint=info['mint'],
-                                owner=info['owner'],
-                                balance=int(info['tokenAmount']['amount']),
-                                decimals=int(info['tokenAmount']['decimals']),
-                                token_symbol=info.get('tokenAmount', {}).get('uiAmountString', '0'),
-                                token_name="Unknown Token",
-                                is_frozen=info.get('state') == 'frozen',
-                                is_native=info.get('isNative', False),
-                                rent_exempt_reserve=int(info.get('rentExemptReserve', 0))
-                            ))
+                            try:
+                                token_amount_obj = info.get('tokenAmount')
+                                if not isinstance(token_amount_obj, dict):
+                                    logger.warning(f"Unexpected tokenAmount format for mint {info.get('mint')}: {token_amount_obj}")
+                                    continue
+
+                                balance_raw = token_amount_obj.get('amount')
+                                decimals_raw = token_amount_obj.get('decimals')
+
+                                # Validate types before casting
+                                if not isinstance(balance_raw, (str, int, float)) or not isinstance(decimals_raw, (int, float)):
+                                    logger.warning(f"Unexpected balance or decimals format for mint {info.get('mint')}. Balance: {balance_raw}, Decimals: {decimals_raw}")
+                                    continue
+
+                                accounts.append(TokenAccountInfo(
+                                    ata_pubkey=pubkey,
+                                    token_mint=info.get('mint'),
+                                    owner=info.get('owner'),
+                                    balance=int(balance_raw),
+                                    decimals=int(decimals_raw),
+                                    token_symbol=token_amount_obj.get('uiAmountString', '0'),
+                                    token_name="Unknown Token",
+                                    is_frozen=info.get('state') == 'frozen',
+                                    is_native=info.get('isNative', False),
+                                    rent_exempt_reserve=int(info.get('rentExemptReserve', 0))
+                                ))
+                            except (ValueError, TypeError, KeyError) as e:
+                                logger.error(f"Could not parse token account info for mint {info.get('mint')}: {e}. Data: {info}", exc_info=True)
+                                continue
             
             return accounts
             
@@ -353,35 +370,46 @@ class WalletScanner:
         return []
     
     def _get_recent_transactions(self, wallet_address: str) -> List[Dict[str, Any]]:
-        """Get recent transactions for a wallet"""
+        """Get recent transactions for a wallet using batch processing."""
         transactions = []
         
         try:
-            # Get recent signatures, using the defined constant
+            # Step 1: Get recent signatures
             response = self.rpc_client.call(
                 "getSignaturesForAddress",
                 [wallet_address, {"limit": self.RECENT_TRANSACTIONS_LIMIT}]
             )
             
-            if response and 'result' in response:
-                # The slicing is no longer needed as we fetch the exact number
-                signatures = [sig['signature'] for sig in response['result']]
+            if not (response and 'result' in response and response['result']):
+                return []
 
-                # Get transaction details
-                for signature in signatures:
-                    tx_response = self.rpc_client.call(
-                        "getTransaction",
-                        [signature, {"encoding": "json", "maxSupportedTransactionVersion": 0}]
-                    )
-                    
-                    if tx_response and 'result' in tx_response and tx_response['result']:
-                        transactions.append({
-                            'signature': signature,
-                            'transaction': tx_response['result']
-                        })
+            signatures = [sig['signature'] for sig in response['result']]
             
+            # Step 2: Prepare batch request for getTransaction
+            batch_requests = [
+                {
+                    "method": "getTransaction",
+                    "params": [sig, {"encoding": "json", "maxSupportedTransactionVersion": 0}]
+                }
+                for sig in signatures
+            ]
+            
+            # Step 3: Execute batch call
+            logger.info(f"🔗 [RPC] Making batch getTransaction call for {len(signatures)} signatures.")
+            batch_responses = self.rpc_client.batch_call(batch_requests)
+            
+            # Step 4: Process responses
+            for i, tx_response in enumerate(batch_responses):
+                if tx_response and 'result' in tx_response and tx_response['result']:
+                    transactions.append({
+                        'signature': signatures[i],
+                        'transaction': tx_response['result']
+                    })
+                else:
+                    logger.warning(f"Failed to fetch transaction details for signature: {signatures[i]}")
+
         except Exception as e:
-            logger.error(f"❌ Error getting transactions for {wallet_address}: {e}")
+            logger.error(f"❌ Error getting transactions for {wallet_address}: {e}", exc_info=True)
         
         return transactions
     

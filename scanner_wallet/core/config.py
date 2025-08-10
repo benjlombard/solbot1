@@ -52,7 +52,6 @@ def sanitize_filename(name: str) -> str:
 # Constantes par défaut
 DEFAULT_RPC_ENDPOINTS = [
     "https://api.mainnet-beta.solana.com",
-    "https://rpc.ankr.com/solana",
     "https://solana.public-rpc.com"
 ]
 
@@ -145,7 +144,7 @@ class WalletConfig:
     primary_address: Optional[str] = None
     selection_mode: WalletSelectionMode = WalletSelectionMode.PRIORITY
     random_selection_weight_by_priority: bool = False
-    min_interval_between_scans: int = 30
+    min_interval_between_scans: int = 45
     random_selection_cooldown: int = 300
     max_wallets_per_instance: int = 1000
     

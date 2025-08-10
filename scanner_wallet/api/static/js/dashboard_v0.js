@@ -1,28 +1,3 @@
-// ===== NOUVELLES FONCTIONS POUR LES THÈMES =====
-
-// Variables pour les thèmes
-let currentTheme = 'dark';
-
-// Fonction pour restaurer le thème (appelée automatiquement)
-function initializeTheme() {
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    const body = document.body;
-    
-    body.dataset.theme = savedTheme;
-    currentTheme = savedTheme;
-    
-    // Mettre à jour l'icône si elle existe
-    const themeIcon = document.getElementById('theme-icon');
-    if (themeIcon) {
-        themeIcon.textContent = savedTheme === 'dark' ? '🌙' : '☀️';
-    }
-}
-
-// Initialiser le thème dès que possible
-initializeTheme();
-
-// ===== VOTRE CODE JAVASCRIPT EXISTANT =====
-
 // Variables globales du dashboard
 let dashboardData = {};
 let refreshTimer;
@@ -36,11 +11,6 @@ const MAX_TOKENS_DISPLAY = 8;
 // Initialisation du dashboard
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 Initialisation du dashboard');
-    
-    // Initialiser le thème
-    initializeTheme();
-    
-    // Charger les données du dashboard
     loadDashboardData();
     startAutoRefresh();
     
@@ -785,13 +755,147 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Fermeture de modal en cliquant à l'extérieur
-document.addEventListener('DOMContentLoaded', function() {
-    const detailsModal = document.getElementById('details-modal');
-    if (detailsModal) {
-        detailsModal.addEventListener('click', (e) => {
-            if (e.target.classList.contains('modal')) {
-                closeModal();
-            }
-        });
+const detailsModal = document.getElementById('details-modal');
+if (detailsModal) {
+    detailsModal.addEventListener('click', (e) => {
+        if (e.target.classList.contains('modal')) {
+            closeModal();
+        }
+    });
+}
+
+// Style supplémentaire pour les modals et formulaires
+const additionalStyles = `
+    <style>
+    .detail-section {
+        margin-bottom: 24px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--border);
     }
-});
+    
+    .detail-section:last-child {
+        border-bottom: none;
+    }
+    
+    .detail-section h4 {
+        color: var(--text-primary);
+        margin-bottom: 16px;
+        font-size: 16px;
+        font-weight: 600;
+    }
+    
+    .detail-grid {
+        display: grid;
+        gap: 12px;
+    }
+    
+    .detail-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+    }
+    
+    .detail-label {
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 16px;
+    }
+    
+    .stat-item {
+        text-align: center;
+        padding: 16px;
+        background: var(--surface);
+        border-radius: 8px;
+        border: 1px solid var(--border);
+    }
+    
+    .stat-value {
+        font-size: 20px;
+        font-weight: 600;
+        color: var(--primary);
+        margin-bottom: 4px;
+    }
+    
+    .stat-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+    }
+    
+    .detail-actions {
+        margin-top: 24px;
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+    }
+    
+    .top-tokens-list, .wallet-distribution {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .token-item, .wallet-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        background: var(--surface);
+        border-radius: 6px;
+        border: 1px solid var(--border);
+    }
+    
+    .form-group {
+        margin-bottom: 20px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--text-primary);
+        font-weight: 500;
+    }
+    
+    .form-input, .form-select {
+        width: 100%;
+        padding: 12px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-size: 14px;
+    }
+    
+    .form-input:focus, .form-select:focus {
+        outline: none;
+        border-color: var(--primary);
+    }
+    
+    .form-help {
+        margin-top: 4px;
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    
+    .form-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 24px;
+    }
+    </style>
+`;
+
+// Injecter les styles seulement si pas déjà présents
+if (!document.getElementById('dashboard-styles')) {
+    const styleElement = document.createElement('div');
+    styleElement.id = 'dashboard-styles';
+    styleElement.innerHTML = additionalStyles;
+    document.head.appendChild(styleElement);
+}

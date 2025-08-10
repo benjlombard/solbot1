@@ -349,7 +349,7 @@ class SolanaWalletMonitor:
                 duration = get_current_timestamp() - cycle_start
                 logger.info(f"--- Cycle {cycle_id} Finished. Duration: {duration:.2f}s ---")
                 
-                sleep_interval = getattr(self.config.monitoring, 'update_interval', 45)
+                sleep_interval = getattr(self.config.monitoring, 'update_interval', 60)
                 logger.debug(f"Sleeping for {sleep_interval} seconds.")
                 time.sleep(sleep_interval)
                 

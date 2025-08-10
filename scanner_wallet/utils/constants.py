@@ -45,9 +45,7 @@ DUST_THRESHOLD = 0.0000001  # Seuil en-dessous duquel on ignore les montants
 # Endpoints RPC publics par défaut (fallback)
 DEFAULT_RPC_ENDPOINTS = [
     "https://api.mainnet-beta.solana.com",
-    "https://rpc.ankr.com/solana", 
     "https://solana.public-rpc.com",
-    "https://solana-api.projectserum.com"
 ]
 
 # Configuration timeouts

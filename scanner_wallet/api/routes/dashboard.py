@@ -499,7 +499,7 @@ async def get_dashboard_data():
             else:
                 cursor.execute(top_tokens_query, (current_time - 86400,))
                 top_tokens_raw = cursor.fetchall()
-                
+
             top_tokens = []
             
             for row in top_tokens_raw:
@@ -618,6 +618,7 @@ async def get_dashboard_data():
                 wallets_overview.append({
                     'wallet_address': wallet_address,
                     'wallet_short': f"{wallet_address[:8]}.{wallet_address[-8:]}",
+                    'solscan_url': f"https://solscan.io/account/{wallet_address}",
                     'priority_score': round(row[1], 2),
                     'last_scan_time': row[2],
                     'total_scans': row[3],

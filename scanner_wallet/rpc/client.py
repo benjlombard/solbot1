@@ -317,7 +317,7 @@ class RPCClient:
                     'url': endpoint,
                     'type': 'public',
                     'priority': 2,
-                    'rate_limit': 5
+                    'rate_limit': 4
                 })
         
         if not self.endpoints:
@@ -327,7 +327,7 @@ class RPCClient:
                     'url': endpoint,
                     'type': 'public',
                     'priority': 3,
-                    'rate_limit': 5
+                    'rate_limit': 4
                 })
 
     
@@ -649,6 +649,13 @@ class RPCClient:
                 retry_after = int(response.headers.get('Retry-After', 60))
                 raise RPCRateLimitError(endpoint_url, retry_after)
             
+            elif response.status_code == 403:
+                # Erreur "Forbidden", souvent due à un blocage WAF/Cloudflare
+                raise RPCEndpointUnavailableError(
+                    [endpoint_url],
+                    f"HTTP 403 Forbidden: Accès refusé par {endpoint_url}"
+                )
+
             elif response.status_code >= 500:
                 # Erreur serveur
                 raise RPCEndpointUnavailableError(

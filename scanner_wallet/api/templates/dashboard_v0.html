@@ -13,18 +13,9 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-<!-- Google Fonts pour le design moderne -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-<!-- Theme Toggle Button (nouvelle fonctionnalité) -->
-<button class="theme-toggle" onclick="toggleTheme()" title="Changer de thème">
-    <span id="theme-icon">🌙</span>
-</button>
-
 <main class="dashboard-container fade-in">
     <!-- Statistiques principales -->
     <section class="stats-grid" aria-labelledby="stats-title">
@@ -39,7 +30,7 @@
             </div>
             <div class="stat-value" id="total-wallets">-</div>
             <div class="stat-label" id="wallets-stat-label">Wallets Surveillés</div>
-            <div class="stat-sublabel" id="wallets-subtitle">Actifs et monitorés</div>
+            <div class="stat-sublabel" id="wallets-subtitle">Actifs et monitoés</div>
         </article>
 
         <article class="stat-card" aria-labelledby="tokens-stat-label">
@@ -266,37 +257,4 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
-<!-- Script pour le theme toggle (nouvelle fonctionnalité) -->
-<script>
-// Theme Toggle - NOUVELLE FONCTIONNALITÉ
-function toggleTheme() {
-    const body = document.body;
-    const themeIcon = document.getElementById('theme-icon');
-    
-    if (body.dataset.theme === 'dark') {
-        body.dataset.theme = 'light';
-        themeIcon.textContent = '☀️';
-        localStorage.setItem('theme', 'light');
-    } else {
-        body.dataset.theme = 'dark';
-        themeIcon.textContent = '🌙';
-        localStorage.setItem('theme', 'dark');
-    }
-}
-
-// Restore theme au chargement
-function restoreTheme() {
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    const body = document.body;
-    const themeIcon = document.getElementById('theme-icon');
-    
-    body.dataset.theme = savedTheme;
-    themeIcon.textContent = savedTheme === 'dark' ? '🌙' : '☀️';
-}
-
-// Initialiser le thème au chargement de la page
-document.addEventListener('DOMContentLoaded', function() {
-    restoreTheme();
-});
-</script>
 {% endblock %}
