@@ -588,6 +588,7 @@
 }
 
 .token-card {
+    position: relative; /* Nécessaire pour le positionnement absolu des actions */
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
     border-radius: 16px;
@@ -1144,4 +1145,60 @@
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--solana-green);
+}
+
+
+/* Styles pour les nouvelles activités */
+.activity-item.new-activity {
+    background: rgba(20, 241, 149, 0.1); /* Utilise la couleur verte de Solana avec opacité */
+    border-left: 4px solid var(--solana-green);
+    animation: pulse-new 1.5s infinite;
+}
+
+@keyframes pulse-new {
+    0% {
+        background-color: rgba(20, 241, 149, 0.1);
+    }
+    50% {
+        background-color: rgba(20, 241, 149, 0.18);
+    }
+    100% {
+        background-color: rgba(20, 241, 149, 0.1);
+    }
+}
+
+
+
+/* Styles pour les actions sur les cartes de token */
+.token-actions {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 8px;
+    opacity: 0; /* Caché par défaut */
+    transition: var(--transition-fast);
+}
+
+.token-card:hover .token-actions {
+    opacity: 1; /* Apparaît au survol de la carte */
+}
+
+.btn-icon {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition-fast);
+}
+
+.btn-icon:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    transform: scale(1.1);
 }

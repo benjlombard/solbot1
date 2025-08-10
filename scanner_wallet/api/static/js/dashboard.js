@@ -149,6 +149,19 @@ function updateTopTokensChart() {
     });
 }
 
+function copyTokenMint(button, event) {
+    event.stopPropagation();
+    const address = button.dataset.address;
+    if (!address) return;
+
+    navigator.clipboard.writeText(address).then(() => {
+        showMessage(`Adresse du jeton copiée: ${address.substring(0, 8)}...`, 'success', 2000);
+    }).catch(err => {
+        console.error('Failed to copy token address: ', err);
+        showMessage('Erreur de copie', 'error');
+    });
+}
+
 function updatePortfolioChart() {
     const wallets = dashboardData.wallets_overview || [];
     const ctx = document.getElementById('portfolio-pie-chart');
@@ -458,6 +471,13 @@ function updateActivity() {
 
         displayActivities.forEach(activity => {
             const clone = template.content.cloneNode(true);
+            const activityItem = clone.querySelector('.activity-item');
+
+            // Ajout de la classe pour les nouveaux éléments
+            if (activity.is_new) {
+                activityItem.classList.add('new-activity');
+            }
+            
             const iconEl = clone.querySelector('.activity-icon');
             const linksEl = clone.querySelector('.activity-links');
             let icon, title, details, activityClass;
@@ -544,9 +564,17 @@ function updateTopTokens() {
     container.innerHTML = displayTokens.map(token => {
         const activityPercent = Math.min(100, (token.activity_score / 100) * 100);
         const logoText = token.symbol ? token.symbol.charAt(0) : 'T';
-        
+        const dexscreenerUrl = `https://dexscreener.com/solana/${token.mint}`;
         return `
             <div class="token-card fade-in-up" onclick="showTokenDetails('${token.mint}')">
+            <div class="token-actions">
+                    <button class="btn-icon" title="Copier l'adresse du jeton" data-address="${token.mint}" onclick="copyTokenMint(this, event)">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </button>
+                    <a href="${dexscreenerUrl}" target="_blank" rel="noopener noreferrer" class="btn-icon" title="Voir sur DexScreener" onclick="event.stopPropagation()">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                    </a>
+                </div>
                 <div class="token-header">
                     <div class="token-logo">${logoText}</div>
                     <div class="token-info">

@@ -112,6 +112,11 @@ class TransactionStorage:
                         price_per_token REAL,
                         transaction_type TEXT NOT NULL,
                         status TEXT NOT NULL,
+                        is_token_transaction INTEGER DEFAULT 0,
+                        is_large_token_amount INTEGER DEFAULT 0,
+                        detection_delay REAL,
+                        wallet_priority_at_detection REAL,
+                        scan_cycle_id TEXT,
                         source TEXT,
                         metadata_json TEXT,
                         compressed_data BLOB,
@@ -214,6 +219,11 @@ class TransactionStorage:
                 'price_per_token': float(transaction.price_per_token) if transaction.price_per_token else None,
                 'transaction_type': str(transaction.transaction_type),
                 'status': str(transaction.status),
+                'is_token_transaction': transaction.is_token_transaction,
+                'is_large_token_amount': transaction.is_large_token_amount,
+                'detection_delay': transaction.detection_delay,
+                'wallet_priority_at_detection': transaction.wallet_priority_at_detection,
+                'scan_cycle_id': transaction.scan_cycle_id,
                 'source': transaction.source,
                 'created_at': transaction.created_at,
                 'updated_at': transaction.created_at
@@ -233,21 +243,25 @@ class TransactionStorage:
         try:
             with self.db_manager.get_connection() as conn:
                 cursor = conn.cursor()
-                
+                logger.info(f"DEBUG_JULES: Saving transaction {data['signature']}. is_token_transaction = {data.get('is_token_transaction')}")
                 cursor.execute("""
                     INSERT OR REPLACE INTO transactions (
                         signature, wallet_address, slot, block_time, amount, fee,
                         token_mint, token_symbol, token_name, token_amount,
-                        price_per_token, transaction_type, status, source,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        price_per_token, transaction_type, status, 
+                        is_token_transaction, is_large_token_amount,
+                        detection_delay, wallet_priority_at_detection, scan_cycle_id,
+                        source, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     data['signature'], data['wallet_address'], data['slot'],
                     data['block_time'], data['amount'], data['fee'],
                     data['token_mint'], data['token_symbol'], data['token_name'],
                     data['token_amount'], data['price_per_token'],
-                    data['transaction_type'], data['status'], data['source'],
-                    data['created_at'], data['updated_at']
+                    data['transaction_type'], data['status'],
+                    data['is_token_transaction'], data['is_large_token_amount'],
+                    data['detection_delay'], data['wallet_priority_at_detection'], data['scan_cycle_id'],
+                    data['source'], data['created_at'], data['updated_at']
                 ))
                 
                 conn.commit()

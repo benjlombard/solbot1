@@ -770,8 +770,9 @@ class WalletScanner:
                     INSERT OR REPLACE INTO transactions 
                     (signature, wallet_address, slot, block_time, amount, fee, 
                      token_mint, token_symbol, token_name, token_amount, 
-                     price_per_token, transaction_type, status, source, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     price_per_token, transaction_type, status, source, created_at,
+                     is_token_transaction, is_large_token_amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     transaction.signature,
                     transaction.wallet_address,
@@ -787,7 +788,9 @@ class WalletScanner:
                     str(transaction.transaction_type),
                     str(transaction.status),
                     transaction.source,
-                    transaction.created_at
+                    transaction.created_at,
+                    transaction.is_token_transaction,
+                    transaction.is_large_token_amount
                 ))
                 
                 conn.commit()

@@ -665,14 +665,21 @@ async def get_dashboard_data():
 
             # === ACTIVITÉ RÉCENTE (avec enrichissement) ===
             cursor.execute("""
-                SELECT * FROM (
-                    SELECT 'transaction' as type, signature, wallet_address, token_mint, token_symbol, transaction_type, token_amount, amount, block_time as timestamp FROM transactions WHERE is_token_transaction = 1 AND block_time >= ?
-                    UNION ALL
-                    SELECT 'discovery' as type, token_mint, wallet_address, ata_pubkey, symbol, null, initial_balance, null, discovered_at as timestamp FROM token_discoveries WHERE discovered_at >= ?
-                )
+                       SELECT 
+                    'transaction' as type, 
+                    signature, 
+                    wallet_address, 
+                    token_mint, 
+                    token_symbol, 
+                    transaction_type, 
+                    token_amount, 
+                    amount, 
+                    block_time as timestamp 
+                FROM transactions 
+                WHERE is_token_transaction = 1 AND block_time >= ?
                 ORDER BY timestamp DESC
                 LIMIT 50
-            """, (current_time - 86400, current_time - 86400))
+            """, (current_time - 86400,))
             
             recent_activity_raw = cursor.fetchall()
             
@@ -685,6 +692,8 @@ async def get_dashboard_data():
             recent_activity = []
             for row in recent_activity_raw:
                 activity_type = row[0]
+                timestamp = row[8]
+                is_new = (current_time - timestamp) < 300  # 5 minutes threshold
                 token_mint = row[3] if activity_type == 'transaction' else row[1]
                 enriched_data = dexscreener_data.get(token_mint, {})
                 security_info = security_data.get(token_mint, {})
@@ -694,16 +703,17 @@ async def get_dashboard_data():
                         'type': 'transaction',
                         'signature': row[1], 'wallet_address': row[2], 'token_mint': token_mint,
                         'token_symbol': row[4], 'transaction_type': row[5], 'token_amount': row[6],
-                        'sol_amount': row[7], 'timestamp': row[8]
+                        'sol_amount': row[7], 'timestamp': timestamp
                     }
                 else:
                     activity_item = {
                         'type': 'discovery',
                         'token_mint': token_mint, 'wallet_address': row[2], 'ata_pubkey': row[3],
-                        'token_symbol': row[4], 'initial_balance': row[6], 'timestamp': row[8]
+                        'token_symbol': row[4], 'initial_balance': row[6], 'timestamp': timestamp
                     }
                 
                 activity_item.update({
+                    'is_new': is_new,
                     'price_usd': enriched_data.get('price_usd'),
                     'liquidity_usd': enriched_data.get('liquidity_usd'),
                     'security_score': security_info.get('rug_probability'),
@@ -1383,7 +1393,7 @@ def get_token_price_history(token_mint):
     except Exception as e:
         logger.error(f"Erreur token price history: {e}")
         return jsonify(create_error_response("Failed to load token price history", [str(e)])), 500
-        
+
 # ============= ROUTES UTILITAIRES =============
 
 @dashboard_bp.route('/health')
