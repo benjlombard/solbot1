@@ -676,11 +676,103 @@
             <button class="toast-close" onclick="closeTransactionToast()">&times;</button>
         </div>
     </div>
+
+    
+<!-- Scripts optimisés -->
+<script>
+// Configuration globale optimisée
+const API_BASE = window.location.origin + '/api';
+
+// Fonctions utilitaires minimalistes
+function formatNumber(num, decimals = 6) {
+    if (typeof num !== 'number' || isNaN(num)) return '0';
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    if (num < 0.001 && num > 0) return num.toExponential(2);
+    return Number(num.toFixed(decimals));
+}
+
+function formatTimeAgo(timestamp) {
+    if (!timestamp) return 'Jamais';
+    const diff = Date.now() / 1000 - timestamp;
+    if (diff < 60) return `${Math.floor(diff)}s`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+    return `${Math.floor(diff / 86400)}j`;
+}
+
+// Stub functions pour compatibilité
+function showMessage(msg, type) {
+    console.log(`${type.toUpperCase()}: ${msg}`);
+}
+
+function updateConnectionStatus(connected) {
+    console.log('Connection status:', connected);
+}
+
+function getPriorityCategory(score) {
+    if (score >= 4.0) return "high";
+    if (score >= 2.0) return "medium";
+    return "low";
+}
+
+function getWalletStatusClass(wallet) {
+    if (!wallet?.seconds_since_scan) return 'error';
+    if (wallet.seconds_since_scan <= 300) return '';
+    if (wallet.seconds_since_scan <= 900) return 'warning';
+    return 'error';
+}
+
+function getWalletStatusText(wallet) {
+    const minutes = Math.floor((wallet.seconds_since_scan || 0) / 60);
+    if (minutes < 5) return 'Récent';
+    if (minutes < 30) return 'Normal';
+    return 'En retard';
+}
+
+// Log de démarrage
+console.log('🚀 Dashboard optimisé - Scripts de base chargés');
+</script>
+
     {% endblock %}
 
     {% block extra_js %}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='js/phantom-integration.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/phantom_refactor.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='js/dashboard_refactor.js') }}" defer></script>
+
+    <script>
+// Point d'entrée optimisé
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🎯 Dashboard optimisé - Initialisation terminée');
+    
+    // Vérifier les performances
+    if (performance.memory) {
+        console.log('💾 Mémoire utilisée:', Math.round(performance.memory.usedJSHeapSize / 1024 / 1024) + 'MB');
+    }
+    
+    // Performance observer pour détecter les problèmes
+    if ('PerformanceObserver' in window) {
+        const observer = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+                if (entry.duration > 100) {
+                    console.warn('⚠️ Tâche lente détectée:', entry.name, entry.duration + 'ms');
+                }
+            }
+        });
+        observer.observe({entryTypes: ['measure', 'navigation']});
+    }
+});
+
+// Surveiller l'utilisation mémoire
+if (typeof performance !== 'undefined' && performance.memory) {
+    setInterval(() => {
+        const memory = Math.round(performance.memory.usedJSHeapSize / 1024 / 1024);
+        if (memory > 100) { // Plus de 100MB
+            console.warn('⚠️ Utilisation mémoire élevée:', memory + 'MB');
+        }
+    }, 30000);
+}
+</script>
     {% endblock %}
