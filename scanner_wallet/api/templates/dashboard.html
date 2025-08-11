@@ -14,93 +14,6 @@
 {% block extra_css %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-clean.css') }}">
-
-<style>
-
-
-/* Force l'ordre avec !important maximum */
-.header-buttons-container {
-    position: fixed !important;
-    top: 20px !important;
-    right: 20px !important;
-    z-index: 9999 !important;
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: center !important;
-    gap: 12px !important;
-    pointer-events: none !important;
-}
-
-.header-buttons-container > * {
-    pointer-events: auto !important;
-    position: relative !important;
-    top: auto !important;
-    right: auto !important;
-    bottom: auto !important;
-    left: auto !important;
-    margin: 0 !important;
-}
-
-/* Reset TOUTES les positions fixes conflictuelles */
-.wallet-connection,
-.wallet-connect-btn,
-.wallet-info,
-.theme-toggle,
-#theme-toggle,
-[onclick*="connect"],
-[onclick*="toggle"] {
-    position: relative !important;
-    top: auto !important;
-    right: auto !important;
-    bottom: auto !important;
-    left: auto !important;
-    margin: 0 !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-}
-
-/* Mobile fix */
-@media (max-width: 768px) {
-    .header-buttons-container {
-        top: 15px !important;
-        right: 15px !important;
-        gap: 8px !important;
-    }
-}
-
-@media (max-width: 480px) {
-    .header-buttons-container {
-        flex-direction: column !important;
-        gap: 6px !important;
-    }
-}
-
-.theme-toggle,
-.wallet-connect-btn,
-.wallet-info {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 12px;
-    padding: 10px 16px;
-    color: #f9fafb;
-    font-size: 14px;
-    backdrop-filter: blur(10px);
-    transition: all 0.3s ease;
-}
-
-.theme-toggle {
-    padding: 10px;
-    font-size: 18px;
-}
-
-[data-theme="light"] .theme-toggle,
-[data-theme="light"] .wallet-connect-btn,
-[data-theme="light"] .wallet-info {
-    color: #1e293b;
-    border-color: rgba(0, 0, 0, 0.1);
-}
-</style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -171,12 +84,13 @@
                         <th>ATA</th>
                         <th>Type</th>
                         <th>Amount</th>
+                        <th>Links</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="activity-table-body">
                     <tr>
-                        <td colspan="7" class="loading">
+                        <td colspan="8" class="loading">
                             <div class="spinner"></div>
                             Loading recent activity...
                         </td>
@@ -193,7 +107,7 @@
             <div class="section-controls">
                 <!-- NOUVELLE: Barre de recherche -->
                 <div class="search-container">
-                    <span class="search-icon">🔍</span>
+                    <i class="fas fa-search search-icon"></i>
                     <input 
                         type="text" 
                         id="wallets-search" 
@@ -201,7 +115,9 @@
                         placeholder="Search by wallet, token..."
                         autocomplete="off"
                     >
-                    <button class="search-clear" type="button" title="Effacer">×</button>
+                    <button class="search-clear" type="button" title="Clear">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
                 <div id="wallets-search-results" class="search-results-info" style="display: none;"></div>
                 
@@ -379,6 +295,13 @@ console.log('🚀 Dashboard optimisé - Scripts de base chargés');
 <script src="{{ url_for('static', filename='js/search-theme.js') }}" defer></script>
 
 <script>
+
+function refreshActivity() {
+  const refreshBtn = document.querySelector('.refresh-btn-modern');
+  refreshBtn.classList.add('loading');
+  setTimeout(() => refreshBtn.classList.remove('loading'), 2000); // Simule un chargement
+  // Logique de refresh existante ici
+}
 // Point d'entrée optimisé
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🎯 Dashboard optimisé - Initialisation terminée');
@@ -414,10 +337,10 @@ if (typeof performance !== 'undefined' && performance.memory) {
 document.addEventListener('DOMContentLoaded', function () {
   document.querySelectorAll('.wallet-action-btn.copy-btn').forEach(button => {
     button.addEventListener('click', function () {
-      const address = this.getAttribute('data-address');
-      if (address) {
+      const valueToCopy = this.getAttribute('data-copy');
+      if (valueToCopy) {
         // Copier l'adresse dans le presse-papiers
-        navigator.clipboard.write(address).then(() => {
+        navigator.clipboard.write(valueToCopy).then(() => {
           // Feedback visuel sur le bouton
           this.classList.add('copied');
           setTimeout(() => {

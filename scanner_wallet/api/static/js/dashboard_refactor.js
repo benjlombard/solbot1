@@ -90,13 +90,14 @@ async function safeFetch(url, opts = {}){
   }
 }
 
-async function loadDashboardData(){
+async function loadDashboardData(btn = null){
   if (isUpdating) {
     console.log('⏳ [LOAD] Update already running, skipping');
     return;
   }
   isUpdating = true;
   console.log('🔄 [LOAD] Starting dashboard data fetch...');
+  if (btn) btn.classList.add('spinning');
 
   try {
     const url = `${API_BASE}/dashboard/data`;
@@ -170,6 +171,7 @@ async function loadDashboardData(){
     }
   } finally {
     isUpdating = false;
+    if (btn) btn.classList.remove('spinning');
     console.log('🏁 [LOAD] Load process finished');
   }
 }
@@ -243,6 +245,7 @@ function updateActivityDiff(){
           <td class="ata-col"></td>
           <td class="type-col"></td>
           <td class="amount-col"></td>
+          <td class="links-col"></td>
           <td class="actions-col"></td>
         `;
         activityRows.set(key, tr);
@@ -287,19 +290,25 @@ function populateActivityRow(tr, a){
     tr.querySelector('.wallet-col').innerHTML = `
       <div class="address-container">
         <a href="https://solscan.io/account/${a.wallet_address}" target="_blank" title="${a.wallet_address}">${walletShort}</a>
-        <button class="copy-btn-small" data-copy="${a.wallet_address}">📋</button>
+        <button class="wallet-action-btn copy-btn" data-copy="${a.wallet_address}" title="Copy Address"><i class="far fa-copy"></i></button>
       </div>`;
     tr.querySelector('.token-col').textContent = a.token_symbol || 'UNKNOWN';
     tr.querySelector('.token-addr-col').innerHTML = `
       <div class="address-container">
         <span>${tokenShort}</span>
-        <button class="copy-btn-small" data-copy="${a.token_mint}">📋</button>
+        <button class="wallet-action-btn copy-btn" data-copy="${a.token_mint}" title="Copy Token Address"><i class="far fa-copy"></i></button>
       </div>`;
     tr.querySelector('.ata-col').textContent = a.ata_pubkey ? `${a.ata_pubkey.slice(0,4)}...${a.ata_pubkey.slice(-4)}` : 'N/A';
     tr.querySelector('.type-col').innerHTML = `<span class="type-${a.transaction_type}">${a.transaction_type}</span>
       <div style="font-size:11px;color:var(--text-muted)">${formatTimeAgo(a.timestamp)}</div>`;
     tr.querySelector('.amount-col').innerHTML = `<div class="amount-sol">${formatNumber(a.sol_amount||0)} SOL</div>
       <div class="amount-usd">$${formatNumber(a.usd_amount||0,2)}</div>`;
+    tr.querySelector('.links-col').innerHTML = `
+      <div class="link-group">
+        <a href="https://dexscreener.com/solana/${a.token_mint}" target="_blank" title="DexScreener">D</a>
+        <a href="https://pump.fun/${a.token_mint}" target="_blank" title="Pump.fun">P</a>
+        <a href="https://gmgn.ai/sol/${a.token_mint}" target="_blank" title="GMGN.ai">G</a>
+      </div>`;
     tr.querySelector('.actions-col').innerHTML = `
       <div class="action-buttons">
         <button class="btn btn-sm btn-buy" data-buy="${a.token_mint}">💰</button>
@@ -408,8 +417,8 @@ function populateWalletRow(tr, w){
     tr.querySelector('.balance-col').innerHTML = `<span class="balance-amount">${formatNumber(w.sol_balance||0)} SOL</span>`;
     tr.querySelector('.lastscan-col').innerHTML = `<span class="scan-time">${formatTimeAgo(w.last_scan_time) || 'N/A'}</span>`;
     tr.querySelector('.actions-col').innerHTML = `<div class="wallet-actions">
-        <button class="wallet-action-btn copy-btn" data-address="${address}">📋</button>
-        <button class="wallet-action-btn view-btn" data-view="${address}">👁️</button>
+        <button class="wallet-action-btn copy-btn" data-copy="${address}" title="Copy Address"><i class="far fa-copy"></i></button>
+        <button class="wallet-action-btn view-btn" data-view="${address}" title="View Details"><i class="far fa-eye"></i></button>
       </div>`;
   } catch (e) {
     console.error('💥 [WALLETS] Error populating row:', e, w);
@@ -418,8 +427,9 @@ function populateWalletRow(tr, w){
 
 // Fonctions pour l'interface (les boutons refresh, etc.)
 function refreshActivity() {
-  console.log('🔄 [UI] Manual refresh triggered');
-  loadDashboardData();
+  console.log('🔄 [UI] Manual refresh triggered for Activity');
+  const btn = document.querySelector('#activity-search').closest('.section-header').querySelector('.refresh-btn-modern');
+  loadDashboardData(btn);
 }
 
 function toggleAutoRefresh(type) {
