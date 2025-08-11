@@ -41,6 +41,106 @@ const WALLETS_PER_PAGE = 10;
 // Configuration
 const MAX_ACTIVITY_DISPLAY = 35;
 const MAX_TOKENS_DISPLAY = 35;
+// Variables pour l'auto-refresh
+let autoRefreshTimers = {
+    activity: null,
+    wallets: null
+};
+let autoRefreshActive = {
+    activity: false,
+    wallets: false
+};
+let countdownTimers = {
+    activity: null,
+    wallets: null
+};
+let countdownValues = {
+    activity: 15,
+    wallets: 15
+};
+
+// Fonction pour activer/désactiver l'auto-refresh
+function toggleAutoRefresh(section) {
+    const isActive = autoRefreshActive[section];
+    
+    if (isActive) {
+        stopAutoRefresh(section);
+    } else {
+        startAutoRefresh(section);
+    }
+}
+
+// Démarrer l'auto-refresh pour une section
+function startAutoRefresh(section) {
+    const control = document.getElementById(`auto-refresh-${section}`);
+    if (!control) return;
+    
+    autoRefreshActive[section] = true;
+    control.classList.add('active');
+    countdownValues[section] = 15;
+    
+    // Démarrer le timer principal
+    autoRefreshTimers[section] = setInterval(() => {
+        if (section === 'activity') {
+            refreshActivity();
+        } else if (section === 'wallets') {
+            refreshWallets();
+        }
+        countdownValues[section] = 15; // Reset countdown
+    }, 15000);
+    
+    // Démarrer le countdown
+    startCountdown(section);
+    
+    console.log(`🔄 Auto-refresh ${section} activé (15s)`);
+}
+
+// Arrêter l'auto-refresh pour une section
+function stopAutoRefresh(section) {
+    const control = document.getElementById(`auto-refresh-${section}`);
+    if (!control) return;
+    
+    autoRefreshActive[section] = false;
+    control.classList.remove('active');
+    
+    // Arrêter les timers
+    if (autoRefreshTimers[section]) {
+        clearInterval(autoRefreshTimers[section]);
+        autoRefreshTimers[section] = null;
+    }
+    
+    if (countdownTimers[section]) {
+        clearInterval(countdownTimers[section]);
+        countdownTimers[section] = null;
+    }
+    
+    // Reset countdown display
+    const countdownEl = document.getElementById(`countdown-${section}`);
+    if (countdownEl) countdownEl.textContent = '';
+    
+    console.log(`⏸️ Auto-refresh ${section} arrêté`);
+}
+
+// Démarrer le countdown visuel
+function startCountdown(section) {
+    const countdownEl = document.getElementById(`countdown-${section}`);
+    if (!countdownEl) return;
+    
+    countdownTimers[section] = setInterval(() => {
+        countdownValues[section]--;
+        countdownEl.textContent = countdownValues[section];
+        
+        if (countdownValues[section] <= 0) {
+            countdownValues[section] = 15; // Reset pour le prochain cycle
+        }
+    }, 1000);
+}
+
+// Arrêter tous les auto-refresh au déchargement de la page
+window.addEventListener('beforeunload', () => {
+    stopAutoRefresh('activity');
+    stopAutoRefresh('wallets');
+});
 
 // Initialisation du dashboard
 document.addEventListener('DOMContentLoaded', function() {
@@ -654,46 +754,68 @@ function getWalletStatusText(wallet) {
 
 // Fonctions de rafraîchissement
 async function refreshWallets() {
-    const button = event.target.closest('button');
-    const originalText = button.innerHTML;
+const button = event?.target?.closest('button');
+    let originalText = '';
     
-    button.innerHTML = '<div class="spinner"></div>';
-    button.disabled = true;
+    if (button) {
+        originalText = button.innerHTML;
+        button.innerHTML = '<div class="spinner"></div>';
+        button.disabled = true;
+    }
     
     try {
         await loadDashboardData();
-        showMessage('Wallets mis à jour', 'success', 2000);
+        if (typeof showMessage === 'function') {
+            showMessage('Wallets mis à jour', 'success', 2000);
+        }
+        
+        // Reset countdown si auto-refresh actif
+        if (autoRefreshActive.wallets) {
+            countdownValues.wallets = 15;
+        }
     } catch (error) {
-        showMessage('Erreur lors de la mise à jour', 'error');
+        if (typeof showMessage === 'function') {
+            showMessage('Erreur lors de la mise à jour', 'error');
+        }
     } finally {
-        button.innerHTML = originalText;
-        button.disabled = false;
+        if (button) {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
     }
 }
 
 async function refreshActivity() {
-    const button = event.target.closest('button');
-    const originalText = button.innerHTML;
+    const button = event?.target?.closest('button');
+    let originalText = '';
     
-    button.innerHTML = '<div class="spinner"></div>';
-    button.disabled = true;
-
-    const tableBody = document.getElementById('activity-table-body');
-    const loadingIndicator = document.getElementById('activity-list-loading');
-    if (loadingIndicator) loadingIndicator.style.display = 'block';
-    if (tableBody) tableBody.innerHTML = '';
+    if (button) {
+        originalText = button.innerHTML;
+        button.innerHTML = '<div class="spinner"></div>';
+        button.disabled = true;
+    }
     
     try {
-        await loadDashboardData(); // This will call renderActivityTable
-        showMessage('Activité mise à jour', 'success', 2000);
+        await loadDashboardData();
+        if (typeof showMessage === 'function') {
+            showMessage('Activité mise à jour', 'success', 2000);
+        }
+        
+        // Reset countdown si auto-refresh actif
+        if (autoRefreshActive.activity) {
+            countdownValues.activity = 15;
+        }
     } catch (error) {
-        showMessage('Erreur lors de la mise à jour', 'error');
+        if (typeof showMessage === 'function') {
+            showMessage('Erreur lors de la mise à jour', 'error');
+        }
     } finally {
-        button.innerHTML = originalText;
-        button.disabled = false;
+        if (button) {
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
     }
 }
-
 async function refreshTokens() {
     const button = event.target.closest('button');
     const originalText = button.innerHTML;
