@@ -79,8 +79,13 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-# Import de la nouvelle route trading
-#from api.routes.trading import trading_bp, init_trading_routes
+
+try:
+    from api.routes.trading import trading_bp, init_trading_routes
+except ImportError as e:
+    logging.warning(f"Trading routes non disponibles: {e}")
+    trading_bp = None
+
 # Imports de configuration avec fallbacks
 try:
     from core.config import get_config, init_config
@@ -117,7 +122,8 @@ def load_blueprints():
         ('dashboard', 'api.routes.dashboard', 'dashboard_bp', '/api/dashboard/*'),
         ('analytics', 'api.routes.analytics', 'analytics_bp', '/api/analytics/*'),
         ('admin', 'api.routes.admin', 'admin_bp', '/api/admin/*'),
-        ('batching', 'api.routes.batching', 'batching_bp', '/api/batching/*')
+        ('batching', 'api.routes.batching', 'batching_bp', '/api/batching/*'),
+        ('trading', 'api.routes.trading', 'trading_bp', '/api/trading/*') 
     ]
     
     for name, module_path, bp_name, route_prefix in blueprint_configs:
@@ -263,6 +269,7 @@ def create_app():
             'analytics': '/api/analytics/' if 'analytics' in registered_bp else None,
             'admin': '/api/admin/health' if 'admin' in registered_bp else None,
             'batching': '/api/batching/status' if 'batching' in registered_bp else None,
+            'trading': '/api/trading/health' if 'trading' in registered_bp else None,
         }
         
         # Filtrer les endpoints None
@@ -282,6 +289,7 @@ def create_app():
                 'analytics': 'API d\'analyse des wallets Solana',
                 'admin': 'Administration et monitoring système', 
                 'batching': 'Contrôle du système de batching RPC',
+                'trading': 'Interface de trading avec Phantom Wallet',
                 'health': 'Statut de santé de l\'application',
                 'stats': 'Statistiques d\'utilisation'
             },
@@ -402,6 +410,15 @@ def create_app():
             'environment': getattr(getattr(config, 'environment', None), 'value', 'unknown'),
             'timestamp': int(time.time())
         })
+
+    @app.route('/trading')
+    def trading_interface():
+        """Interface de trading"""
+        try:
+            return render_template('trading.html')
+        except Exception as e:
+            logger.error(f"Erreur template trading: {e}")
+            return jsonify({'error': 'Trading interface not available'}), 500
 
     # ============= ENREGISTREMENT DES BLUEPRINTS =============
 
@@ -556,7 +573,8 @@ if __name__ == "__main__":
         logger.info(f"   • Admin: http://{host}:{port}/api/admin/health")
         logger.info(f"   • Health: http://{host}:{port}/health")
         logger.info(f"   • Stats: http://{host}:{port}/stats")
-        logger.info(f"💱 Trading API: http://{host}:{port}/api/trading")
+        logger.info(f"💱 Trading API: http://{host}:{port}/api/trading")  # NOUVEAU
+        logger.info(f"🎯 Trading Interface: http://{host}:{port}/trading")  # NOUVEAU
         logger.info("=" * 60)
         
         # Test des emojis

@@ -46,7 +46,196 @@ trading_bp = Blueprint('trading', __name__, url_prefix='/api/trading')
 # =============================================================================
 # ROUTES DE CONFIGURATION
 # =============================================================================
+@trading_bp.route('/quick-quote', methods=['POST'])
+def get_quick_quote():
+    """Obtient un devis rapide pour un token depuis le dashboard"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify(create_error_response("No data provided")), 400
+        
+        # Validation des paramètres requis
+        token_mint = data.get('token_mint')
+        amount_sol = data.get('amount_sol')
+        trade_type_str = data.get('trade_type', 'buy')  # 'buy' ou 'sell'
+        wallet_address = data.get('wallet_address')
+        
+        if not token_mint:
+            return jsonify(create_error_response("token_mint is required")), 400
+        
+        if not amount_sol:
+            return jsonify(create_error_response("amount_sol is required")), 400
+        
+        try:
+            amount_sol = float(amount_sol)
+        except ValueError:
+            return jsonify(create_error_response("amount_sol must be a number")), 400
+        
+        # Validation du type de trade
+        try:
+            trade_type = TradeType(trade_type_str.lower())
+        except ValueError:
+            return jsonify(create_error_response("Invalid trade_type. Must be 'buy' or 'sell'")), 400
+        
+        # Si pas de wallet fourni, utiliser un wallet par défaut pour le devis
+        if not wallet_address:
+            wallet_address = "11111111111111111111111111111111"  # Wallet temporaire pour devis
+        
+        # Obtenir le devis
+        quote = trading_manager.get_trade_quote(
+            wallet_address, token_mint, amount_sol, trade_type
+        )
+        
+        return jsonify(create_success_response(
+            "Quick quote generated",
+            {
+                'quote': quote.to_dict(),
+                'dex_url': _generate_dex_url(token_mint, amount_sol, trade_type),
+                'jupiter_url': _generate_jupiter_url(token_mint, amount_sol, trade_type)
+            }
+        ))
+        
+    except Exception as e:
+        logger.error(f"Error getting quick quote: {e}")
+        return jsonify(create_error_response("Failed to get quote", [str(e)])), 500
 
+
+@trading_bp.route('/dex-urls', methods=['POST'])
+def get_dex_urls():
+    """Génère les URLs pour différents DEX"""
+    try:
+        data = request.get_json()
+        token_mint = data.get('token_mint')
+        amount_sol = data.get('amount_sol', 1.0)
+        trade_type = data.get('trade_type', 'buy')
+        
+        if not token_mint:
+            return jsonify(create_error_response("token_mint is required")), 400
+        
+        urls = {
+            'jupiter': _generate_jupiter_url(token_mint, amount_sol, trade_type),
+            'raydium': _generate_raydium_url(token_mint, amount_sol, trade_type),
+            'orca': _generate_orca_url(token_mint, amount_sol, trade_type),
+            'dexscreener': f"https://dexscreener.com/solana/{token_mint}",
+            'birdeye': f"https://birdeye.so/token/{token_mint}",
+            'solscan': f"https://solscan.io/token/{token_mint}"
+        }
+        
+        return jsonify(create_success_response(
+            "DEX URLs generated",
+            urls
+        ))
+        
+    except Exception as e:
+        logger.error(f"Error generating DEX URLs: {e}")
+        return jsonify(create_error_response("Failed to generate URLs", [str(e)])), 500
+
+
+@trading_bp.route('/phantom-transaction', methods=['POST'])
+def create_phantom_transaction():
+    """Crée une transaction pour Phantom Wallet"""
+    try:
+        data = request.get_json()
+        wallet_address = data.get('wallet_address')
+        token_mint = data.get('token_mint')
+        amount_sol = data.get('amount_sol')
+        trade_type = data.get('trade_type', 'buy')
+        
+        if not all([wallet_address, token_mint, amount_sol]):
+            return jsonify(create_error_response("Missing required parameters")), 400
+        
+        # Validation
+        if not validate_wallet_address(wallet_address):
+            return jsonify(create_error_response("Invalid wallet address")), 400
+        
+        if not validate_token_mint(token_mint):
+            return jsonify(create_error_response("Invalid token mint")), 400
+        
+        # Obtenir un devis
+        quote = trading_manager.get_trade_quote(
+            wallet_address, token_mint, float(amount_sol), TradeType(trade_type)
+        )
+        
+        # Créer l'ordre
+        order = trading_manager.create_trade_order(wallet_address, quote.quote_id)
+        
+        # Générer la transaction Phantom
+        transaction_data = _create_phantom_transaction_data(quote, order)
+        
+        return jsonify(create_success_response(
+            "Phantom transaction created",
+            {
+                'order_id': order.order_id,
+                'quote': quote.to_dict(),
+                'transaction_data': transaction_data,
+                'phantom_params': _create_phantom_params(quote, order)
+            }
+        ))
+        
+    except Exception as e:
+        logger.error(f"Error creating Phantom transaction: {e}")
+        return jsonify(create_error_response("Failed to create transaction", [str(e)])), 500
+
+
+def _generate_jupiter_url(token_mint: str, amount_sol: float, trade_type: str) -> str:
+    """Génère une URL Jupiter pour le trade"""
+    sol_mint = "So11111111111111111111111111111111111111112"
+    
+    if trade_type.lower() == 'buy':
+        return f"https://jup.ag/swap/{sol_mint}-{token_mint}?inAmount={amount_sol}"
+    else:
+        return f"https://jup.ag/swap/{token_mint}-{sol_mint}?inAmount={amount_sol}"
+
+
+def _generate_raydium_url(token_mint: str, amount_sol: float, trade_type: str) -> str:
+    """Génère une URL Raydium pour le trade"""
+    if trade_type.lower() == 'buy':
+        return f"https://raydium.io/swap/?inputCurrency=sol&outputCurrency={token_mint}&inputAmount={amount_sol}"
+    else:
+        return f"https://raydium.io/swap/?inputCurrency={token_mint}&outputCurrency=sol&inputAmount={amount_sol}"
+
+
+def _generate_orca_url(token_mint: str, amount_sol: float, trade_type: str) -> str:
+    """Génère une URL Orca pour le trade"""
+    if trade_type.lower() == 'buy':
+        return f"https://www.orca.so/swap?from=sol&to={token_mint}&amount={amount_sol}"
+    else:
+        return f"https://www.orca.so/swap?from={token_mint}&to=sol&amount={amount_sol}"
+
+
+def _create_phantom_transaction_data(quote: TradeQuote, order: TradeOrder) -> Dict[str, Any]:
+    """Crée les données de transaction pour Phantom"""
+    return {
+        'type': 'swap',
+        'input_mint': quote.token_mint if quote.trade_type == TradeType.SELL else "So11111111111111111111111111111111111111112",
+        'output_mint': "So11111111111111111111111111111111111111112" if quote.trade_type == TradeType.SELL else quote.token_mint,
+        'amount_in': int(quote.amount_in),
+        'amount_out': int(quote.amount_out),
+        'slippage_bps': int(quote.slippage * 100),
+        'priority_fee': order.priority_fee,
+        'quote_id': quote.quote_id,
+        'order_id': order.order_id
+    }
+
+
+def _create_phantom_params(quote: TradeQuote, order: TradeOrder) -> Dict[str, Any]:
+    """Crée les paramètres pour l'appel Phantom"""
+    return {
+        'method': 'swap',
+        'params': {
+            'inputMint': quote.token_mint if quote.trade_type == TradeType.SELL else "So11111111111111111111111111111111111111112",
+            'outputMint': "So11111111111111111111111111111111111111112" if quote.trade_type == TradeType.SELL else quote.token_mint,
+            'amount': str(int(quote.amount_in)),
+            'slippageBps': int(quote.slippage * 100),
+            'userPublicKey': order.wallet_address,
+            'wrapUnwrapSOL': True,
+            'asLegacyTransaction': False,
+            'allowOptimizedWrappedSolTokenAccount': True,
+            'onlyDirectRoutes': False,
+            'prioritizationFeeLamports': order.priority_fee
+        }
+    }
+    
 @trading_bp.route('/settings/<wallet_address>', methods=['GET'])
 def get_trading_settings(wallet_address):
     """Récupère les paramètres de trading d'un wallet"""

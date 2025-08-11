@@ -13,6 +13,7 @@
 
     {% block extra_css %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/trading.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -499,13 +500,21 @@
     </button>
 
     <!-- Wallet Connect -->
-    <button class="wallet-connect-btn" onclick="connectPhantomWallet()" title="Connect Phantom">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/>
-            <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>
-        </svg>
-        <span id="wallet-status">Connect</span>
-    </button>
+    <div class="wallet-connection">
+        <div class="wallet-info" id="wallet-info" style="display: none;">
+            <div class="wallet-status-dot"></div>
+            <span id="wallet-address">Non connecté</span>
+            <button onclick="disconnectWallet()" class="disconnect-btn">×</button>
+        </div>
+        <button class="wallet-connect-btn" onclick="connectPhantomWallet()" title="Connect Phantom" id="connect-wallet-btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/>
+                <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>
+            </svg>
+            <span id="wallet-status">Connecter</span>
+        </button>
+    </div>
+
 
     <!-- Dashboard Container -->
     <div class="dashboard-container">
@@ -658,10 +667,20 @@
             </div>
         </div>
     </template>
+
+
+    <div id="transaction-toast" class="transaction-toast" style="display: none;">
+        <div class="toast-content">
+            <div class="toast-icon"></div>
+            <div class="toast-message"></div>
+            <button class="toast-close" onclick="closeTransactionToast()">&times;</button>
+        </div>
+    </div>
     {% endblock %}
 
     {% block extra_js %}
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
     <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
     <script src="{{ url_for('static', filename='js/phantom-integration.js') }}" defer></script>
     {% endblock %}

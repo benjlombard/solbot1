@@ -637,8 +637,21 @@ function renderActivityTable() {
             const cellActions = row.insertCell();
             cellActions.innerHTML = `
                 <div class="action-buttons">
-                    <button class="btn btn-sm btn-buy" onclick="buyToken('${activity.token_mint}')">Acheter</button>
-                    <button class="btn btn-sm btn-sell" onclick="sellToken('${activity.token_mint}')">Vendre</button>
+                    <button class="btn btn-sm btn-buy" 
+                            onclick="buyToken('${activity.token_mint}')"
+                            title="Acheter ${activity.token_symbol}">
+                        💰 Acheter
+                    </button>
+                    <button class="btn btn-sm btn-sell" 
+                            onclick="sellToken('${activity.token_mint}')"
+                            title="Vendre ${activity.token_symbol}">
+                        💸 Vendre
+                    </button>
+                    <button class="btn btn-sm btn-secondary" 
+                            onclick="showTokenDetails('${activity.token_mint}')"
+                            title="Détails du token">
+                        📊
+                    </button>
                 </div>
             `;
         });

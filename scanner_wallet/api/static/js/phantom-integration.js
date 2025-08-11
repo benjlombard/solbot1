@@ -1,3 +1,675 @@
+// Ajouter ce code au fichier scanner_wallet/api/static/js/phantom-integration.js
+
+// =============================================================================
+// TRADING AVEC PHANTOM WALLET
+// =============================================================================
+
+let phantomProvider = null;
+let connectedWallet = null;
+
+// Configuration des DEX
+const DEX_CONFIGS = {
+    jupiter: {
+        name: 'Jupiter',
+        logo: '🪐',
+        description: 'Meilleur prix garanti',
+        color: '#FF8A00'
+    },
+    raydium: {
+        name: 'Raydium',
+        logo: '💫',
+        description: 'AMM populaire',
+        color: '#8C49FF'
+    },
+    orca: {
+        name: 'Orca',
+        logo: '🐋',
+        description: 'Interface simple',
+        color: '#FF6B9D'
+    }
+};
+
+// Fonction pour acheter un token
+async function buyToken(tokenMint) {
+    console.log('🛒 Initiating token purchase:', tokenMint);
+    
+    try {
+        // Vérifier la connexion Phantom
+        if (!connectedWallet) {
+            await connectPhantomWallet();
+            if (!connectedWallet) {
+                showNotification('Veuillez connecter votre wallet Phantom', 'error');
+                return;
+            }
+        }
+        
+        // Afficher modal de choix d'achat
+        showTradingModal(tokenMint, 'buy');
+        
+    } catch (error) {
+        console.error('❌ Error buying token:', error);
+        showNotification('Erreur lors de l\'achat: ' + error.message, 'error');
+    }
+}
+
+// Fonction pour vendre un token
+async function sellToken(tokenMint) {
+    console.log('💰 Initiating token sale:', tokenMint);
+    
+    try {
+        // Vérifier la connexion Phantom
+        if (!connectedWallet) {
+            await connectPhantomWallet();
+            if (!connectedWallet) {
+                showNotification('Veuillez connecter votre wallet Phantom', 'error');
+                return;
+            }
+        }
+        
+        // Afficher modal de choix de vente
+        showTradingModal(tokenMint, 'sell');
+        
+    } catch (error) {
+        console.error('❌ Error selling token:', error);
+        showNotification('Erreur lors de la vente: ' + error.message, 'error');
+    }
+}
+
+// Afficher modal de trading
+function showTradingModal(tokenMint, tradeType) {
+    const modal = document.createElement('div');
+    modal.className = 'trading-modal';
+    modal.innerHTML = `
+        <div class="trading-modal-content">
+            <div class="trading-modal-header">
+                <h3>${tradeType === 'buy' ? '🛒 Acheter Token' : '💰 Vendre Token'}</h3>
+                <button class="modal-close" onclick="closeTradingModal()">&times;</button>
+            </div>
+            <div class="trading-modal-body">
+                <div class="token-info">
+                    <div class="token-address">
+                        <strong>Token:</strong> 
+                        <span class="mono">${tokenMint.substring(0, 8)}...${tokenMint.substring(tokenMint.length - 8)}</span>
+                        <button onclick="copyToClipboard('${tokenMint}')" class="copy-btn-small">📋</button>
+                    </div>
+                </div>
+                
+                <div class="trade-form">
+                    <div class="form-group">
+                        <label>Montant (SOL)</label>
+                        <div class="amount-input-container">
+                            <input type="number" id="trade-amount" value="1.0" min="0.001" step="0.001" class="form-input">
+                            <div class="amount-presets">
+                                <button onclick="setTradeAmount(0.1)" class="preset-btn">0.1</button>
+                                <button onclick="setTradeAmount(0.5)" class="preset-btn">0.5</button>
+                                <button onclick="setTradeAmount(1.0)" class="preset-btn">1.0</button>
+                                <button onclick="setTradeAmount(5.0)" class="preset-btn">5.0</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Slippage (%)</label>
+                        <div class="slippage-selector">
+                            <button onclick="setSlippage(0.1)" class="slippage-btn">0.1%</button>
+                            <button onclick="setSlippage(0.5)" class="slippage-btn active">0.5%</button>
+                            <button onclick="setSlippage(1.0)" class="slippage-btn">1.0%</button>
+                            <button onclick="setSlippage(3.0)" class="slippage-btn">3.0%</button>
+                        </div>
+                    </div>
+                    
+                    <div class="quote-section" id="quote-section" style="display: none;">
+                        <div class="quote-display" id="quote-display"></div>
+                    </div>
+                    
+                    <div class="trading-actions">
+                        <button onclick="getQuoteForTrade('${tokenMint}', '${tradeType}')" class="btn btn-secondary" id="get-quote-btn">
+                            📊 Obtenir un devis
+                        </button>
+                        <button onclick="executeTradeWithPhantom('${tokenMint}', '${tradeType}')" class="btn btn-primary" id="execute-trade-btn" disabled>
+                            🚀 ${tradeType === 'buy' ? 'Acheter' : 'Vendre'} avec Phantom
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="dex-options">
+                    <h4>Ou trader sur un DEX :</h4>
+                    <div class="dex-buttons" id="dex-buttons">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            Chargement des options...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Ajouter au DOM
+    document.body.appendChild(modal);
+    
+    // Charger les options DEX
+    loadDexOptions(tokenMint, tradeType);
+    
+    // Écouter les clics pour fermer
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeTradingModal();
+        }
+    });
+}
+
+// Fermer modal de trading
+function closeTradingModal() {
+    const modal = document.querySelector('.trading-modal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// Définir montant de trade
+function setTradeAmount(amount) {
+    const input = document.getElementById('trade-amount');
+    if (input) {
+        input.value = amount;
+        
+        // Mettre à jour les boutons presets
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        event.target.classList.add('active');
+    }
+}
+
+// Définir slippage
+function setSlippage(slippage) {
+    // Stocker la valeur
+    window.currentSlippage = slippage;
+    
+    // Mettre à jour l'UI
+    document.querySelectorAll('.slippage-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    event.target.classList.add('active');
+}
+
+// Charger options DEX
+async function loadDexOptions(tokenMint, tradeType) {
+    try {
+        const amount = parseFloat(document.getElementById('trade-amount')?.value || 1.0);
+        
+        const response = await fetch('/api/trading/dex-urls', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token_mint: tokenMint,
+                amount_sol: amount,
+                trade_type: tradeType
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            displayDexOptions(result.data);
+        } else {
+            throw new Error(result.message);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error loading DEX options:', error);
+        document.getElementById('dex-buttons').innerHTML = 
+            '<div class="error-message">Erreur de chargement des options DEX</div>';
+    }
+}
+
+// Afficher options DEX
+function displayDexOptions(urls) {
+    const container = document.getElementById('dex-buttons');
+    
+    container.innerHTML = Object.entries(DEX_CONFIGS).map(([key, config]) => {
+        const url = urls[key];
+        if (!url) return '';
+        
+        return `
+            <button class="dex-option-btn" onclick="openDexUrl('${url}')" 
+                    style="border-color: ${config.color};">
+                <div class="dex-logo">${config.logo}</div>
+                <div class="dex-info">
+                    <h5>${config.name}</h5>
+                    <p>${config.description}</p>
+                </div>
+                <div class="dex-arrow">→</div>
+            </button>
+        `;
+    }).join('') + `
+        <div class="additional-links">
+            <a href="${urls.dexscreener}" target="_blank" class="link-btn">📊 DexScreener</a>
+            <a href="${urls.birdeye}" target="_blank" class="link-btn">🦅 Birdeye</a>
+            <a href="${urls.solscan}" target="_blank" class="link-btn">🔍 Solscan</a>
+        </div>
+    `;
+}
+
+// Ouvrir URL DEX
+function openDexUrl(url) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    closeTradingModal();
+}
+
+// Obtenir devis pour trade
+async function getQuoteForTrade(tokenMint, tradeType) {
+    const getQuoteBtn = document.getElementById('get-quote-btn');
+    const executeBtn = document.getElementById('execute-trade-btn');
+    const quoteSection = document.getElementById('quote-section');
+    const quoteDisplay = document.getElementById('quote-display');
+    
+    try {
+        // Désactiver bouton et afficher loading
+        getQuoteBtn.disabled = true;
+        getQuoteBtn.innerHTML = '<div class="spinner"></div> Calcul...';
+        
+        const amount = parseFloat(document.getElementById('trade-amount').value);
+        const slippage = window.currentSlippage || 0.5;
+        
+        if (!amount || amount <= 0) {
+            throw new Error('Montant invalide');
+        }
+        
+        // Appel API pour devis
+        const response = await fetch('/api/trading/quick-quote', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token_mint: tokenMint,
+                amount_sol: amount,
+                trade_type: tradeType,
+                wallet_address: connectedWallet,
+                slippage: slippage
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const quote = result.data.quote;
+            
+            // Afficher le devis
+            quoteDisplay.innerHTML = `
+                <div class="quote-details">
+                    <div class="quote-row">
+                        <span>Vous ${tradeType === 'buy' ? 'recevrez' : 'obtiendrez'} :</span>
+                        <strong>${formatNumber(quote.amount_out)} ${quote.token_symbol}</strong>
+                    </div>
+                    <div class="quote-row">
+                        <span>Prix unitaire :</span>
+                        <span>${formatNumber(quote.effective_price)} SOL</span>
+                    </div>
+                    <div class="quote-row">
+                        <span>Impact prix :</span>
+                        <span class="price-impact ${quote.price_impact_level}">
+                            ${quote.price_impact.toFixed(2)}%
+                        </span>
+                    </div>
+                    <div class="quote-row">
+                        <span>Frais estimés :</span>
+                        <span>${formatNumber(quote.estimated_fee_sol)} SOL</span>
+                    </div>
+                    <div class="quote-row">
+                        <span>DEX :</span>
+                        <span>${quote.dex}</span>
+                    </div>
+                    <div class="quote-row">
+                        <span>Expire dans :</span>
+                        <span class="countdown">${quote.time_to_expiry}s</span>
+                    </div>
+                </div>
+            `;
+            
+            quoteSection.style.display = 'block';
+            executeBtn.disabled = false;
+            
+            // Stocker le devis
+            window.currentQuote = quote;
+            
+            // Démarrer countdown
+            startQuoteCountdown(quote.time_to_expiry);
+            
+        } else {
+            throw new Error(result.message);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error getting quote:', error);
+        showNotification('Erreur devis: ' + error.message, 'error');
+        quoteDisplay.innerHTML = `<div class="error-message">Erreur: ${error.message}</div>`;
+        quoteSection.style.display = 'block';
+        
+    } finally {
+        getQuoteBtn.disabled = false;
+        getQuoteBtn.innerHTML = '📊 Actualiser le devis';
+    }
+}
+
+// Countdown pour devis
+function startQuoteCountdown(timeLeft) {
+    const countdownEl = document.querySelector('.countdown');
+    const executeBtn = document.getElementById('execute-trade-btn');
+    
+    const interval = setInterval(() => {
+        timeLeft--;
+        if (countdownEl) countdownEl.textContent = `${timeLeft}s`;
+        
+        if (timeLeft <= 0) {
+            clearInterval(interval);
+            if (countdownEl) countdownEl.textContent = 'Expiré';
+            if (executeBtn) {
+                executeBtn.disabled = true;
+                executeBtn.innerHTML = '⏰ Devis expiré';
+            }
+        }
+    }, 1000);
+}
+
+// Exécuter trade avec Phantom
+async function executeTradeWithPhantom(tokenMint, tradeType) {
+    const executeBtn = document.getElementById('execute-trade-btn');
+    
+    try {
+        if (!window.currentQuote) {
+            throw new Error('Aucun devis disponible');
+        }
+        
+        if (!connectedWallet) {
+            throw new Error('Wallet non connecté');
+        }
+        
+        executeBtn.disabled = true;
+        executeBtn.innerHTML = '<div class="spinner"></div> Préparation...';
+        
+        const amount = parseFloat(document.getElementById('trade-amount').value);
+        
+        // Créer transaction Phantom
+        const response = await fetch('/api/trading/phantom-transaction', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                wallet_address: connectedWallet,
+                token_mint: tokenMint,
+                amount_sol: amount,
+                trade_type: tradeType
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            executeBtn.innerHTML = '<div class="spinner"></div> Envoi vers Phantom...';
+            
+            // Exécuter avec Phantom
+            await executePhantomSwap(result.data);
+            
+        } else {
+            throw new Error(result.message);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error executing trade:', error);
+        showNotification('Erreur exécution: ' + error.message, 'error');
+        
+    } finally {
+        executeBtn.disabled = false;
+        executeBtn.innerHTML = `🚀 ${tradeType === 'buy' ? 'Acheter' : 'Vendre'} avec Phantom`;
+    }
+}
+
+// Exécuter swap Phantom
+async function executePhantomSwap(transactionData) {
+    try {
+        // Vérifier provider Phantom
+        if (!window.solana || !window.solana.isPhantom) {
+            throw new Error('Phantom Wallet non trouvé');
+        }
+        
+        // Créer la transaction Jupiter
+        const jupiterResponse = await fetch('https://quote-api.jup.ag/v6/swap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userPublicKey: connectedWallet,
+                quoteResponse: transactionData.phantom_params,
+                wrapUnwrapSOL: true,
+                useSharedAccounts: true,
+                feeAccount: null,
+                trackingAccount: null,
+                asLegacyTransaction: false,
+                useTokenLedger: false,
+                allowOptimizedWrappedSolTokenAccount: true,
+                skipUserAccountsRpcCalls: false,
+                maxAutoSlippageBps: 300,
+                prioritizationFeeLamports: transactionData.transaction_data.priority_fee || 5000
+            })
+        });
+        
+        const swapResult = await jupiterResponse.json();
+        
+        if (!swapResult.swapTransaction) {
+            throw new Error('Impossible de créer la transaction');
+        }
+        
+        // Décoder et signer la transaction avec Phantom
+        const swapTransactionBuf = Buffer.from(swapResult.swapTransaction, 'base64');
+        const transaction = window.solanaWeb3.Transaction.from(swapTransactionBuf);
+        
+        // Envoyer via Phantom
+        const signedTransaction = await window.solana.signAndSendTransaction(transaction);
+        
+        if (signedTransaction.signature) {
+            showNotification('✅ Transaction envoyée! Signature: ' + signedTransaction.signature.substring(0, 8) + '...', 'success');
+            
+            // Confirmer la transaction côté serveur
+            await confirmTransaction(transactionData.order_id, signedTransaction.signature);
+            
+            // Fermer modal
+            closeTradingModal();
+            
+            // Rafraîchir les données
+            if (typeof loadDashboardData === 'function') {
+                loadDashboardData();
+            }
+            
+        } else {
+            throw new Error('Transaction non signée');
+        }
+        
+    } catch (error) {
+        console.error('❌ Phantom swap error:', error);
+        
+        if (error.message.includes('User rejected')) {
+            showNotification('Transaction annulée par l\'utilisateur', 'warning');
+        } else {
+            showNotification('Erreur Phantom: ' + error.message, 'error');
+        }
+        
+        throw error;
+    }
+}
+
+// Confirmer transaction côté serveur
+async function confirmTransaction(orderId, signature) {
+    try {
+        const response = await fetch(`/api/trading/order/${orderId}/execute`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                signature: signature
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            console.log('✅ Transaction confirmed on server');
+        } else {
+            console.warn('⚠️ Server confirmation failed:', result.message);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error confirming transaction:', error);
+    }
+}
+
+// Améliorer la connexion Phantom existante
+async function connectPhantomWallet() {
+    try {
+        if (!window.solana || !window.solana.isPhantom) {
+            // Rediriger vers l'installation Phantom
+            const installUrl = 'https://phantom.app/';
+            if (confirm('Phantom Wallet n\'est pas installé. Voulez-vous l\'installer maintenant ?')) {
+                window.open(installUrl, '_blank');
+            }
+            return false;
+        }
+        
+        // Connecter le wallet
+        const response = await window.solana.connect();
+        connectedWallet = response.publicKey.toString();
+        phantomProvider = window.solana;
+        
+        // Mettre à jour l'UI
+        updateWalletUI(true);
+        
+        // Écouter les événements
+        window.solana.on('disconnect', () => {
+            connectedWallet = null;
+            phantomProvider = null;
+            updateWalletUI(false);
+            showNotification('Wallet déconnecté', 'info');
+        });
+        
+        showNotification('✅ Wallet Phantom connecté!', 'success');
+        console.log('🔗 Phantom connected:', connectedWallet);
+        
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Phantom connection error:', error);
+        
+        if (error.code === 4001) {
+            showNotification('Connexion refusée par l\'utilisateur', 'warning');
+        } else {
+            showNotification('Erreur de connexion: ' + error.message, 'error');
+        }
+        
+        return false;
+    }
+}
+
+// Mettre à jour l'UI du wallet
+function updateWalletUI(connected) {
+    const connectBtn = document.querySelector('.wallet-connect-btn');
+    const walletStatus = document.getElementById('wallet-status');
+    
+    if (!connectBtn || !walletStatus) return;
+    
+    if (connected && connectedWallet) {
+        connectBtn.style.display = 'none';
+        walletStatus.textContent = `${connectedWallet.substring(0, 4)}...${connectedWallet.substring(connectedWallet.length - 4)}`;
+        
+        // Ajouter indicateur de connexion
+        if (!document.querySelector('.wallet-indicator')) {
+            const indicator = document.createElement('div');
+            indicator.className = 'wallet-indicator';
+            indicator.innerHTML = `
+                <div class="wallet-status-dot"></div>
+                <span>${connectedWallet.substring(0, 6)}...${connectedWallet.substring(connectedWallet.length - 6)}</span>
+                <button onclick="disconnectWallet()" class="disconnect-btn">×</button>
+            `;
+            document.body.appendChild(indicator);
+        }
+    } else {
+        connectBtn.style.display = 'flex';
+        walletStatus.textContent = 'Connecter';
+        
+        // Supprimer indicateur
+        const indicator = document.querySelector('.wallet-indicator');
+        if (indicator) indicator.remove();
+    }
+}
+
+// Déconnecter wallet
+async function disconnectWallet() {
+    try {
+        if (window.solana && window.solana.disconnect) {
+            await window.solana.disconnect();
+        }
+        
+        connectedWallet = null;
+        phantomProvider = null;
+        updateWalletUI(false);
+        showNotification('Wallet déconnecté', 'info');
+        
+    } catch (error) {
+        console.error('❌ Disconnect error:', error);
+    }
+}
+
+// Vérifier si le wallet est déjà connecté au chargement
+async function checkPhantomConnection() {
+    try {
+        if (window.solana && window.solana.isConnected) {
+            connectedWallet = window.solana.publicKey?.toString();
+            if (connectedWallet) {
+                phantomProvider = window.solana;
+                updateWalletUI(true);
+                console.log('🔗 Wallet already connected:', connectedWallet);
+            }
+        }
+    } catch (error) {
+        console.log('No existing connection');
+    }
+}
+
+// Fonction utilitaire pour formater les nombres
+function formatNumber(num, decimals = 6) {
+    if (typeof num !== 'number') return '0';
+    
+    if (num >= 1000000) {
+        return (num / 1000000).toFixed(1) + 'M';
+    } else if (num >= 1000) {
+        return (num / 1000).toFixed(1) + 'K';
+    } else if (num < 0.001 && num > 0) {
+        return num.toExponential(2);
+    } else {
+        return num.toFixed(decimals);
+    }
+}
+
+// Initialisation automatique
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Phantom Trading Integration loaded');
+    
+    // Vérifier connexion existante
+    setTimeout(checkPhantomConnection, 1000);
+    
+    // Charger les scripts Solana Web3 si nécessaire
+    if (!window.solanaWeb3) {
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js';
+        script.onload = () => {
+            console.log('✅ Solana Web3 loaded');
+        };
+        document.head.appendChild(script);
+    }
+});
+
+// Export des fonctions principales pour usage global
+window.buyToken = buyToken;
+window.sellToken = sellToken;
+window.connectPhantomWallet = connectPhantomWallet;
+window.disconnectWallet = disconnectWallet;
+
+
 function loadActivityData() {
     const activityList = document.getElementById('activity-list');
     const loading = document.getElementById('activity-list-loading');
@@ -825,6 +1497,118 @@ function debugElements() {
     console.log('activity-list:', document.getElementById('activity-list'));
     console.log('activity-item-template:', document.getElementById('activity-item-template'));
 }
+
+
+function updatePhantomSidebarStatus(connected, address = null) {
+    const phantomStatus = document.getElementById('phantom-status');
+    const phantomIcon = document.getElementById('phantom-icon');
+    const phantomText = document.getElementById('phantom-text');
+    
+    if (phantomStatus && phantomIcon && phantomText) {
+        if (connected && address) {
+            phantomStatus.classList.add('connected');
+            phantomIcon.textContent = '👻✅';
+            phantomText.textContent = `Phantom: ${address.substring(0, 6)}...`;
+        } else {
+            phantomStatus.classList.remove('connected');
+            phantomIcon.textContent = '👻';
+            phantomText.textContent = 'Phantom: Déconnecté';
+        }
+    }
+}
+
+// Ajouter ces fonctions dans phantom-integration.js
+
+// Fonction pour afficher les notifications toast
+function showTransactionToast(message, type = 'info', duration = 5000) {
+    const toast = document.getElementById('transaction-toast');
+    const icon = toast.querySelector('.toast-icon');
+    const messageEl = toast.querySelector('.toast-message');
+    
+    if (!toast) return;
+    
+    // Définir l'icône selon le type
+    const icons = {
+        'success': '✅',
+        'error': '❌',
+        'warning': '⚠️',
+        'info': 'ℹ️',
+        'loading': '⏳'
+    };
+    
+    icon.textContent = icons[type] || icons['info'];
+    messageEl.textContent = message;
+    
+    // Afficher le toast
+    toast.style.display = 'block';
+    
+    // Masquer automatiquement
+    if (duration > 0) {
+        setTimeout(() => {
+            closeTransactionToast();
+        }, duration);
+    }
+}
+
+// Fonction pour fermer le toast
+function closeTransactionToast() {
+    const toast = document.getElementById('transaction-toast');
+    if (toast) {
+        toast.style.display = 'none';
+    }
+}
+
+// Améliorer la fonction showNotification existante pour utiliser le toast
+function showNotification(message, type = 'info', duration = 5000) {
+    // Utiliser le toast si disponible, sinon fallback
+    const toast = document.getElementById('transaction-toast');
+    
+    if (toast) {
+        showTransactionToast(message, type, duration);
+    } else {
+        // Fallback vers l'ancienne méthode
+        console.log(`${type.toUpperCase()}: ${message}`);
+        
+        // Créer notification simple si pas de toast
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.textContent = message;
+        
+        notification.style.cssText = `
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            padding: 12px 20px;
+            background: var(--glass-bg);
+            backdrop-filter: var(--blur-md);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-weight: 600;
+            z-index: 10001;
+            animation: slideIn 0.3s ease;
+            box-shadow: var(--shadow-lg);
+        `;
+        
+        if (type === 'success') {
+            notification.style.borderColor = 'var(--solana-green)';
+            notification.style.color = 'var(--solana-green)';
+        } else if (type === 'error') {
+            notification.style.borderColor = '#ef4444';
+            notification.style.color = '#ef4444';
+        }
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, duration);
+    }
+}
+
+// Export global des fonctions
+window.showTransactionToast = showTransactionToast;
+window.closeTransactionToast = closeTransactionToast;
 
 // Initialiser l'application au chargement de la page
 document.addEventListener('DOMContentLoaded', function() {
