@@ -227,6 +227,74 @@ def create_app():
             'timestamp': int(time.time())
         }), 404
 
+    @app.errorhandler(405)
+    def method_not_allowed(error):
+        """Handler 405 personnalisé avec debug détaillé"""
+        
+        # Log détaillé pour debugging
+        logger.error(f"❌ 405 Method Not Allowed:")
+        logger.error(f"   📍 URL: {request.url}")
+        logger.error(f"   📍 Path: {request.path}")
+        logger.error(f"   📍 Method: {request.method}")
+        logger.error(f"   📍 User-Agent: {request.headers.get('User-Agent', 'Unknown')}")
+        logger.error(f"   📍 Referer: {request.headers.get('Referer', 'None')}")
+        
+        if request.method == 'POST':
+            logger.error(f"   📍 Content-Type: {request.headers.get('Content-Type', 'None')}")
+            try:
+                json_data = request.get_json()
+                if json_data:
+                    logger.error(f"   📍 JSON Data: {json_data}")
+            except:
+                pass
+            
+            try:
+                form_data = dict(request.form)
+                if form_data:
+                    logger.error(f"   📍 Form Data: {form_data}")
+            except:
+                pass
+        
+        # Log des routes disponibles pour cette URL
+        try:
+            from flask import current_app
+            logger.error("   📍 Routes disponibles pour ce path:")
+            matching_routes = []
+            for rule in current_app.url_map.iter_rules():
+                if rule.rule == request.path:
+                    matching_routes.append(f"      {rule.rule} -> Methods: {list(rule.methods - {'HEAD', 'OPTIONS'})}")
+            
+            if matching_routes:
+                for route in matching_routes:
+                    logger.error(route)
+            else:
+                logger.error("      Aucune route trouvée pour ce path")
+                
+                # Chercher des routes similaires
+                similar_routes = []
+                for rule in current_app.url_map.iter_rules():
+                    if request.path in rule.rule or rule.rule in request.path:
+                        similar_routes.append(f"      SIMILAR: {rule.rule} -> Methods: {list(rule.methods - {'HEAD', 'OPTIONS'})}")
+                
+                if similar_routes:
+                    logger.error("   📍 Routes similaires:")
+                    for route in similar_routes[:5]:  # Limite à 5
+                        logger.error(route)
+                        
+        except Exception as e:
+            logger.error(f"   📍 Erreur lors du listing des routes: {e}")
+        
+        app.stats['errors'] += 1
+        
+        return jsonify({
+            'error': 'Method Not Allowed',
+            'message': f'The method {request.method} is not allowed for {request.path}',
+            'url': request.url,
+            'method': request.method,
+            'available_methods': 'Check server logs for details',
+            'timestamp': int(time.time())
+        }), 405
+
     @app.errorhandler(500)
     def internal_error(error):
         """Handler 500 personnalisé"""
@@ -297,7 +365,17 @@ def create_app():
             'message': '🎉 API Solana Wallet Monitor opérationnelle!'
         })
 
-
+    @app.route('/favicon.ico')
+    def favicon():
+        """Route pour le favicon"""
+        try:
+            # Essayer de servir un favicon depuis static si il existe
+            return app.send_static_file('favicon.ico')
+        except Exception:
+            # Sinon, retourner une réponse vide avec le bon content-type
+            from flask import Response
+            return Response('', mimetype='image/x-icon')
+            
     @app.route('/debug/routes-list')
     def debug_routes_list():
         """Debug: Liste toutes les routes enregistrées"""

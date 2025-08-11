@@ -755,9 +755,10 @@ async def async_get_dashboard_data():
         
         return create_success_response("Dashboard data retrieved", dashboard_data)
 
-@dashboard_bp.route('/data', methods=['GET', 'POST'])
+@dashboard_bp.route('/data', methods=['GET'])
 def get_dashboard_data():
     """Wrapper synchrone pour la route Flask"""
+    logger.info(f"Dashboard data requested - Method: {request.method}")
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)

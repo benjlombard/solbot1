@@ -1,688 +1,319 @@
-    {% extends "base.html" %}
+{% extends "base.html" %}
 
-    {% block title %}Dashboard - Solana Wallet Monitor{% endblock %}
-    {% block page_title %}Dashboard{% endblock %}
+{% block title %}Dashboard - Solana Wallet Monitor{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
 
-    {% block breadcrumb %}
-    <nav class="breadcrumb">
-        <a href="/" class="breadcrumb-item">Home</a>
-        <span class="breadcrumb-separator">></span>
-        <span class="breadcrumb-item">Dashboard</span>
-    </nav>
-    {% endblock %}
+{% block breadcrumb %}
+<nav class="breadcrumb">
+    <a href="/" class="breadcrumb-item">Home</a>
+    <span class="breadcrumb-separator">></span>
+    <span class="breadcrumb-item">Dashboard</span>
+</nav>
+{% endblock %}
 
-    {% block extra_css %}
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/trading.css') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <style>
-    /* === NEW MODERN STYLES === */
-    :root {
-        /* Enhanced color palette */
-        --bg-primary: #0a0a0a;
-        --bg-secondary: #111827;
-        --bg-surface: rgba(31, 41, 55, 0.3);
-        --border: #374151;
-        --border-light: #4b5563;
-        --text-primary: #f9fafb;
-        --text-secondary: #d1d5db;
-        --text-muted: #9ca3af;
-        --solana-green: #14f195;
-        --solana-purple: #9945ff;
+{% block extra_css %}
+<!-- <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/trading.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/search-theme.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/header-fix.css') }}"> -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-clean.css') }}">
+<style>
+//* === OVERRIDE ABSOLU - PLUS RIEN NE CHEVAUCHE === */
+
+/* Force l'ordre avec !important maximum */
+.header-buttons-container {
+    position: fixed !important;
+    top: 20px !important;
+    right: 20px !important;
+    z-index: 9999 !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 12px !important;
+    pointer-events: none !important;
+}
+
+.header-buttons-container > * {
+    pointer-events: auto !important;
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    margin: 0 !important;
+}
+
+/* Reset TOUTES les positions fixes conflictuelles */
+.wallet-connection,
+.wallet-connect-btn,
+.wallet-info,
+.theme-toggle,
+#theme-toggle,
+[onclick*="connect"],
+[onclick*="toggle"] {
+    position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    margin: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+/* Mobile fix */
+@media (max-width: 768px) {
+    .header-buttons-container {
+        top: 15px !important;
+        right: 15px !important;
+        gap: 8px !important;
     }
+}
 
-    /* Classes nécessaires pour le rendu JavaScript */
-    .wallet-address-small {
-        font-family: 'Monaco', 'Courier New', monospace;
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text-primary);
+@media (max-width: 480px) {
+    .header-buttons-container {
+        flex-direction: column !important;
+        gap: 6px !important;
     }
+}
 
-    .priority-badge-small {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 8px;
-        border-radius: 12px;
-        font-size: 10px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-
-    .priority-high-small {
-        background: rgba(239, 68, 68, 0.15);
-        color: #fca5a5;
-        border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-
-    .priority-medium-small {
-        background: rgba(245, 158, 11, 0.15);
-        color: #fcd34d;
-        border: 1px solid rgba(245, 158, 11, 0.3);
-    }
-
-    .priority-low-small {
-        background: rgba(107, 114, 128, 0.15);
-        color: #9ca3af;
-        border: 1px solid rgba(107, 114, 128, 0.3);
-    }
-
-    .balance-amount {
-        font-weight: 700;
-        color: var(--solana-green);
-    }
-
-    .scan-time {
-        font-size: 12px;
-        color: var(--text-muted);
-    }
-
-    .wallet-cell {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        cursor: pointer;
-    }
-
-    .wallet-avatar-small {
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 12px;
-        font-weight: 700;
-        color: white;
-    }
-
-    .wallet-info-small {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-
-    .wallet-status-small {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-    }
-
-    .status-dot-tiny {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--solana-green);
-    }
-
-    .status-dot-tiny.warning {
-        background: #f59e0b;
-    }
-
-    .status-dot-tiny.error {
-        background: #ef4444;
-    }
-
-    .status-text {
-        font-size: 10px;
-        color: var(--text-muted);
-    }
-
-    .wallet-actions {
-        display: flex;
-        gap: 4px;
-    }
-
-    .wallet-action-btn {
-        padding: 4px 6px;
-        border: none;
-        border-radius: 4px;
-        background: rgba(255, 255, 255, 0.1);
-        color: var(--text-secondary);
-        cursor: pointer;
-        font-size: 12px;
-        transition: all 0.2s ease;
-    }
-
-    .wallet-action-btn:hover {
-        background: var(--solana-green);
-        color: black;
-    }
-
-    /* Container for full-width tables */
-    .dashboard-section {
-        margin-bottom: 40px;
-        background: var(--bg-surface);
-        backdrop-filter: blur(10px);
-        border: 1px solid var(--border);
-        border-radius: 20px;
-        overflow: hidden;
-    }
-
-    .section-header {
-        padding: 24px 32px;
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background: rgba(255, 255, 255, 0.02);
-    }
-
-    .section-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: var(--text-primary);
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
-
-    .section-controls {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-    }
-
-    .table-container-full {
-        width: 100%;
-        overflow-x: auto;
-    }
-
-    .table-modern {
-        width: 100%;
-        border-collapse: collapse;
-        background: transparent;
-    }
-
-    .table-modern th {
-        padding: 16px 24px;
-        text-align: left;
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        border-bottom: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.02);
-        position: sticky;
-        top: 0;
-        z-index: 10;
-    }
-
-    .table-modern td {
-        padding: 16px 24px;
-        border-bottom: 1px solid var(--border);
-        transition: all 0.2s ease;
-    }
-
-    .table-modern tbody tr {
-        transition: all 0.2s ease;
-    }
-
-    .table-modern tbody tr:hover {
-        background: rgba(255, 255, 255, 0.05);
-    }
-
-    .refresh-btn-modern {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid var(--border);
-        border-radius: 50%;
-        width: 36px;
-        height: 36px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        transition: all 0.3s ease;
-    }
-
-    .refresh-btn-modern:hover {
-        transform: rotate(180deg);
-        border-color: var(--solana-green);
-        color: var(--solana-green);
-    }
-
-    .add-btn-modern {
-        background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
-        color: white;
-        border: none;
-        padding: 8px 16px;
-        border-radius: 12px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s ease;
-    }
-
-    .add-btn-modern:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(20, 241, 149, 0.3);
-    }
-
-    .search-input-modern {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 8px 16px;
-        color: var(--text-primary);
-        font-size: 0.875rem;
-        width: 250px;
-    }
-
-    .loading {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 32px;
-        color: var(--text-muted);
-    }
-
-    .spinner {
-        width: 16px;
-        height: 16px;
-        border: 2px solid var(--border);
-        border-top: 2px solid var(--solana-green);
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-
-    .address-container {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-
-    .copy-btn-small {
-        padding: 2px 4px;
-        border: none;
-        background: rgba(255, 255, 255, 0.1);
-        color: var(--text-secondary);
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 10px;
-        transition: all 0.2s ease;
-    }
-
-    .copy-btn-small:hover {
-        background: var(--solana-green);
-        color: black;
-    }
-
-    .link-group {
-        display: flex;
-        gap: 4px;
-        margin-top: 4px;
-    }
-
-    .link-group a {
-        display: inline-block;
-        width: 16px;
-        height: 16px;
-        background: rgba(255, 255, 255, 0.1);
-        color: var(--text-secondary);
-        text-align: center;
-        line-height: 16px;
-        font-size: 10px;
-        text-decoration: none;
-        border-radius: 3px;
-        transition: all 0.2s ease;
-    }
-
-    .link-group a:hover {
-        background: var(--solana-green);
-        color: black;
-    }
-
-    .type-buy {
-        color: #10b981;
-        font-weight: 600;
-    }
-
-    .type-sell {
-        color: #ef4444;
-        font-weight: 600;
-    }
-
-    .type-other {
-        color: var(--text-muted);
-        font-weight: 600;
-    }
-
-    .amount-sol {
-        font-weight: 700;
-        color: var(--text-primary);
-    }
-
-    .amount-usd {
-        font-size: 12px;
-        color: var(--text-muted);
-    }
-
-    .action-buttons {
-        display: flex;
-        gap: 4px;
-    }
-
-    .btn {
-        padding: 4px 8px;
-        border: none;
-        border-radius: 6px;
-        font-size: 11px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
-
-    .btn-sm {
-        padding: 3px 6px;
-        font-size: 10px;
-    }
-
-    .btn-buy {
-        background: rgba(16, 185, 129, 0.2);
-        color: #10b981;
-        border: 1px solid rgba(16, 185, 129, 0.3);
-    }
-
-    .btn-buy:hover {
-        background: #10b981;
-        color: white;
-    }
-
-    .btn-sell {
-        background: rgba(239, 68, 68, 0.2);
-        color: #ef4444;
-        border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-
-    .btn-sell:hover {
-        background: #ef4444;
-        color: white;
-    }
-
-    @media (max-width: 768px) {
-        .section-header {
-            padding: 16px 20px;
-            flex-direction: column;
-            gap: 16px;
-            align-items: flex-start;
-        }
-        
-        .section-controls {
-            width: 100%;
-            justify-content: space-between;
-        }
-        
-        .search-input-modern {
-            width: 100%;
-            max-width: 200px;
-        }
-        
-        .table-modern th,
-        .table-modern td {
-            padding: 12px 16px;
-            font-size: 0.875rem;
-        }
-    }
-    /* Auto-refresh controls */
-.auto-refresh-control {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--glass-bg);
-    backdrop-filter: var(--blur-md);
-    border: 1px solid var(--glass-border);
+.theme-toggle,
+.wallet-connect-btn,
+.wallet-info {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 12px;
-    padding: 8px 12px;
-    cursor: pointer;
-    transition: var(--transition-fast);
+    padding: 10px 16px;
+    color: #f9fafb;
+    font-size: 14px;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
 }
 
-.auto-refresh-control:hover {
-    border-color: var(--solana-green);
+.theme-toggle {
+    padding: 10px;
+    font-size: 18px;
 }
 
-.auto-refresh-control.active {
-    border-color: var(--solana-green);
-    background: rgba(20, 241, 149, 0.1);
+[data-theme="light"] .theme-toggle,
+[data-theme="light"] .wallet-connect-btn,
+[data-theme="light"] .wallet-info {
+    color: #1e293b;
+    border-color: rgba(0, 0, 0, 0.1);
 }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+{% endblock %}
 
-.auto-refresh-control.active .status-dot {
-    background: var(--solana-green);
-    animation: pulse 2s infinite;
-}
+{% block content %}
 
-.status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--text-muted);
-    transition: var(--transition-fast);
-}
-
-.auto-refresh-text {
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-}
-
-.auto-refresh-control.active .auto-refresh-text {
-    color: var(--solana-green);
-}
-
-.countdown {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    min-width: 20px;
-    text-align: center;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-}
-    </style>
-    {% endblock %}
-
-    {% block content %}
-    <!-- Theme Toggle -->
-    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Theme">
-        <span id="theme-icon">🌙</span>
+<!-- Header Buttons Container - NOUVELLE STRUCTURE -->
+<!-- Remplacez TOUT le bloc header-buttons existant par : -->
+<div class="header-buttons-container">
+    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">
+        <span id="theme-icon">☀️</span>
     </button>
-
-    <!-- Wallet Connect -->
-    <div class="wallet-connection">
-        <div class="wallet-info" id="wallet-info" style="display: none;">
-            <div class="wallet-status-dot"></div>
-            <span id="wallet-address">Non connecté</span>
-            <button onclick="disconnectWallet()" class="disconnect-btn">×</button>
-        </div>
-        <button class="wallet-connect-btn" onclick="connectPhantomWallet()" title="Connect Phantom" id="connect-wallet-btn">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/>
-                <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>
-            </svg>
-            <span id="wallet-status">Connecter</span>
-        </button>
-    </div>
-
-
-    <!-- Dashboard Container -->
-    <div class="dashboard-container">
-
-        <!-- Section Activité Récente -->
-        <section class="dashboard-section">
-            <header class="section-header">
-                <h2 class="section-title">⚡ Recent Activity</h2>
-                <div class="section-controls">
-                   <div class="auto-refresh-control" onclick="toggleAutoRefresh('activity')" id="auto-refresh-activity">
-        <div class="status-dot"></div>
-        <span class="auto-refresh-text">Auto 15s</span>
-        <span class="countdown" id="countdown-activity"></span>
-    </div>
-    <button onclick="refreshActivity()" class="refresh-btn-modern" title="Refresh">
-        <span>🔄</span>
+    
+    <button class="wallet-connect-btn" onclick="connectPhantomWallet()">
+        <span id="wallet-status">Connecter</span>
     </button>
-                </div>
-            </header>
-            <div class="table-container-full">
-                <table class="table-modern">
-                    <thead>
-                        <tr>
-                            <th>Wallet</th>
-                            <th>Token</th>
-                            <th>Token Address</th>
-                            <th>ATA</th>
-                            <th>Type</th>
-                            <th>Amount</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="activity-table-body">
-                        <tr>
-                            <td colspan="7" class="loading">
-                                <div class="spinner"></div>
-                                Loading recent activity...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            <!-- Loading indicateur caché pour compatibilité -->
-            <div id="activity-list-loading" style="display: none;"></div>
-        </section>
-
-        <!-- Section Wallets Surveillés -->
-        <section class="dashboard-section">
-            <header class="section-header">
-                <h2 class="section-title">🎯 Monitored Wallets</h2>
-                <div class="section-controls">
-    <input type="search" id="wallet-search-input" class="search-input-modern" placeholder="Search by address...">
-    <div class="auto-refresh-control" onclick="toggleAutoRefresh('wallets')" id="auto-refresh-wallets">
-        <div class="status-dot"></div>
-        <span class="auto-refresh-text">Auto 15s</span>
-        <span class="countdown" id="countdown-wallets"></span>
+    
+    <div class="wallet-info" id="wallet-info" style="display: none;">
+        <div class="wallet-status-dot"></div>
+        <span id="wallet-address"></span>
+        <button onclick="disconnectWallet()" style="background:none;border:none;color:inherit;font-size:16px;cursor:pointer;">×</button>
     </div>
-    <button onclick="showWalletModal()" class="add-btn-modern">
-        <span>➕ Add Wallet</span>
-    </button>
 </div>
-            </header>
-            <div class="table-container-full">
-                <table class="table-modern">
-                    <thead>
-                        <tr>
-                            <th>Wallet</th>
-                            <th>Priority</th>
-                            <th>Tokens</th>
-                            <th>24h TX</th>
-                            <th>Balance SOL</th>
-                            <th>Last Scan</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="wallets-table-body">
-                        <tr>
-                            <td colspan="7" class="loading">
-                                <div class="spinner"></div>
-                                Loading wallets...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+
+<!-- Dashboard Container -->
+<div class="dashboard-container">
+
+    <!-- Section Activité Récente -->
+    <section class="dashboard-section">
+        <header class="section-header">
+            <h2 class="section-title">⚡ Recent Activity</h2>
+            <div class="section-controls">
+                <!-- NOUVELLE: Barre de recherche -->
+                <div class="search-container">
+                    <span class="search-icon">🔍</span>
+                    <input 
+                        type="text" 
+                        id="activity-search" 
+                        class="search-input" 
+                        placeholder="Rechercher par wallet, token..."
+                        autocomplete="off"
+                    >
+                    <button class="search-clear" type="button" title="Effacer">×</button>
+                </div>
+                <div id="activity-search-results" class="search-results-info" style="display: none;"></div>
+                
+                <!-- Contrôles existants -->
+                <div class="auto-refresh-control" onclick="toggleAutoRefresh('activity')" id="auto-refresh-activity">
+                    <div class="status-dot"></div>
+                    <span class="auto-refresh-text">Auto 15s</span>
+                    <span class="countdown" id="countdown-activity"></span>
+                </div>
+                <button onclick="refreshActivity()" class="refresh-btn-modern" title="Refresh">
+                    <span>🔄</span>
+                </button>
             </div>
-            <div id="wallets-pagination" style="padding: 20px; text-align: center;"></div>
-            <!-- Loading indicateur caché pour compatibilité -->
-            <div id="wallets-loading" style="display: none;"></div>
-        </section>
-
-    </div>
-
-    <!-- Modal -->
-    <div class="modal" id="details-modal" style="display: none;">
-        <div class="modal-content">
-            <h3 id="modal-title">Details</h3>
-            <button onclick="closeModal()">&times;</button>
-            <div id="modal-body"></div>
+        </header>
+        <div class="table-container-full">
+            <table class="table-modern">
+                <thead>
+                    <tr>
+                        <th>Wallet</th>
+                        <th>Token</th>
+                        <th>Token Address</th>
+                        <th>ATA</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="activity-table-body">
+                    <tr>
+                        <td colspan="7" class="loading">
+                            <div class="spinner"></div>
+                            Loading recent activity...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
-    </div>
+    </section>
 
-    <!-- Templates corrigés -->
-    <template id="wallet-row-template">
-        <tr>
-            <td data-column="wallet">
-                <div class="wallet-cell">
-                    <div class="wallet-avatar-small"></div>
-                    <div class="wallet-info-small">
-                        <div class="wallet-address-small"></div>
-                        <div class="wallet-status-small">
-                            <div class="status-dot-tiny"></div>
-                            <span class="status-text"></span>
-                        </div>
+    <!-- Section Wallets Surveillés -->
+    <section class="dashboard-section">
+        <header class="section-header">
+            <h2 class="section-title">🎯 Monitored Wallets</h2>
+            <div class="section-controls">
+                <!-- NOUVELLE: Barre de recherche -->
+                <div class="search-container">
+                    <span class="search-icon">🔍</span>
+                    <input 
+                        type="text" 
+                        id="wallets-search" 
+                        class="search-input" 
+                        placeholder="Rechercher par adresse..."
+                        autocomplete="off"
+                    >
+                    <button class="search-clear" type="button" title="Effacer">×</button>
+                </div>
+                <div id="wallets-search-results" class="search-results-info" style="display: none;"></div>
+                
+                <!-- Contrôles existants -->
+                <div class="auto-refresh-control" onclick="toggleAutoRefresh('wallets')" id="auto-refresh-wallets">
+                    <div class="status-dot"></div>
+                    <span class="auto-refresh-text">Auto 15s</span>
+                    <span class="countdown" id="countdown-wallets"></span>
+                </div>
+                <button onclick="showWalletModal()" class="add-btn-modern">
+                    <span>➕ Add Wallet</span>
+                </button>
+            </div>
+        </header>
+        <div class="table-container-full">
+            <table class="table-modern">
+                <thead>
+                    <tr>
+                        <th>Wallet</th>
+                        <th>Priority</th>
+                        <th>Tokens</th>
+                        <th>24h TX</th>
+                        <th>Balance SOL</th>
+                        <th>Last Scan</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="wallets-table-body">
+                    <tr>
+                        <td colspan="7" class="loading">
+                            <div class="spinner"></div>
+                            Loading wallets...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+</div>
+
+<!-- Modal -->
+<div class="modal" id="details-modal" style="display: none;">
+    <div class="modal-content">
+        <h3 id="modal-title">Details</h3>
+        <button onclick="closeModal()">&times;</button>
+        <div id="modal-body"></div>
+    </div>
+</div>
+
+<!-- Templates corrigés -->
+<template id="wallet-row-template">
+    <tr>
+        <td data-column="wallet">
+            <div class="wallet-cell">
+                <div class="wallet-avatar-small"></div>
+                <div class="wallet-info-small">
+                    <div class="wallet-address-small"></div>
+                    <div class="wallet-status-small">
+                        <div class="status-dot-tiny"></div>
+                        <span class="status-text"></span>
                     </div>
                 </div>
-            </td>
-            <td data-column="priority">
-                <span class="priority-badge-small"></span>
-            </td>
-            <td data-column="tokens">-</td>
-            <td data-column="tx_24h">-</td>
-            <td data-column="balance">
-                <span class="balance-amount">- SOL</span>
-            </td>
-            <td data-column="last_scan">
-                <span class="scan-time">-</span>
-            </td>
-            <td data-column="actions">
-                <div class="wallet-actions">
-                    <button class="wallet-action-btn copy-btn" data-address="">📋</button>
-                    <button class="wallet-action-btn view-btn">👁️</button>
-                </div>
-            </td>
-        </tr>
-    </template>
+            </div>
+        </td>
+        <td data-column="priority">
+            <span class="priority-badge-small"></span>
+        </td>
+        <td data-column="tokens">-</td>
+        <td data-column="tx_24h">-</td>
+        <td data-column="balance">
+            <span class="balance-amount">- SOL</span>
+        </td>
+        <td data-column="last_scan">
+            <span class="scan-time">-</span>
+        </td>
+        <td data-column="actions">
+            <div class="wallet-actions">
+                <button class="wallet-action-btn copy-btn" data-address="">📋</button>
+                <button class="wallet-action-btn view-btn">👁️</button>
+            </div>
+        </td>
+    </tr>
+</template>
 
-    <template id="activity-item-template">
-        <div class="modern-activity-item">
-            <div class="activity-icon-container">
-                <div class="activity-icon"></div>
-                <div class="activity-type-badge"></div>
-            </div>
-            <div class="activity-details">
-                <h4 class="activity-title"></h4>
-                <div class="activity-time"></div>
-                <div class="wallet-address"></div>
-                <div class="token-symbol"></div>
-                <div class="token-address"></div>
-                <div class="activity-amount"></div>
-            </div>
+<template id="activity-item-template">
+    <div class="modern-activity-item">
+        <div class="activity-icon-container">
+            <div class="activity-icon"></div>
+            <div class="activity-type-badge"></div>
         </div>
-    </template>
-
-
-    <div id="transaction-toast" class="transaction-toast" style="display: none;">
-        <div class="toast-content">
-            <div class="toast-icon"></div>
-            <div class="toast-message"></div>
-            <button class="toast-close" onclick="closeTransactionToast()">&times;</button>
+        <div class="activity-details">
+            <h4 class="activity-title"></h4>
+            <div class="activity-time"></div>
+            <div class="wallet-address"></div>
+            <div class="token-symbol"></div>
+            <div class="token-address"></div>
+            <div class="activity-amount"></div>
         </div>
     </div>
+</template>
 
-    
+<div id="transaction-toast" class="transaction-toast" style="display: none;">
+    <div class="toast-content">
+        <div class="toast-icon"></div>
+        <div class="toast-message"></div>
+        <button class="toast-close" onclick="closeTransactionToast()">&times;</button>
+    </div>
+</div>
+
 <!-- Scripts optimisés -->
 <script>
-// Configuration globale optimisée
-const API_BASE = window.location.origin + '/api';
-
 // Fonctions utilitaires minimalistes
 function formatNumber(num, decimals = 6) {
     if (typeof num !== 'number' || isNaN(num)) return '0';
@@ -734,15 +365,16 @@ function getWalletStatusText(wallet) {
 console.log('🚀 Dashboard optimisé - Scripts de base chargés');
 </script>
 
-    {% endblock %}
+{% endblock %}
 
-    {% block extra_js %}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
-    <script src="{{ url_for('static', filename='js/phantom_refactor.js') }}" defer></script>
-    <script src="{{ url_for('static', filename='js/dashboard_refactor.js') }}" defer></script>
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+<script src="{{ url_for('static', filename='js/phantom_refactor.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/dashboard_refactor.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/search-theme.js') }}" defer></script>
 
-    <script>
+<script>
 // Point d'entrée optimisé
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🎯 Dashboard optimisé - Initialisation terminée');
@@ -775,4 +407,4 @@ if (typeof performance !== 'undefined' && performance.memory) {
     }, 30000);
 }
 </script>
-    {% endblock %}
+{% endblock %}

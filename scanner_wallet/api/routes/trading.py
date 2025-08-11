@@ -46,10 +46,25 @@ trading_bp = Blueprint('trading', __name__, url_prefix='/api/trading')
 # =============================================================================
 # ROUTES DE CONFIGURATION
 # =============================================================================
-@trading_bp.route('/quick-quote', methods=['POST'])
+@trading_bp.route('/quick-quote', methods=['GET','POST'])
 def get_quick_quote():
     """Obtient un devis rapide pour un token depuis le dashboard"""
     try:
+        # Pour GET, retourner un message d'aide
+        if request.method == 'GET':
+            return jsonify(create_success_response(
+                "Quick quote endpoint",
+                {
+                    'usage': 'POST avec token_mint, amount_sol, trade_type, wallet_address',
+                    'example': {
+                        'token_mint': 'So11111111111111111111111111111111111111112',
+                        'amount_sol': 1.0,
+                        'trade_type': 'buy',
+                        'wallet_address': 'your_wallet_address'
+                    }
+                }
+            ))
+
         data = request.get_json()
         if not data:
             return jsonify(create_error_response("No data provided")), 400

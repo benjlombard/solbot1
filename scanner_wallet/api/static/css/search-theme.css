@@ -1,0 +1,502 @@
+/* === FEATURES: RECHERCHE + THÈME === */
+
+/* Variables CSS pour les thèmes */
+:root {
+    /* Thème sombre (par défaut) */
+    --theme-bg-primary: #0a0a0a;
+    --theme-bg-secondary: #111827;
+    --theme-bg-surface: rgba(31, 41, 55, 0.3);
+    --theme-border: #374151;
+    --theme-border-light: #4b5563;
+    --theme-text-primary: #f9fafb;
+    --theme-text-secondary: #d1d5db;
+    --theme-text-muted: #9ca3af;
+    --theme-solana-green: #14f195;
+    --theme-solana-purple: #9945ff;
+    --theme-glass-bg: rgba(31, 41, 55, 0.4);
+    --theme-glass-border: rgba(75, 85, 99, 0.3);
+    --theme-hover-bg: rgba(255, 255, 255, 0.05);
+    --theme-error: #ef4444;
+    --theme-warning: #f59e0b;
+    --theme-success: #10b981;
+}
+
+/* Thème clair */
+[data-theme="light"] {
+    /* Backgrounds */
+    --theme-bg-primary: #ffffff;
+    --theme-bg-secondary: #f8fafc;
+    --theme-bg-surface: #f1f5f9;
+    --theme-glass-bg: rgba(248, 250, 252, 0.95);
+    --theme-hover-bg: rgba(0, 0, 0, 0.03);
+    
+    /* Text colors - FIXÉS pour contraste */
+    --theme-text-primary: #1e293b !important;
+    --theme-text-secondary: #334155 !important;
+    --theme-text-muted: #64748b !important;
+    
+    /* Borders */
+    --theme-border: #e2e8f0;
+    --theme-border-light: #cbd5e1;
+    --theme-glass-border: rgba(203, 213, 225, 0.5);
+    
+    /* Theme colors - ajustés pour clair */
+    --theme-solana-green: #059669;
+    --theme-solana-purple: #7c3aed;
+    --theme-error: #dc2626;
+    --theme-warning: #d97706;
+    --theme-success: #059669;
+}
+
+/* Override spécifique pour éléments problématiques */
+[data-theme="light"] .wallet-address-small,
+[data-theme="light"] .balance-amount,
+[data-theme="light"] .amount-sol,
+[data-theme="light"] .section-title {
+    color: #1e293b !important;
+}
+
+[data-theme="light"] .text-muted,
+[data-theme="light"] .scan-time,
+[data-theme="light"] .status-text {
+    color: #475569 !important;
+}
+
+/* Boutons en thème clair */
+[data-theme="light"] .wallet-action-btn,
+[data-theme="light"] .copy-btn-small {
+    background: rgba(0, 0, 0, 0.05);
+    color: #334155;
+}
+
+[data-theme="light"] .wallet-action-btn:hover,
+[data-theme="light"] .copy-btn-small:hover {
+    background: #059669;
+    color: white;
+}
+
+/* Priorité badges en clair */
+[data-theme="light"] .priority-high-small {
+    background: rgba(220, 38, 38, 0.1);
+    color: #dc2626;
+}
+
+[data-theme="light"] .priority-medium-small {
+    background: rgba(217, 119, 6, 0.1);
+    color: #d97706;
+}
+
+[data-theme="light"] .priority-low-small {
+    background: rgba(100, 116, 139, 0.1);
+    color: #475569;
+}
+
+/* Application des variables de thème */
+body {
+    background: var(--theme-bg-primary);
+    color: var(--theme-text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.dashboard-section {
+    background: var(--theme-glass-bg);
+    border: 1px solid var(--theme-glass-border);
+}
+
+.section-header {
+    background: var(--theme-hover-bg);
+    border-bottom: 1px solid var(--theme-border);
+}
+
+.section-title {
+    color: var(--theme-text-primary);
+}
+
+.table-modern th {
+    background: var(--theme-hover-bg);
+    border-bottom: 1px solid var(--theme-border);
+    color: var(--theme-text-muted);
+}
+
+.table-modern td {
+    border-bottom: 1px solid var(--theme-border);
+}
+
+.table-modern tbody tr:hover {
+    background: var(--theme-hover-bg);
+}
+
+/* === CORRECTION ALIGNEMENT HEADER BUTTONS === */
+
+/* Container pour les boutons en haut à droite */
+.header-buttons {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    pointer-events: none; /* Permet aux boutons enfants d'être cliquables */
+}
+
+.header-buttons > * {
+    pointer-events: auto; /* Réactive le pointer pour les boutons */
+}
+
+/* === TOGGLE THÈME === */
+.theme-toggle {
+    position: static; /* PAS de position fixed ici ! */
+    background: var(--theme-glass-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--theme-glass-border);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 24px;
+    color: var(--theme-text-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    margin: 0; /* Reset margin */
+}
+
+.theme-toggle:hover {
+    transform: scale(1.1) rotate(15deg);
+    box-shadow: 0 6px 20px rgba(20, 241, 149, 0.2);
+}
+
+.theme-toggle.light {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    color: white;
+}
+
+.theme-toggle.dark {
+    background: linear-gradient(135deg, #1e293b, #334155);
+    color: #60a5fa;
+}
+
+/* === WALLET CONNECTION === */
+.wallet-connection {
+    position: static; /* Retire le position si il y en avait un */
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.wallet-connect-btn {
+    background: var(--theme-glass-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--theme-glass-border);
+    border-radius: 12px;
+    padding: 10px 16px;
+    color: var(--theme-text-primary);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.wallet-connect-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(20, 241, 149, 0.2);
+    border-color: var(--theme-solana-green);
+}
+
+.wallet-connect-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.wallet-info {
+    background: var(--theme-glass-bg);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--theme-glass-border);
+    border-radius: 12px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.wallet-status-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--theme-success);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+.disconnect-btn {
+    background: none;
+    border: none;
+    color: var(--theme-text-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.disconnect-btn:hover {
+    background: var(--theme-error);
+    color: white;
+}
+
+/* === RECHERCHE === */
+.search-container {
+    position: relative;
+    max-width: 300px;
+}
+
+.search-input {
+    width: 100%;
+    padding: 10px 16px 10px 40px;
+    background: var(--theme-glass-bg);
+    border: 1px solid var(--theme-border);
+    border-radius: 12px;
+    color: var(--theme-text-primary);
+    font-size: 14px;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--theme-solana-green);
+    box-shadow: 0 0 0 3px rgba(20, 241, 149, 0.1);
+    background: var(--theme-bg-surface);
+}
+
+.search-input::placeholder {
+    color: var(--theme-text-muted);
+}
+
+.search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--theme-text-muted);
+    font-size: 16px;
+    pointer-events: none;
+}
+
+.search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--theme-text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    opacity: 0;
+    transition: all 0.2s ease;
+}
+
+.search-input:not(:placeholder-shown) + .search-icon + .search-clear {
+    opacity: 1;
+}
+
+.search-clear:hover {
+    background: var(--theme-hover-bg);
+    color: var(--theme-text-primary);
+}
+
+.search-results-info {
+    font-size: 12px;
+    color: var(--theme-text-muted);
+    margin-left: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.search-highlight {
+    background: linear-gradient(120deg, rgba(20, 241, 149, 0.3) 0%, rgba(20, 241, 149, 0.1) 100%);
+    color: var(--theme-solana-green);
+    font-weight: 600;
+    padding: 1px 3px;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+}
+
+/* Animation pour les résultats de recherche */
+.search-match {
+    animation: searchPulse 0.5s ease-in-out;
+}
+
+@keyframes searchPulse {
+    0% { 
+        background: rgba(20, 241, 149, 0.2);
+        transform: scale(1);
+    }
+    50% { 
+        background: rgba(20, 241, 149, 0.3);
+        transform: scale(1.02);
+    }
+    100% { 
+        background: transparent;
+        transform: scale(1);
+    }
+}
+
+/* État masqué pour les lignes qui ne matchent pas */
+.search-hidden {
+    display: none !important;
+}
+
+/* Animation de transition pour le thème */
+* {
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Améliorations visuelles pour la recherche */
+.section-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.section-controls .search-container {
+    margin-right: auto;
+}
+
+/* Responsive pour mobile */
+@media (max-width: 768px) {
+    .header-buttons {
+        top: 15px;
+        right: 15px;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+    
+    .theme-toggle {
+        width: 40px;
+        height: 40px;
+        font-size: 20px;
+    }
+    
+    .wallet-connect-btn {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+    
+    .wallet-connect-btn svg {
+        width: 16px;
+        height: 16px;
+    }
+    
+    .wallet-info {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+    
+    .search-container {
+        max-width: 200px;
+    }
+    
+    .search-input {
+        font-size: 12px;
+        padding: 8px 12px 8px 32px;
+    }
+    
+    .section-controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+    
+    .section-controls .search-container {
+        max-width: 100%;
+        margin-right: 0;
+    }
+}
+
+/* Très petit écran - empiler verticalement */
+@media (max-width: 480px) {
+    .header-buttons {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+    }
+}
+
+/* Amélioration des couleurs pour les types de transaction en mode clair */
+[data-theme="light"] .type-buy {
+    color: var(--theme-success);
+}
+
+[data-theme="light"] .type-sell {
+    color: var(--theme-error);
+}
+
+[data-theme="light"] .type-other {
+    color: var(--theme-text-muted);
+}
+
+/* Amélioration des badges de priorité en mode clair */
+[data-theme="light"] .priority-high-small {
+    background: rgba(220, 38, 38, 0.15);
+    color: var(--theme-error);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+[data-theme="light"] .priority-medium-small {
+    background: rgba(217, 119, 6, 0.15);
+    color: var(--theme-warning);
+    border: 1px solid rgba(217, 119, 6, 0.3);
+}
+
+[data-theme="light"] .priority-low-small {
+    background: rgba(100, 116, 139, 0.15);
+    color: var(--theme-text-muted);
+    border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+/* Amélioration des boutons en mode clair */
+[data-theme="light"] .btn-buy {
+    background: rgba(5, 150, 105, 0.2);
+    color: var(--theme-success);
+    border: 1px solid rgba(5, 150, 105, 0.3);
+}
+
+[data-theme="light"] .btn-sell {
+    background: rgba(220, 38, 38, 0.2);
+    color: var(--theme-error);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+/* Scroll personnalisé pour les thèmes */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--theme-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--theme-border-light);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--theme-solana-green);
+}
