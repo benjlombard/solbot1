@@ -2,7 +2,7 @@
   console.log('🚀 [INIT] Dashboard script started, API_BASE:', API_BASE);
 
   const CONFIG = {
-    refreshInterval: 45_000,
+    refreshInterval: 15_000, // Réduit à 15 secondes pour plus de réactivité
     maxActivityItems: 20,
     maxWalletsDisplay: 10,
     debounceDelay: 250
@@ -13,7 +13,7 @@
   let isUpdating = false;
   let abortController = null;
   let globalTimer = null;
-  let autoRefresh = { activity: false, wallets: false };
+  let autoRefresh = { activity: true, wallets: true }; // Activé par défaut
 
   const activityRows = new Map();
   const walletRows = new Map();
@@ -56,22 +56,22 @@
   }
 
   function showMessage(msg, type) {
-  console.log(`${type.toUpperCase()}: ${msg}`);
-  const toast = document.getElementById('transaction-toast');
-  if (toast) {
-    const toastMessage = toast.querySelector('.toast-message');
-    const toastIcon = toast.querySelector('.toast-icon');
-    toastMessage.textContent = msg;
-    toastIcon.innerHTML = `<i class="fas fa-${type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>`;
-    toast.classList.add('show', type); // Add type class for styling
-    setTimeout(() => {
-      toast.classList.remove('show', type);
-    }, 3000);
-  } else {
-    console.warn('⚠️ [MESSAGE] Transaction toast element not found');
-    alert(`${type.toUpperCase()}: ${msg}`); // Fallback
+    console.log(`${type.toUpperCase()}: ${msg}`);
+    const toast = document.getElementById('transaction-toast');
+    if (toast) {
+      const toastMessage = toast.querySelector('.toast-message');
+      const toastIcon = toast.querySelector('.toast-icon');
+      toastMessage.textContent = msg;
+      toastIcon.innerHTML = `<i class="fas fa-${type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>`;
+      toast.classList.add('show', type);
+      setTimeout(() => {
+        toast.classList.remove('show', type);
+      }, 3000);
+    } else {
+      console.warn('⚠️ [MESSAGE] Transaction toast element not found');
+      alert(`${type.toUpperCase()}: ${msg}`);
+    }
   }
-}
 
   function idForActivity(a) {
     return `${a.wallet_address}|${a.token_mint}|${a.timestamp}`;
@@ -157,6 +157,9 @@
     console.log('🔄 [LOAD] Starting dashboard data fetch...');
     if (btn) btn.classList.add('spinning');
 
+    // Mettre à jour le timestamp de dernière mise à jour
+    updateLastRefreshTime();
+
     try {
       const url = `${API_BASE}/dashboard/data`;
       console.log('🎯 [LOAD] Fetching from URL:', url);
@@ -216,6 +219,10 @@
       }
 
       console.log(`✅ [LOAD] Render completed: ${dashboardData.recent_activity?.length || 0} activities, ${dashboardData.wallets_overview?.length || 0} wallets`);
+      
+      // Afficher un message de succès temporaire
+      showMessage('Données mises à jour', 'success');
+      
     } catch (err) {
       if (err.name !== 'AbortError') {
         console.error('💥 [LOAD] Failed to load dashboard data:', {
@@ -224,12 +231,29 @@
         });
         showErrorInTable('activity-table-body', `Erreur: ${err.message}`);
         showErrorInTable('wallets-table-body', `Erreur: ${err.message}`);
+        showMessage(`Erreur de chargement: ${err.message}`, 'error');
       }
     } finally {
       isUpdating = false;
       if (btn) btn.classList.remove('spinning');
       console.log('🏁 [LOAD] Load process finished');
     }
+  }
+
+  function updateLastRefreshTime() {
+    const now = new Date();
+    const timeString = now.toLocaleTimeString('fr-FR', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit' 
+    });
+    console.log(`🕒 [REFRESH] Last refresh: ${timeString}`);
+    
+    // Optionnel : mettre à jour un élément UI pour montrer l'heure de dernière MAJ
+    const refreshButtons = document.querySelectorAll('.refresh-btn-modern');
+    refreshButtons.forEach(btn => {
+      btn.setAttribute('title', `Actualiser (dernière MAJ: ${timeString})`);
+    });
   }
 
   function showErrorInTable(tableBodyId, message) {
@@ -322,6 +346,7 @@
       }
     }
 
+    // Nettoyer les anciennes entrées
     for (const [k, node] of activityRows) {
       if (!newKeys.has(k)) {
         node.remove();
@@ -496,7 +521,9 @@
       const valueToCopy = button.getAttribute('data-copy');
       if (valueToCopy) {
         console.log('📋 [COPY] Copying address:', valueToCopy);
-        navigator.clipboard.write(valueToCopy).then(() => {
+        
+        // Correction de l'API clipboard
+        navigator.clipboard.writeText(valueToCopy).then(() => {
           button.classList.add('copied');
           setTimeout(() => button.classList.remove('copied'), 1000);
 
@@ -513,15 +540,18 @@
           }
         }).catch(err => {
           console.error('💥 [COPY] Error copying address:', err);
-          showMessage('Erreur lors de la copie de l’adresse', 'error');
+          showMessage('Erreur lors de la copie de l\'adresse', 'error');
         });
       }
     });
   }
 
+  // Fonctions publiques corrigées
   function refreshActivity() {
     console.log('🔄 [UI] Manual refresh triggered for Activity');
-    const btn = document.querySelector('#activity-search').closest('.section-header').querySelector('.refresh-btn-modern');
+    // Trouver le bon bouton de refresh dans la section Activity
+    const activitySection = document.querySelector('#activity-search').closest('.dashboard-section');
+    const btn = activitySection.querySelector('.refresh-btn-modern');
     loadDashboardData(btn);
   }
 
@@ -529,8 +559,28 @@
     console.log('🔄 [UI] Toggle auto-refresh for:', type);
     if (type === 'activity') {
       autoRefresh.activity = !autoRefresh.activity;
+      updateAutoRefreshUI('activity', autoRefresh.activity);
     } else if (type === 'wallets') {
       autoRefresh.wallets = !autoRefresh.wallets;
+      updateAutoRefreshUI('wallets', autoRefresh.wallets);
+    }
+  }
+
+  function updateAutoRefreshUI(type, isActive) {
+    const control = document.getElementById(`auto-refresh-${type}`);
+    if (control) {
+      const dot = control.querySelector('.status-dot');
+      const text = control.querySelector('.auto-refresh-text');
+      
+      if (isActive) {
+        control.classList.add('active');
+        dot.style.backgroundColor = '#10b981'; // vert
+        text.textContent = 'Auto ON';
+      } else {
+        control.classList.remove('active');
+        dot.style.backgroundColor = '#6b7280'; // gris
+        text.textContent = 'Auto OFF';
+      }
     }
   }
 
@@ -540,6 +590,10 @@
       clearInterval(globalTimer);
       console.log('⏰ [SCHEDULER] Cleared existing timer');
     }
+
+    // Initialiser l'UI des auto-refresh
+    updateAutoRefreshUI('activity', autoRefresh.activity);
+    updateAutoRefreshUI('wallets', autoRefresh.wallets);
 
     globalTimer = setInterval(() => {
       if (autoRefresh.activity || autoRefresh.wallets) {
@@ -593,8 +647,16 @@
     });
   });
 
+  // API publique
   window.dashboard = {
     refreshActivity,
-    toggleAutoRefresh
+    toggleAutoRefresh,
+    loadDashboardData: () => loadDashboardData(),
+    getConfig: () => CONFIG,
+    getAutoRefreshStatus: () => autoRefresh,
+    forceRefresh: () => {
+      console.log('🔥 [FORCE] Force refresh triggered');
+      loadDashboardData();
+    }
   };
 })();
