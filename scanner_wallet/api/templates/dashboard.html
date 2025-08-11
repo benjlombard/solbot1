@@ -17,12 +17,778 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* Override pour la nouvelle disposition */
+.main-content-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+}
+
+.activity-section {
+    background: var(--glass-bg);
+    backdrop-filter: var(--blur-md);
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+}
+
+.wallets-section {
+    background: var(--glass-bg);
+    backdrop-filter: var(--blur-md);
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+}
+
+/* Wallet Connection Button */
+.wallet-connect-btn {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 1000;
+    background: var(--glass-bg);
+    backdrop-filter: var(--blur-md);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.wallet-connect-btn:hover {
+    transform: scale(1.05);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--solana-purple);
+}
+
+.wallet-connect-btn.connected {
+    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
+    color: white;
+    border-color: transparent;
+}
+
+.wallet-icon {
+    transition: var(--transition-fast);
+}
+
+.wallet-connect-btn:hover .wallet-icon {
+    transform: rotate(5deg);
+}
+
+/* Nouvelle section d'activité moderne */
+.activity-container {
+    max-height: 600px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+
+.activity-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.activity-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.activity-container::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+.modern-activity-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--glass-border);
+    transition: var(--transition-normal);
+    position: relative;
+    overflow: hidden;
+}
+
+.modern-activity-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
+    transform: scaleY(0);
+    transition: var(--transition-fast);
+}
+
+.modern-activity-item:hover {
+    background: var(--glass-bg);
+    transform: translateX(4px);
+}
+
+.modern-activity-item:hover::before {
+    transform: scaleY(1);
+}
+
+.modern-activity-item:last-child {
+    border-bottom: none;
+}
+
+.activity-main-content {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex: 1;
+    min-width: 0;
+}
+
+.activity-icon-container {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.activity-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: white;
+    box-shadow: var(--shadow-lg);
+    position: relative;
+    overflow: hidden;
+}
+
+.activity-icon::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
+    opacity: 0.9;
+}
+
+.activity-icon::after {
+    content: '⚡';
+    position: relative;
+    z-index: 1;
+}
+
+.activity-icon.buy::after { content: '📈'; }
+.activity-icon.sell::after { content: '📉'; }
+.activity-icon.transfer::after { content: '↔️'; }
+.activity-icon.discovery::after { content: '🔍'; }
+
+.activity-type-badge {
+    position: absolute;
+    bottom: -4px;
+    right: -4px;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 2px solid var(--bg-primary);
+    color: white;
+}
+
+.activity-type-badge.buy {
+    background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.activity-type-badge.sell {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.activity-type-badge.transfer {
+    background: linear-gradient(135deg, #9333ea, #7c3aed);
+}
+
+.activity-type-badge.discovery {
+    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
+}
+
+.activity-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.activity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.activity-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.activity-time {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+    background: var(--glass-bg);
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--glass-border);
+}
+
+.activity-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.info-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.wallet-address-display {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--glass-bg);
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--blur-sm);
+}
+
+.wallet-address {
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 12px;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.copy-btn-small {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    transition: var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.copy-btn-small:hover {
+    color: var(--solana-green);
+    background: var(--bg-tertiary);
+    transform: scale(1.1);
+}
+
+.token-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.token-symbol {
+    font-weight: 700;
+    color: var(--text-primary);
+    background: var(--glass-bg);
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--glass-border);
+    font-size: 12px;
+}
+
+.token-address {
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--glass-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--glass-border);
+}
+
+.activity-amount {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--solana-green);
+    background: var(--glass-bg);
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--blur-sm);
+}
+
+.activity-amount.negative {
+    color: #ef4444;
+}
+
+.activity-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.action-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-fast);
+    backdrop-filter: var(--blur-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.buy-btn {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    box-shadow: var(--shadow-md);
+}
+
+.buy-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.sell-btn {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    box-shadow: var(--shadow-md);
+}
+
+.sell-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.details-btn {
+    background: var(--glass-bg);
+    color: var(--text-secondary);
+    border: 1px solid var(--glass-border);
+}
+
+.details-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+/* Nouveau tableau responsive pour les wallets */
+.wallets-table-container {
+    width: 100%;
+    overflow: hidden;
+}
+
+.wallets-table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+
+.wallets-table-wrapper::-webkit-scrollbar {
+    height: 6px;
+}
+
+.wallets-table-wrapper::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.wallets-table-wrapper::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+.wallets-table {
+    width: 100%;
+    min-width: 900px;
+    border-collapse: collapse;
+    background: transparent;
+    font-family: 'Inter', sans-serif;
+}
+
+.wallets-table th,
+.wallets-table td {
+    padding: 16px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--glass-border);
+    vertical-align: middle;
+}
+
+.wallets-table th {
+    background: var(--glass-bg);
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: var(--blur-sm);
+}
+
+.wallets-table td {
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: var(--transition-fast);
+}
+
+.wallets-table tbody tr {
+    transition: var(--transition-fast);
+    position: relative;
+}
+
+.wallets-table tbody tr::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
+    transform: scaleY(0);
+    transition: var(--transition-fast);
+}
+
+.wallets-table tbody tr:hover {
+    background: var(--glass-bg);
+    transform: translateX(4px);
+}
+
+.wallets-table tbody tr:hover::before {
+    transform: scaleY(1);
+}
+
+/* Colonnes spécifiques du tableau wallets */
+.wallets-table th:nth-child(1), /* Wallet */
+.wallets-table td:nth-child(1) {
+    width: 25%;
+    min-width: 200px;
+}
+
+.wallets-table th:nth-child(2), /* Priorité */
+.wallets-table td:nth-child(2) {
+    width: 12%;
+    min-width: 100px;
+    text-align: center;
+}
+
+.wallets-table th:nth-child(3), /* Tokens */
+.wallets-table td:nth-child(3) {
+    width: 10%;
+    min-width: 80px;
+    text-align: center;
+}
+
+.wallets-table th:nth-child(4), /* TX 24h */
+.wallets-table td:nth-child(4) {
+    width: 10%;
+    min-width: 80px;
+    text-align: center;
+}
+
+.wallets-table th:nth-child(5), /* Balance SOL */
+.wallets-table td:nth-child(5) {
+    width: 15%;
+    min-width: 120px;
+    text-align: right;
+}
+
+.wallets-table th:nth-child(6), /* Dernier Scan */
+.wallets-table td:nth-child(6) {
+    width: 18%;
+    min-width: 140px;
+}
+
+.wallets-table th:nth-child(7), /* Actions */
+.wallets-table td:nth-child(7) {
+    width: 10%;
+    min-width: 120px;
+    text-align: center;
+}
+
+/* Styles pour les cellules du tableau wallets */
+.wallet-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.wallet-avatar-small {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.wallet-info-small {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.wallet-address-small {
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.wallet-status-small {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.status-dot-tiny {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--primary-500);
+}
+
+.priority-badge-small {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.priority-high-small {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.priority-medium-small {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.priority-low-small {
+    background: rgba(107, 114, 128, 0.15);
+    color: #9ca3af;
+    border: 1px solid rgba(107, 114, 128, 0.3);
+}
+
+.balance-amount {
+    font-weight: 700;
+    color: var(--solana-green);
+}
+
+.scan-time {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: var(--glass-bg);
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--glass-border);
+}
+
+.wallet-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+}
+
+.wallet-action-btn {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 11px;
+    transition: var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.wallet-action-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    transform: scale(1.05);
+}
+
+.wallet-action-btn.view-btn:hover {
+    border-color: var(--solana-green);
+    color: var(--solana-green);
+}
+
+.wallet-action-btn.copy-btn:hover {
+    border-color: var(--solana-purple);
+    color: var(--solana-purple);
+}
+
+/* Controls pour les wallets */
+.wallets-controls {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--glass-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.search-container {
+    flex: 1;
+    min-width: 200px;
+}
+
+.sort-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.sort-container span {
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 14px;
+}
+
+/* Responsive pour mobile */
+@media (max-width: 768px) {
+    .main-content-layout {
+        gap: 20px;
+    }
+    
+    .wallet-connect-btn {
+        top: 10px;
+        left: 10px;
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+    
+    .modern-activity-item {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 16px;
+        padding: 16px 20px;
+    }
+    
+    .activity-main-content {
+        gap: 16px;
+    }
+    
+    .activity-info-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .activity-actions {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    
+    .action-btn {
+        flex: 1;
+        min-width: 80px;
+        justify-content: center;
+    }
+    
+    .wallets-controls {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+    }
+    
+    .search-container {
+        width: 100%;
+    }
+    
+    /* Tableau responsive pour mobile */
+    .wallets-table {
+        min-width: 700px;
+    }
+    
+    .wallets-table th,
+    .wallets-table td {
+        padding: 12px 16px;
+        font-size: 13px;
+    }
+    
+    .wallets-table th {
+        font-size: 11px;
+    }
+    
+    .wallet-avatar-small {
+        width: 32px;
+        height: 32px;
+        font-size: 12px;
+    }
+    
+    .wallet-address-small {
+        font-size: 12px;
+    }
+    
+    .wallet-action-btn {
+        padding: 4px 6px;
+    }
+}
+</style>
 {% endblock %}
 
 {% block content %}
-<!-- Theme Toggle Button (nouvelle fonctionnalité) -->
+<!-- Theme Toggle Button -->
 <button class="theme-toggle" onclick="toggleTheme()" title="Changer de thème">
     <span id="theme-icon">🌙</span>
+</button>
+
+<!-- Wallet Connection Button -->
+<button class="wallet-connect-btn" onclick="connectPhantomWallet()" title="Connecter Phantom Wallet">
+    <svg class="wallet-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/>
+        <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>
+    </svg>
+    <span id="wallet-status">Connecter</span>
 </button>
 
 <main class="dashboard-container fade-in">
@@ -108,10 +874,38 @@
         </div>
     </section>
 
-    <!-- Contenu principal -->
-    <div class="main-grid">
-        <!-- Panel des wallets -->
-        <section class="wallets-panel" aria-labelledby="wallets-panel-title">
+    <!-- Nouveau layout principal -->
+    <div class="main-content-layout">
+        <!-- Section Activité Récente -->
+        <section class="activity-section" aria-labelledby="activity-panel-title">
+            <header class="panel-header">
+                <h2 class="panel-title" id="activity-panel-title">
+                    <span role="img" aria-label="Éclair">⚡</span>
+                    Activité Récente
+                </h2>
+                <div class="panel-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="refreshActivity()">
+                        <span role="img" aria-label="Actualiser">🔄</span>
+                        Actualiser
+                    </button>
+                </div>
+            </header>
+            
+            <!-- Nouvelle version moderne de l'activité -->
+            <div class="activity-container">
+                <div class="activity-list" id="activity-list">
+                    <!-- Les éléments seront insérés ici par JavaScript -->
+                </div>
+            </div>
+            
+            <div id="activity-list-loading" class="loading">
+                <div class="spinner"></div>
+                Chargement de l'activité...
+            </div>
+        </section>
+
+        <!-- Section Wallets Surveillés - Maintenant en tableau responsive -->
+        <section class="wallets-section" aria-labelledby="wallets-panel-title">
             <header class="panel-header">
                 <h2 class="panel-title" id="wallets-panel-title">
                     <span role="img" aria-label="Cible">🎯</span>
@@ -128,6 +922,7 @@
                     </button>
                 </div>
             </header>
+            
             <!-- Controls for filtering and sorting -->
             <div class="wallets-controls">
                 <div class="search-container">
@@ -141,66 +936,66 @@
                     <button class="btn btn-sm btn-secondary" data-sort="transactions_24h">Activité</button>
                 </div>
             </div>
-            <div class="wallets-list" id="wallets-list">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    Chargement des wallets...
+            
+            <!-- Nouveau tableau responsive pour les wallets -->
+            <div class="wallets-table-container">
+                <div class="wallets-table-wrapper">
+                    <table class="wallets-table">
+                        <thead>
+                            <tr>
+                                <th>Wallet</th>
+                                <th>Priorité</th>
+                                <th>Tokens</th>
+                                <th>TX 24h</th>
+                                <th>Balance SOL</th>
+                                <th>Dernier Scan</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="wallets-table-body">
+                            <!-- Les lignes seront insérées ici par JavaScript -->
+                        </tbody>
+                    </table>
                 </div>
             </div>
+            
+            <div id="wallets-loading" class="loading">
+                <div class="spinner"></div>
+                Chargement des wallets...
+            </div>
+            
             <!-- Pagination controls -->
             <div class="pagination-container" id="wallets-pagination">
                 <!-- Pagination buttons will be generated here by JS -->
             </div>
         </section>
 
-        <!-- Panel d'activité -->
-        <section class="activity-panel" aria-labelledby="activity-panel-title">
-            <header class="panel-header">
-                <h2 class="panel-title" id="activity-panel-title">
-                    <span role="img" aria-label="Éclair">⚡</span>
-                    Activité Récente
+        <!-- Section des tokens populaires -->
+        <section class="tokens-section" aria-labelledby="tokens-section-title">
+            <header class="card-header">
+                <h2 class="card-title" id="tokens-section-title">
+                    <span role="img" aria-label="Feu">🔥</span>
+                    Tokens Populaires (24h)
                 </h2>
                 <div class="panel-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="refreshActivity()">
+                    <button class="btn btn-secondary btn-sm" onclick="refreshTokens()">
                         <span role="img" aria-label="Actualiser">🔄</span>
                         Actualiser
                     </button>
+                    <button class="btn btn-primary btn-sm" onclick="navigateTo('/tokens')">
+                        <span role="img" aria-label="Oeil">👁️</span>
+                        Voir Tous
+                    </button>
                 </div>
             </header>
-            <div class="activity-list" id="activity-list">
+            <div class="tokens-grid" id="tokens-grid">
                 <div class="loading">
                     <div class="spinner"></div>
-                    Chargement de l'activité...
+                    Chargement des tokens...
                 </div>
             </div>
         </section>
     </div>
-
-    <!-- Section des tokens populaires -->
-    <section class="tokens-section" aria-labelledby="tokens-section-title">
-        <header class="card-header">
-            <h2 class="card-title" id="tokens-section-title">
-                <span role="img" aria-label="Feu">🔥</span>
-                Tokens Populaires (24h)
-            </h2>
-            <div class="panel-actions">
-                <button class="btn btn-secondary btn-sm" onclick="refreshTokens()">
-                    <span role="img" aria-label="Actualiser">🔄</span>
-                    Actualiser
-                </button>
-                <button class="btn btn-primary btn-sm" onclick="navigateTo('/tokens')">
-                    <span role="img" aria-label="Oeil">👁️</span>
-                    Voir Tous
-                </button>
-            </div>
-        </header>
-        <div class="tokens-grid" id="tokens-grid">
-            <div class="loading">
-                <div class="spinner"></div>
-                Chargement des tokens...
-            </div>
-        </div>
-    </section>
 </main>
 
 <!-- Modal pour les détails -->
@@ -215,6 +1010,129 @@
         </div>
     </div>
 </div>
+
+<!-- Template pour les éléments d'activité -->
+<template id="activity-item-template">
+    <div class="modern-activity-item fade-in-up">
+        <div class="activity-main-content">
+            <div class="activity-icon-container">
+                <div class="activity-icon"></div>
+                <div class="activity-type-badge"></div>
+            </div>
+            
+            <div class="activity-details">
+                <div class="activity-header">
+                    <h4 class="activity-title"></h4>
+                    <div class="activity-time"></div>
+                </div>
+                
+                <div class="activity-info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Wallet</span>
+                        <div class="wallet-address-display">
+                            <span class="wallet-address"></span>
+                            <button class="copy-btn-small" onclick="copyToClipboard(this)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="info-item">
+                        <span class="info-label">Token</span>
+                        <div class="token-info">
+                            <span class="token-symbol"></span>
+                            <span class="token-address"></span>
+                        </div>
+                    </div>
+                    
+                    <div class="info-item">
+                        <span class="info-label">Montant</span>
+                        <span class="activity-amount"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="activity-actions">
+            <button class="action-btn buy-btn" onclick="openPhantomBuy(this)" title="Acheter sur Phantom">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 5v14l7-7-7-7z"/>
+                    <path d="M5 12h14"/>
+                </svg>
+                Buy
+            </button>
+            <button class="action-btn sell-btn" onclick="openPhantomSell(this)" title="Vendre sur Phantom">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 19V5l-7 7 7 7z"/>
+                    <path d="M19 12H5"/>
+                </svg>
+                Sell
+            </button>
+            <button class="action-btn details-btn" onclick="showActivityDetails(this)" title="Voir les détails">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="1"/>
+                    <circle cx="19" cy="12" r="1"/>
+                    <circle cx="5" cy="12" r="1"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+</template>
+
+<!-- Template pour les lignes du tableau wallets -->
+<template id="wallet-row-template">
+    <tr class="wallet-row fade-in-up">
+        <!-- Colonne 1: Wallet -->
+        <td>
+            <div class="wallet-cell">
+                <div class="wallet-avatar-small"></div>
+                <div class="wallet-info-small">
+                    <div class="wallet-address-small"></div>
+                    <div class="wallet-status-small">
+                        <div class="status-dot-tiny"></div>
+                        <span class="status-text"></span>
+                    </div>
+                </div>
+            </div>
+        </td>
+        <!-- Colonne 2: Priorité -->
+        <td>
+            <div class="priority-badge-small"></div>
+        </td>
+        <!-- Colonne 3: Tokens -->
+        <td class="tokens-count">-</td>
+        <!-- Colonne 4: TX 24h -->
+        <td class="tx-count">-</td>
+        <!-- Colonne 5: Balance SOL -->
+        <td>
+            <div class="balance-amount">- SOL</div>
+        </td>
+        <!-- Colonne 6: Dernier Scan -->
+        <td>
+            <div class="scan-time">-</div>
+        </td>
+        <!-- Colonne 7: Actions -->
+        <td>
+            <div class="wallet-actions">
+                <button class="wallet-action-btn view-btn" onclick="viewWalletDetails(this)" title="Voir détails">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                </button>
+                <button class="wallet-action-btn copy-btn" onclick="copyWalletAddress(this)" title="Copier adresse">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                </button>
+            </div>
+        </td>
+    </tr>
+</template>
 
 <!-- Templates pour le contenu dynamique -->
 <template id="wallet-item-template">
@@ -267,18 +1185,6 @@
     </div>
 </template>
 
-<template id="activity-item-template">
-    <div class="activity-item fade-in-up">
-        <div class="activity-icon"></div>
-        <div class="activity-content">
-            <div class="activity-title"></div>
-            <div class="activity-details"></div>
-            <div class="activity-links"></div>
-        </div>
-        <div class="activity-time"></div>
-    </div>
-</template>
-
 <template id="token-card-template">
     <div class="token-card fade-in-up">
         <div class="token-header">
@@ -315,37 +1221,5 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
-<!-- Script pour le theme toggle (nouvelle fonctionnalité) -->
-<script>
-// Theme Toggle - NOUVELLE FONCTIONNALITÉ
-function toggleTheme() {
-    const body = document.body;
-    const themeIcon = document.getElementById('theme-icon');
-    
-    if (body.dataset.theme === 'dark') {
-        body.dataset.theme = 'light';
-        themeIcon.textContent = '☀️';
-        localStorage.setItem('theme', 'light');
-    } else {
-        body.dataset.theme = 'dark';
-        themeIcon.textContent = '🌙';
-        localStorage.setItem('theme', 'dark');
-    }
-}
-
-// Restore theme au chargement
-function restoreTheme() {
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    const body = document.body;
-    const themeIcon = document.getElementById('theme-icon');
-    
-    body.dataset.theme = savedTheme;
-    themeIcon.textContent = savedTheme === 'dark' ? '🌙' : '☀️';
-}
-
-// Initialiser le thème au chargement de la page
-document.addEventListener('DOMContentLoaded', function() {
-    restoreTheme();
-});
-</script>
+<script src="{{ url_for('static', filename='js/phantom-integration.js') }}" defer></script>
 {% endblock %}

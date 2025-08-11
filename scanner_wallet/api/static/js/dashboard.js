@@ -239,7 +239,7 @@ async function loadDashboardData() {
         fullWalletsList = response.data.wallets_overview || [];
         updateStats();
         renderWalletsList(); // Use the new render function
-        updateActivity();
+        renderActivityTable();
         updateTopTokens();
         updatePortfolioChart();
         updateTopTokensChart();
@@ -452,99 +452,124 @@ function renderPaginationControls(totalPages, totalItems) {
 }
 
 
-// Mise à jour de l'activité récente
-function updateActivity() {
-    const container = document.getElementById('activity-list');
-    const template = document.getElementById('activity-item-template');
-    if (!container || !template) return;
+// Nouvelle fonction pour le rendu de la table d'activité
+function renderActivityTable() {
+    const tableBody = document.getElementById('activity-table-body');
+    const loadingIndicator = document.getElementById('activity-list-loading');
+    if (!tableBody || !loadingIndicator) return;
 
     try {
         const activities = dashboardData.recent_activity || [];
         
         if (!activities.length) {
-            setContainerState(container, 'empty', 'Aucune activité récente');
+            loadingIndicator.innerHTML = 'Aucune activité récente.';
+            tableBody.innerHTML = '';
             return;
         }
 
-        container.innerHTML = ''; // Clear previous content
+        loadingIndicator.style.display = 'none';
+        tableBody.innerHTML = ''; // Vider le contenu précédent
+
         const displayActivities = activities.slice(0, MAX_ACTIVITY_DISPLAY);
 
         displayActivities.forEach(activity => {
-            const clone = template.content.cloneNode(true);
-            const activityItem = clone.querySelector('.activity-item');
-
-            // Ajout de la classe pour les nouveaux éléments
+            const row = tableBody.insertRow();
             if (activity.is_new) {
-                activityItem.classList.add('new-activity');
+                row.classList.add('new-activity');
             }
-            
-            const iconEl = clone.querySelector('.activity-icon');
-            const linksEl = clone.querySelector('.activity-links');
-            let icon, title, details, activityClass;
 
-            // Générer l'URL Solscan pour le wallet
-            const walletSolscanUrl = `https://solscan.io/account/${activity.wallet_address}`;
-            const walletShort = activity.wallet_address.substring(0, 6) + '...';
-
-            if (activity.type === 'transaction') {
-                activityClass = activity.transaction_type === 'buy' ? 'buy' : 'sell';
-                icon = activityClass === 'buy' ? '📈' : '📉';
-                
-                // Titre avec lien vers le wallet
-                title = `${activity.token_symbol || 'Unknown'} - `;
-                
-                details = `${activity.transaction_type.toUpperCase()}: ${formatNumber(activity.token_amount)} for ${formatNumber(activity.sol_amount)} SOL`;
-            } else { // discovery
-                activityClass = 'discovery';
-                icon = '🆕';
-                
-                // Titre avec lien vers le wallet
-                title = `Nouveau Token: ${activity.token_symbol || 'Unknown'} - `;
-                
-                details = `Découvert | Balance: ${formatNumber(activity.initial_balance)}`;
-            }
-            
-            iconEl.className = `activity-icon activity-${activityClass}`;
-            iconEl.textContent = icon;
-            
-            // Construire le titre avec le lien wallet
-            const titleElement = clone.querySelector('.activity-title');
-            titleElement.innerHTML = `
-                ${title}
-                <a href="${walletSolscanUrl}" 
-                   target="_blank" 
-                   rel="noopener noreferrer"
-                   class="wallet-link"
-                   title="Voir le wallet sur Solscan">
-                    ${walletShort}
-                </a>
+            // 1. Cellule Wallet
+            const cellWallet = row.insertCell();
+            cellWallet.innerHTML = `
+                <div class="address-container">
+                    <a href="https://solscan.io/account/${activity.wallet_address}" target="_blank" rel="noopener noreferrer" title="${activity.wallet_address}">
+                        ${activity.wallet_address.substring(0, 4)}...${activity.wallet_address.substring(activity.wallet_address.length - 4)}
+                    </a>
+                    <button class="copy-btn-small" onclick="copyToClipboard('${activity.wallet_address}', 'Adresse du wallet copiée')">📋</button>
+                </div>
             `;
-            
-            clone.querySelector('.activity-details').textContent = details;
-            clone.querySelector('.activity-time').textContent = formatTimeAgo(activity.timestamp);
 
-            // Liens pour les transactions (token)
-            if (activity.solscan_url) {
-                linksEl.innerHTML = `
-                    <a href="${activity.solscan_url}" target="_blank" rel="noopener noreferrer">TX Solscan</a>
+            // 2. Cellule Token
+            const cellToken = row.insertCell();
+            cellToken.textContent = activity.token_symbol || 'UNKNOWN';
+
+            // 3. Cellule Adresse du Token
+            const cellTokenAddress = row.insertCell();
+            cellTokenAddress.innerHTML = `
+                <div class="address-container">
+                    <span>${activity.token_mint.substring(0, 4)}...${activity.token_mint.substring(activity.token_mint.length - 4)}</span>
+                    <button class="copy-btn-small" onclick="copyToClipboard('${activity.token_mint}', 'Adresse du token copiée')">📋</button>
+                </div>
+                <div class="link-group">
+                    <a href="${activity.solscan_url}" target="_blank" rel="noopener noreferrer" title="Solscan">S</a>
+                    <a href="${activity.dexscreener_url}" target="_blank" rel="noopener noreferrer" title="DexScreener">D</a>
+                    <a href="${activity.pumpfun_url}" target="_blank" rel="noopener noreferrer" title="Pump.fun">P</a>
+                    <a href="${activity.gmgn_url}" target="_blank" rel="noopener noreferrer" title="gmgn.ai">G</a>
+                </div>
+            `;
+
+            // 4. Cellule ATA
+            const cellAta = row.insertCell();
+            if (activity.ata_pubkey) {
+                cellAta.innerHTML = `
+                    <div class="address-container">
+                        <a href="https://solscan.io/account/${activity.ata_pubkey}" target="_blank" rel="noopener noreferrer" title="${activity.ata_pubkey}">
+                            ${activity.ata_pubkey.substring(0, 4)}...${activity.ata_pubkey.substring(activity.ata_pubkey.length - 4)}
+                        </a>
+                        <button class="copy-btn-small" onclick="copyToClipboard('${activity.ata_pubkey}', 'Adresse ATA copiée')">📋</button>
+                    </div>
                 `;
-                
-                if (activity.dexscreener_url) {
-                    linksEl.innerHTML += ` | <a href="${activity.dexscreener_url}" target="_blank" rel="noopener noreferrer">DexScreener</a>`;
-                }
-                
-                if (activity.pumpfun_url) {
-                    linksEl.innerHTML += ` | <a href="${activity.pumpfun_url}" target="_blank" rel="noopener noreferrer">Pump.fun</a>`;
-                }
+            } else {
+                cellAta.textContent = 'N/A';
             }
 
-            container.appendChild(clone);
+            // 5. Cellule Type
+            const cellType = row.insertCell();
+            const typeClass = activity.transaction_type === 'buy' ? 'type-buy' : activity.transaction_type === 'sell' ? 'type-sell' : 'type-other';
+            cellType.innerHTML = `<span class="${typeClass}">${activity.transaction_type}</span> (${formatTimeAgo(activity.timestamp)})`;
+
+            // 6. Cellule Montant
+            const cellAmount = row.insertCell();
+            cellAmount.innerHTML = `
+                <div class="amount-sol">${formatNumber(activity.sol_amount)} SOL</div>
+                <div class="amount-usd">$${formatNumber(activity.usd_amount, 2)}</div>
+            `;
+
+            // 7. Cellule Actions
+            const cellActions = row.insertCell();
+            cellActions.innerHTML = `
+                <div class="action-buttons">
+                    <button class="btn btn-sm btn-buy" onclick="buyToken('${activity.token_mint}')">Acheter</button>
+                    <button class="btn btn-sm btn-sell" onclick="sellToken('${activity.token_mint}')">Vendre</button>
+                </div>
+            `;
         });
 
     } catch (error) {
-        console.error('Erreur dans updateActivity:', error);
-        setContainerState(container, 'error', error.message);
+        console.error('Erreur dans renderActivityTable:', error);
+        loadingIndicator.innerHTML = `<div class="error-message">Erreur: ${error.message}</div>`;
+        loadingIndicator.style.display = 'block';
     }
+}
+
+function copyToClipboard(text, message) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        showMessage(message, 'success', 2000);
+    }).catch(err => {
+        console.error('Failed to copy: ', err);
+        showMessage('Erreur de copie', 'error');
+    });
+}
+
+function buyToken(mint) {
+    const jupiterUrl = `https://jup.ag/swap/SOL-${mint}`;
+    window.open(jupiterUrl, '_blank', 'noopener,noreferrer');
+}
+
+function sellToken(mint) {
+    const jupiterUrl = `https://jup.ag/swap/${mint}-SOL`;
+    window.open(jupiterUrl, '_blank', 'noopener,noreferrer');
 }
 
 // Mise à jour des tokens populaires
@@ -654,9 +679,14 @@ async function refreshActivity() {
     
     button.innerHTML = '<div class="spinner"></div>';
     button.disabled = true;
+
+    const tableBody = document.getElementById('activity-table-body');
+    const loadingIndicator = document.getElementById('activity-list-loading');
+    if (loadingIndicator) loadingIndicator.style.display = 'block';
+    if (tableBody) tableBody.innerHTML = '';
     
     try {
-        await loadDashboardData();
+        await loadDashboardData(); // This will call renderActivityTable
         showMessage('Activité mise à jour', 'success', 2000);
     } catch (error) {
         showMessage('Erreur lors de la mise à jour', 'error');

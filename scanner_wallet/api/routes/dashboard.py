@@ -437,323 +437,348 @@ def debug_dashboard_data():
         'note': 'Cette URL devrait être /dashboard/data avec un slash'
     })
 
-@dashboard_bp.route('/data')
-async def get_dashboard_data():
+async def async_get_dashboard_data():
     """Données principales pour le dashboard - VERSION MULTI-WALLETS AMÉLIORÉE"""
-    try:
-        # Vérifier le cache
-        cache_key = "dashboard_main_data"
-        cached_data = dashboard_cache.get(cache_key)
-        if cached_data:
-            return jsonify(create_success_response("Dashboard data retrieved from cache", cached_data))
+    # Vérifier le cache
+    cache_key = "dashboard_main_data"
+    cached_data = dashboard_cache.get(cache_key)
+    if cached_data:
+        return create_success_response("Dashboard data retrieved from cache", cached_data)
 
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            current_time = int(time.time())
-            
-            # === STATISTIQUES GÉNÉRALES MULTI-WALLETS ===
-            
-            # Comptes de tokens actifs
-            cursor.execute("SELECT COUNT(*) FROM token_accounts WHERE is_active = 1")
-            total_token_accounts = cursor.fetchone()[0] or 0
-            
-            # Tokens uniques découverts
-            cursor.execute("""
-                SELECT COUNT(DISTINCT token_mint) 
-                 FROM token_discoveries
-            """)
-            total_unique_tokens = cursor.fetchone()[0] or 0
-            
-            # Balance changes dernière heure
-            cursor.execute("""
-                SELECT COUNT(*) FROM transactions 
-                WHERE is_token_transaction = 1 
-                AND block_time >= ?
-            """, (current_time - 3600,))
-            balance_changes_1h = cursor.fetchone()[0] or 0
-            
-            # Grosses transactions 24h
-            cursor.execute("""
-                SELECT COUNT(*) FROM transactions 
-                WHERE is_large_token_amount = 1 
-                AND block_time >= ?
-            """, (current_time - 86400,))
-            large_transactions_24h = cursor.fetchone()[0] or 0
-            
-            # Dernier scan
-            cursor.execute("SELECT MAX(completed_at) FROM scan_history")
-            last_scan_result = cursor.fetchone()
-            last_scan_time = last_scan_result[0] if last_scan_result[0] else 0
-            
-            # Total wallets monitorés
-            cursor.execute("SELECT COUNT(DISTINCT wallet_address) FROM wallet_priorities")
-            total_wallets = cursor.fetchone()[0] or 0
-            
-            # === TOKENS LES PLUS ACTIFS (24H) ===
-            top_tokens_query = load_query('get_top_active_tokens.sql')
-            if not top_tokens_query:
-                # Gérer le cas où la requête ne peut être chargée
-                logger.error("Impossible de charger la requête get_top_active_tokens.sql")
-                top_tokens_raw = []
-            else:
-                cursor.execute(top_tokens_query, (current_time - 86400,))
-                top_tokens_raw = cursor.fetchall()
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        current_time = int(time.time())
+        
+        # === STATISTIQUES GÉNÉRALES MULTI-WALLETS ===
+        
+        # Comptes de tokens actifs
+        cursor.execute("SELECT COUNT(*) FROM token_accounts WHERE is_active = 1")
+        total_token_accounts = cursor.fetchone()[0] or 0
+        
+        # Tokens uniques découverts
+        cursor.execute("""
+            SELECT COUNT(DISTINCT token_mint) 
+             FROM token_discoveries
+        """)
+        total_unique_tokens = cursor.fetchone()[0] or 0
+        
+        # Balance changes dernière heure
+        cursor.execute("""
+            SELECT COUNT(*) FROM transactions 
+            WHERE is_token_transaction = 1 
+            AND block_time >= ?
+        """, (current_time - 3600,))
+        balance_changes_1h = cursor.fetchone()[0] or 0
+        
+        # Grosses transactions 24h
+        cursor.execute("""
+            SELECT COUNT(*) FROM transactions 
+            WHERE is_large_token_amount = 1 
+            AND block_time >= ?
+        """, (current_time - 86400,))
+        large_transactions_24h = cursor.fetchone()[0] or 0
+        
+        # Dernier scan
+        cursor.execute("SELECT MAX(completed_at) FROM scan_history")
+        last_scan_result = cursor.fetchone()
+        last_scan_time = last_scan_result[0] if last_scan_result[0] else 0
+        
+        # Total wallets monitorés
+        cursor.execute("SELECT COUNT(DISTINCT wallet_address) FROM wallet_priorities")
+        total_wallets = cursor.fetchone()[0] or 0
+        
+        # === TOKENS LES PLUS ACTIFS (24H) ===
+        top_tokens_query = load_query('get_top_active_tokens.sql')
+        if not top_tokens_query:
+            # Gérer le cas où la requête ne peut être chargée
+            logger.error("Impossible de charger la requête get_top_active_tokens.sql")
+            top_tokens_raw = []
+        else:
+            cursor.execute(top_tokens_query, (current_time - 86400,))
+            top_tokens_raw = cursor.fetchall()
 
-            top_tokens = []
+        top_tokens = []
+        
+        for row in top_tokens_raw:
+            symbol = row[0] or 'UNKNOWN'
+            mint = row[1]
+            wallet = row[2]
+            tx_count = row[3]
+            bought = row[4] or 0
+            sold = row[5] or 0
+            avg_price = row[6] or 0
+            last_activity = row[7]
+            sol_volume = row[8] or 0
             
-            for row in top_tokens_raw:
-                symbol = row[0] or 'UNKNOWN'
-                mint = row[1]
-                wallet = row[2]
-                tx_count = row[3]
-                bought = row[4] or 0
-                sold = row[5] or 0
-                avg_price = row[6] or 0
-                last_activity = row[7]
-                sol_volume = row[8] or 0
-                
-                # Calculer un score d'activité
-                activity_score = min(100, (tx_count * 10) + (sol_volume * 5))
-                
-                top_tokens.append({
-                    'symbol': symbol,
-                    'mint': mint,
-                    'mint_short': f"{mint[:6]}.{mint[-6:]}" if mint else "Unknown",
-                    'wallet_address': wallet,
-                    'wallet_short': f"{wallet[:4]}.{wallet[-4:]}" if wallet else "Unknown",
-                    'transaction_count': tx_count,
-                    'total_bought': round(bought, 4),
-                    'total_sold': round(sold, 4),
-                    'net_position': round(bought - sold, 4),
-                    'avg_price': round(avg_price, 6) if avg_price else None,
-                    'sol_volume': round(sol_volume, 4),
-                    'last_activity': last_activity,
-                    'activity_score': round(activity_score, 1),
-                    'hours_ago': round((current_time - last_activity) / 3600, 1) if last_activity else 999
-                })
+            # Calculer un score d'activité
+            activity_score = min(100, (tx_count * 10) + (sol_volume * 5))
+            
+            top_tokens.append({
+                'symbol': symbol,
+                'mint': mint,
+                'mint_short': f"{mint[:6]}.{mint[-6:]}" if mint else "Unknown",
+                'wallet_address': wallet,
+                'wallet_short': f"{wallet[:4]}.{wallet[-4:]}" if wallet else "Unknown",
+                'transaction_count': tx_count,
+                'total_bought': round(bought, 4),
+                'total_sold': round(sold, 4),
+                'net_position': round(bought - sold, 4),
+                'avg_price': round(avg_price, 6) if avg_price else None,
+                'sol_volume': round(sol_volume, 4),
+                'last_activity': last_activity,
+                'activity_score': round(activity_score, 1),
+                'hours_ago': round((current_time - last_activity) / 3600, 1) if last_activity else 999
+            })
 
-            # === NOUVEAUX TOKENS RÉCENTS (GEMS) ===
-            new_gems = []
-            recent_discoveries = [t for t in top_tokens if t['hours_ago'] < 2]  # Moins de 2h
-            for token in recent_discoveries[:5]:
-                if token['transaction_count'] >= 2:  # Au moins 2 transactions
-                    new_gems.append({
-                        **token,
-                        'discovery_type': 'recent_activity',
-                        'confidence': 'high' if token['transaction_count'] >= 5 else 'medium'
-                    })
-
-            # === ALERTES VOLUME ÉLEVÉ ===
-            volume_alerts = []
-            high_volume_tokens = [t for t in top_tokens if t['sol_volume'] > 1.0]  # Plus de 1 SOL
-            for token in high_volume_tokens[:5]:
-                volume_alerts.append({
+        # === NOUVEAUX TOKENS RÉCENTS (GEMS) ===
+        new_gems = []
+        recent_discoveries = [t for t in top_tokens if t['hours_ago'] < 2]  # Moins de 2h
+        for token in recent_discoveries[:5]:
+            if token['transaction_count'] >= 2:  # Au moins 2 transactions
+                new_gems.append({
                     **token,
-                    'alert_type': 'high_volume',
-                    'alert_level': 'critical' if token['sol_volume'] > 10 else 'warning'
+                    'discovery_type': 'recent_activity',
+                    'confidence': 'high' if token['transaction_count'] >= 5 else 'medium'
                 })
 
-            # === STATISTIQUES DES WALLETS ===
-            cursor.execute("""
-                SELECT 
-                    COUNT(*) as total_wallets,
-                    COUNT(CASE WHEN priority_score >= 4.0 THEN 1 END) as high_priority,
-                    COUNT(CASE WHEN priority_score >= 2.0 AND priority_score < 4.0 THEN 1 END) as medium_priority,
-                    COUNT(CASE WHEN priority_score < 2.0 THEN 1 END) as low_priority,
-                    AVG(priority_score) as avg_priority,
-                    COUNT(CASE WHEN (? - last_scan_time) <= 300 THEN 1 END) as recently_scanned
-                FROM wallet_priorities
-            """, (current_time,))
+        # === ALERTES VOLUME ÉLEVÉ ===
+        volume_alerts = []
+        high_volume_tokens = [t for t in top_tokens if t['sol_volume'] > 1.0]  # Plus de 1 SOL
+        for token in high_volume_tokens[:5]:
+            volume_alerts.append({
+                **token,
+                'alert_type': 'high_volume',
+                'alert_level': 'critical' if token['sol_volume'] > 10 else 'warning'
+            })
 
-            wallet_stats = cursor.fetchone()
-            wallet_metrics = {
-                'total_wallets': wallet_stats[0] or 0,
-                'high_priority': wallet_stats[1] or 0,
-                'medium_priority': wallet_stats[2] or 0,
-                'low_priority': wallet_stats[3] or 0,
-                'avg_priority': round(wallet_stats[4], 2) if wallet_stats[4] else 0,
-                'recently_scanned_5min': wallet_stats[5] or 0
-            }
+        # === STATISTIQUES DES WALLETS ===
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_wallets,
+                COUNT(CASE WHEN priority_score >= 4.0 THEN 1 END) as high_priority,
+                COUNT(CASE WHEN priority_score >= 2.0 AND priority_score < 4.0 THEN 1 END) as medium_priority,
+                COUNT(CASE WHEN priority_score < 2.0 THEN 1 END) as low_priority,
+                AVG(priority_score) as avg_priority,
+                COUNT(CASE WHEN (? - last_scan_time) <= 300 THEN 1 END) as recently_scanned
+            FROM wallet_priorities
+        """, (current_time,))
 
-            # === MÉTRIQUES DE PERFORMANCE ===
-            cursor.execute("""
-                SELECT 
-                    COUNT(*) as total_scans,
-                    AVG(scan_duration) as avg_duration,
-                    SUM(new_accounts) as total_discoveries,
-                    AVG(efficiency_score) as avg_efficiency
-                FROM scan_history 
-                WHERE completed_at >= ?
-            """, (current_time - 86400,))  # Dernières 24h
+        wallet_stats = cursor.fetchone()
+        wallet_metrics = {
+            'total_wallets': wallet_stats[0] or 0,
+            'high_priority': wallet_stats[1] or 0,
+            'medium_priority': wallet_stats[2] or 0,
+            'low_priority': wallet_stats[3] or 0,
+            'avg_priority': round(wallet_stats[4], 2) if wallet_stats[4] else 0,
+            'recently_scanned_5min': wallet_stats[5] or 0
+        }
 
-            perf_stats = cursor.fetchone()
-            performance_metrics = {
-                'scans_24h': perf_stats[0] or 0,
-                'avg_scan_duration': round(perf_stats[1], 2) if perf_stats[1] else 0,
-                'discoveries_24h': perf_stats[2] or 0,
-                'avg_efficiency': round(perf_stats[3], 1) if perf_stats[3] else 0,
-                'scans_per_hour': round((perf_stats[0] or 0) / 24, 1)
-            }
+        # === MÉTRIQUES DE PERFORMANCE ===
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_scans,
+                AVG(scan_duration) as avg_duration,
+                SUM(new_accounts) as total_discoveries,
+                AVG(efficiency_score) as avg_efficiency
+            FROM scan_history 
+            WHERE completed_at >= ?
+        """, (current_time - 86400,))  # Dernières 24h
 
-            # === VUE D'ENSEMBLE DES WALLETS ===
-            cursor.execute("""
-                SELECT 
-                    wp.wallet_address, wp.priority_score, wp.last_scan_time,
-                    wp.total_scans, wp.activity_score, wp.consecutive_empty_scans,
-                    (? - wp.last_scan_time) as seconds_since_scan,
-                    (SELECT COUNT(*) FROM token_accounts ta WHERE ta.wallet_address = wp.wallet_address AND ta.is_active = 1) as total_accounts,
-                    (SELECT COUNT(*) FROM token_accounts ta WHERE ta.wallet_address = wp.wallet_address AND ta.scan_priority >= 3) as priority_accounts,
-                    (SELECT COUNT(*) FROM transactions t WHERE t.wallet_address = wp.wallet_address AND t.block_time >= ?) as transactions_24h
-                FROM wallet_priorities wp
-                ORDER BY wp.last_scan_time DESC, wp.priority_score DESC
-            """, (current_time, current_time - 86400))
-            
-            wallets_data = cursor.fetchall()
-            wallets_overview = []
-            wallet_addresses = []
-            for row in wallets_data:
-                wallet_address = row[0]
-                wallet_addresses.append(wallet_address)
-                wallets_overview.append({
-                    'wallet_address': wallet_address,
-                    'wallet_short': f"{wallet_address[:8]}.{wallet_address[-8:]}",
-                    'solscan_url': f"https://solscan.io/account/{wallet_address}",
-                    'priority_score': round(row[1], 2),
-                    'last_scan_time': row[2],
-                    'total_scans': row[3],
-                    'activity_score': round(row[4], 1),
-                    'consecutive_empty_scans': row[5],
-                    'seconds_since_scan': row[6],
-                    'total_token_accounts': row[7] or 0,
-                    'priority_accounts': row[8] or 0,
-                    'transactions_24h': row[9] or 0
-                })
+        perf_stats = cursor.fetchone()
+        performance_metrics = {
+            'scans_24h': perf_stats[0] or 0,
+            'avg_scan_duration': round(perf_stats[1], 2) if perf_stats[1] else 0,
+            'discoveries_24h': perf_stats[2] or 0,
+            'avg_efficiency': round(perf_stats[3], 1) if perf_stats[3] else 0,
+            'scans_per_hour': round((perf_stats[0] or 0) / 24, 1)
+        }
 
-            # Fetch balances and prices
-            from rpc.client import get_default_rpc_client
-            from utils.constants import SOLANA_NATIVE_MINT
-            rpc_client = get_default_rpc_client()
-            
-            # Get SOL price
-            sol_price_data = await get_dexscreener_data_for_mints([SOLANA_NATIVE_MINT])
-            sol_price_usd = sol_price_data.get(SOLANA_NATIVE_MINT, {}).get('price_usd', 0)
-            
-            # Fetch USD to EUR rate dynamically
-            usd_to_eur_rate = await get_usd_to_eur_rate()
-            sol_price_eur = sol_price_usd * usd_to_eur_rate
-            
+        # === VUE D'ENSEMBLE DES WALLETS ===
+        cursor.execute("""
+            SELECT 
+                wp.wallet_address, wp.priority_score, wp.last_scan_time,
+                wp.total_scans, wp.activity_score, wp.consecutive_empty_scans,
+                (? - wp.last_scan_time) as seconds_since_scan,
+                (SELECT COUNT(*) FROM token_accounts ta WHERE ta.wallet_address = wp.wallet_address AND ta.is_active = 1) as total_accounts,
+                (SELECT COUNT(*) FROM token_accounts ta WHERE ta.wallet_address = wp.wallet_address AND ta.scan_priority >= 3) as priority_accounts,
+                (SELECT COUNT(*) FROM transactions t WHERE t.wallet_address = wp.wallet_address AND t.block_time >= ?) as transactions_24h
+            FROM wallet_priorities wp
+            ORDER BY wp.last_scan_time DESC, wp.priority_score DESC
+        """, (current_time, current_time - 86400))
+        
+        wallets_data = cursor.fetchall()
+        wallets_overview = []
+        wallet_addresses = []
+        for row in wallets_data:
+            wallet_address = row[0]
+            wallet_addresses.append(wallet_address)
+            wallets_overview.append({
+                'wallet_address': wallet_address,
+                'wallet_short': f"{wallet_address[:8]}.{wallet_address[-8:]}",
+                'solscan_url': f"https://solscan.io/account/{wallet_address}",
+                'priority_score': round(row[1], 2),
+                'last_scan_time': row[2],
+                'total_scans': row[3],
+                'activity_score': round(row[4], 1),
+                'consecutive_empty_scans': row[5],
+                'seconds_since_scan': row[6],
+                'total_token_accounts': row[7] or 0,
+                'priority_accounts': row[8] or 0,
+                'transactions_24h': row[9] or 0
+            })
+
+        # Fetch balances and prices
+        from rpc.client import get_default_rpc_client
+        from utils.constants import SOLANA_NATIVE_MINT
+        rpc_client = get_default_rpc_client()
+        
+        # Get SOL price
+        sol_price_data = await get_dexscreener_data_for_mints([SOLANA_NATIVE_MINT])
+        sol_price_usd = sol_price_data.get(SOLANA_NATIVE_MINT, {}).get('price_usd', 0)
+        
+        # Fetch USD to EUR rate dynamically
+        usd_to_eur_rate = await get_usd_to_eur_rate()
+        sol_price_eur = sol_price_usd * usd_to_eur_rate
+        
 
 
-            balances = {}
-            for addr in wallet_addresses:
-                try:
-                    result = rpc_client.call('getBalance', [addr])
-                    if result and 'result' in result and 'value' in result['result']:
-                        balances[addr] = result['result']['value'] / 1_000_000_000  # Lamports to SOL
-                    else:
-                        balances[addr] = 0
-                except Exception as e:
-                    logger.warning(f"Erreur récupération balance pour {addr}: {e}")
-                    balances[addr] = 0
-
-            # Add balances to wallets_overview
-            for wallet in wallets_overview:
-                sol_balance = balances.get(wallet['wallet_address'], 0)
-                wallet['sol_balance'] = round(sol_balance, 4)
-                wallet['usd_balance'] = round(sol_balance * sol_price_usd, 2)
-                wallet['eur_balance'] = round(sol_balance * sol_price_eur, 2)
-
-            # === ACTIVITÉ RÉCENTE (avec enrichissement) ===
-            cursor.execute("""
-                       SELECT 
-                    'transaction' as type, 
-                    signature, 
-                    wallet_address, 
-                    token_mint, 
-                    token_symbol, 
-                    transaction_type, 
-                    token_amount, 
-                    amount, 
-                    block_time as timestamp 
-                FROM transactions 
-                WHERE is_token_transaction = 1 AND block_time >= ?
-                ORDER BY timestamp DESC
-                LIMIT 50
-            """, (current_time - 86400,))
-            
-            recent_activity_raw = cursor.fetchall()
-            
-            # Enrichissement asynchrone
-            activity_mints = [row[3] for row in recent_activity_raw if row[3]]
-            dexscreener_task = get_dexscreener_data_for_mints(activity_mints)
-            security_task = get_security_scores_for_mints(activity_mints)
-            dexscreener_data, security_data = await asyncio.gather(dexscreener_task, security_task)
-
-            recent_activity = []
-            for row in recent_activity_raw:
-                activity_type = row[0]
-                timestamp = row[8]
-                is_new = (current_time - timestamp) < 300  # 5 minutes threshold
-                token_mint = row[3] if activity_type == 'transaction' else row[1]
-                enriched_data = dexscreener_data.get(token_mint, {})
-                security_info = security_data.get(token_mint, {})
-                
-                if activity_type == 'transaction':
-                    activity_item = {
-                        'type': 'transaction',
-                        'signature': row[1], 'wallet_address': row[2], 'token_mint': token_mint,
-                        'token_symbol': row[4], 'transaction_type': row[5], 'token_amount': row[6],
-                        'sol_amount': row[7], 'timestamp': timestamp
-                    }
+        balances = {}
+        for addr in wallet_addresses:
+            try:
+                result = rpc_client.call('getBalance', [addr])
+                if result and 'result' in result and 'value' in result['result']:
+                    balances[addr] = result['result']['value'] / 1_000_000_000  # Lamports to SOL
                 else:
-                    activity_item = {
-                        'type': 'discovery',
-                        'token_mint': token_mint, 'wallet_address': row[2], 'ata_pubkey': row[3],
-                        'token_symbol': row[4], 'initial_balance': row[6], 'timestamp': timestamp
-                    }
-                
-                activity_item.update({
-                    'is_new': is_new,
-                    'price_usd': enriched_data.get('price_usd'),
-                    'liquidity_usd': enriched_data.get('liquidity_usd'),
-                    'security_score': security_info.get('rug_probability'),
-                    'risk_level': security_info.get('risk_level'),
-                    'solscan_url': f"https://solscan.io/token/{token_mint}",
-                    'dexscreener_url': f"https://dexscreener.com/solana/{token_mint}",
-                    'pumpfun_url': f"https://pump.fun/{token_mint}"
-                })
-                recent_activity.append(activity_item)
+                    balances[addr] = 0
+            except Exception as e:
+                logger.warning(f"Erreur récupération balance pour {addr}: {e}")
+                balances[addr] = 0
 
-            # === RÉSUMÉ FINAL ===
-            dashboard_data = {
-                'timestamp': current_time,
-                'stats': {
-                    'total_token_accounts': total_token_accounts,
-                    'total_unique_tokens': total_unique_tokens,
-                    'balance_changes_1h': balance_changes_1h,
-                    'large_transactions_24h': large_transactions_24h,
-                    'last_scan_time': last_scan_time,
-                    'minutes_since_scan': round((current_time - last_scan_time) / 60, 1) if last_scan_time else 999
-                },
-                'wallet_metrics': wallet_metrics,
-                'performance_metrics': performance_metrics,
-                'top_tokens': top_tokens[:8],
-                'new_gems': new_gems,
-                'volume_alerts': volume_alerts,
-                'wallets_overview': wallets_overview,
-                'recent_activity': recent_activity
-            }
+        # Add balances to wallets_overview
+        for wallet in wallets_overview:
+            sol_balance = balances.get(wallet['wallet_address'], 0)
+            wallet['sol_balance'] = round(sol_balance, 4)
+            wallet['usd_balance'] = round(sol_balance * sol_price_usd, 2)
+            wallet['eur_balance'] = round(sol_balance * sol_price_eur, 2)
 
-            # Mise en cache
-            dashboard_cache[cache_key] = dashboard_data
+        # === ACTIVITÉ RÉCENTE (avec enrichissement) ===
+        cursor.execute("""
+                   SELECT 
+                'transaction' as type, 
+                signature, 
+                wallet_address, 
+                token_mint, 
+                token_symbol, 
+                transaction_type, 
+                token_amount, 
+                amount, 
+                block_time as timestamp 
+            FROM transactions 
+            WHERE is_token_transaction = 1 AND block_time >= ?
+            ORDER BY timestamp DESC
+            LIMIT 50
+        """, (current_time - 86400,))
+        
+        recent_activity_raw = cursor.fetchall()
+        
+        # Enrichissement asynchrone
+        activity_mints = list(set([row[3] for row in recent_activity_raw if row[3]]))
+        wallet_token_pairs = list(set([(row[2], row[3]) for row in recent_activity_raw if row[2] and row[3]]))
+
+        # Fetch ATAs in batch
+        ata_map = {}
+        if wallet_token_pairs:
+            # SQLite doesn't directly support tuple IN clause, so we build a complex WHERE
+            where_clause = " OR ".join(["(wallet_address = ? AND token_mint = ?)" for _ in wallet_token_pairs])
+            params = [item for pair in wallet_token_pairs for item in pair]
+            cursor.execute(f"SELECT wallet_address, token_mint, ata_pubkey FROM token_accounts WHERE {where_clause}", params)
+            for wallet, mint, ata in cursor.fetchall():
+                ata_map[(wallet, mint)] = ata
+
+        dexscreener_task = get_dexscreener_data_for_mints(activity_mints)
+        security_task = get_security_scores_for_mints(activity_mints)
+        dexscreener_data, security_data = await asyncio.gather(dexscreener_task, security_task)
+
+        recent_activity = []
+        for row in recent_activity_raw:
+            activity_type = row[0]
+            timestamp = row[8]
+            is_new = (current_time - timestamp) < 300  # 5 minutes threshold
             
-            return jsonify(create_success_response("Dashboard data retrieved", dashboard_data))
+            wallet_address = row[2]
+            token_mint = row[3]
 
+            enriched_data = dexscreener_data.get(token_mint, {})
+            security_info = security_data.get(token_mint, {})
+            
+            sol_amount = row[7]
+            usd_amount = sol_amount * sol_price_usd if sol_amount is not None and sol_price_usd is not None else 0
+
+            activity_item = {
+                'type': 'transaction',
+                'signature': row[1], 
+                'wallet_address': wallet_address, 
+                'token_mint': token_mint,
+                'token_symbol': row[4], 
+                'transaction_type': row[5], 
+                'token_amount': row[6],
+                'sol_amount': sol_amount, 
+                'usd_amount': usd_amount,
+                'timestamp': timestamp,
+                'ata_pubkey': ata_map.get((wallet_address, token_mint))
+            }
+            
+            activity_item.update({
+                'is_new': is_new,
+                'price_usd': enriched_data.get('price_usd'),
+                'liquidity_usd': enriched_data.get('liquidity_usd'),
+                'security_score': security_info.get('rug_probability'),
+                'risk_level': security_info.get('risk_level'),
+                'solscan_url': f"https://solscan.io/token/{token_mint}",
+                'dexscreener_url': f"https://dexscreener.com/solana/{token_mint}",
+                'pumpfun_url': f"https://pump.fun/{token_mint}",
+                'gmgn_url': f"https://gmgn.ai/sol/{token_mint}"
+            })
+            recent_activity.append(activity_item)
+
+        # === RÉSUMÉ FINAL ===
+        dashboard_data = {
+            'timestamp': current_time,
+            'stats': {
+                'total_token_accounts': total_token_accounts,
+                'total_unique_tokens': total_unique_tokens,
+                'balance_changes_1h': balance_changes_1h,
+                'large_transactions_24h': large_transactions_24h,
+                'last_scan_time': last_scan_time,
+                'minutes_since_scan': round((current_time - last_scan_time) / 60, 1) if last_scan_time else 999
+            },
+            'wallet_metrics': wallet_metrics,
+            'performance_metrics': performance_metrics,
+            'top_tokens': top_tokens[:8],
+            'new_gems': new_gems,
+            'volume_alerts': volume_alerts,
+            'wallets_overview': wallets_overview,
+            'recent_activity': recent_activity
+        }
+
+        # Mise en cache
+        dashboard_cache[cache_key] = dashboard_data
+        
+        return create_success_response("Dashboard data retrieved", dashboard_data)
+
+@dashboard_bp.route('/data')
+def get_dashboard_data():
+    """Wrapper synchrone pour la route Flask"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(async_get_dashboard_data())
+        return jsonify(result)
     except Exception as e:
-        logger.error(f"Erreur dashboard data: {e}")
+        logger.error(f"Erreur lors de l'exécution de la tâche de données du dashboard: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify(create_error_response("Failed to load dashboard data", [str(e)])), 500
+        return jsonify(create_error_response("Échec de l'exécution de la tâche asynchrone", [str(e)])), 500
 
 
 @dashboard_bp.route('/performance-metrics')
