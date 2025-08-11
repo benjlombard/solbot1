@@ -104,6 +104,7 @@ class APITester:
         
         # Dashboard
         self.test_endpoint('GET', '/api/dashboard/', description='Dashboard principal')
+        self.test_endpoint('GET', '/api/dashboard/data', description='Dashboard data')
         
         # Analytics
         self.test_endpoint('GET', '/api/analytics/', description='Analytics info')

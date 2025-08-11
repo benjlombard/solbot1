@@ -145,6 +145,10 @@ class ColoredFormatter(logging.Formatter):
         )
     
     def format(self, record: logging.LogRecord) -> str:
+        # We need to save the original values because we are modifying the record
+        original_levelname = record.levelname
+        original_name = record.name
+
         if self.use_colors:
             # Colorer le nom du niveau
             level_color = self.COLORS.get(record.levelname, '')
@@ -155,45 +159,48 @@ class ColoredFormatter(logging.Formatter):
             if hasattr(record, 'name') and record.name:
                 record.name = f"\033[90m{record.name}{self.RESET}"
         
-            # Gérer l'encodage des emojis sur Windows
-            result = super().format(record)
+        result = super().format(record)
+
+        # Restore the original values
+        record.levelname = original_levelname
+        record.name = original_name
+        
+        if self.use_colors and not self.unicode_support and sys.platform.startswith('win'):
+            # Remplacer les emojis par des équivalents ASCII sur Windows
+            emoji_replacements = {
+                '🚀': '[START]',
+                '✅': '[OK]',
+                '❌': '[ERROR]',
+                '⚠️': '[WARN]',
+                'ℹ️': '[INFO]',
+                '🔍': '[DEBUG]',
+                '🚨': '[CRITICAL]',
+                '📦': '[BATCH]',
+                '🆕': '[NEW]',
+                '💰': '[TX]',
+                '🎯': '[PRIORITY]',
+                '👛': '[WALLET]',
+                '🪙': '[TOKEN]',
+                '🔌': '[RPC]',
+                '💾': '[DB]',
+                '🗄️': '[CACHE]',
+                '⚡': '[FAST]',
+                '🐌': '[SLOW]',
+                '📊': '[STATS]',
+                '🔧': '[CONFIG]',
+                '🔄': '[UPDATE]',
+                '🧠': '[CYCLE]',
+                '📈': '[UP]',
+                '📉': '[DOWN]',
+                '➡️': '[NEUTRAL]',
+                '🔥': '[HOT]',
+                '🔵': '[EMPTY]'
+            }
             
-            if not self.unicode_support and sys.platform.startswith('win'):
-                # Remplacer les emojis par des équivalents ASCII sur Windows
-                emoji_replacements = {
-                    '🚀': '[START]',
-                    '✅': '[OK]',
-                    '❌': '[ERROR]',
-                    '⚠️': '[WARN]',
-                    'ℹ️': '[INFO]',
-                    '🔍': '[DEBUG]',
-                    '🚨': '[CRITICAL]',
-                    '📦': '[BATCH]',
-                    '🆕': '[NEW]',
-                    '💰': '[TX]',
-                    '🎯': '[PRIORITY]',
-                    '👛': '[WALLET]',
-                    '🪙': '[TOKEN]',
-                    '🔌': '[RPC]',
-                    '💾': '[DB]',
-                    '🗄️': '[CACHE]',
-                    '⚡': '[FAST]',
-                    '🐌': '[SLOW]',
-                    '📊': '[STATS]',
-                    '🔧': '[CONFIG]',
-                    '🔄': '[UPDATE]',
-                    '🧠': '[CYCLE]',
-                    '📈': '[UP]',
-                    '📉': '[DOWN]',
-                    '➡️': '[NEUTRAL]',
-                    '🔥': '[HOT]',
-                    '🔵': '[EMPTY]'
-                }
-                
-                for emoji, replacement in emoji_replacements.items():
-                    result = result.replace(emoji, replacement)
-            
-            return result
+            for emoji, replacement in emoji_replacements.items():
+                result = result.replace(emoji, replacement)
+        
+        return result
 
 
 class ContextFormatter(logging.Formatter):

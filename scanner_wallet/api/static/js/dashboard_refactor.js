@@ -282,3 +282,27 @@ document.addEventListener('DOMContentLoaded', ()=>{
   console.log('[DOMContentLoaded] Starting scheduler');
   startScheduler();
 });
+
+
+window.onerror = function (message, source, lineno, colno, error) {
+    console.error(
+        '[Global Error Handler] Uncaught error:',
+        {
+            message,
+            source,
+            lineno,
+            colno,
+            error: error && error.stack ? error.stack : error
+        }
+    );
+};
+
+window.addEventListener('unhandledrejection', function (event) {
+    console.error(
+        '[Global Error Handler] Unhandled promise rejection:',
+        {
+            reason: event.reason,
+            stack: event.reason && event.reason.stack ? event.reason.stack : undefined
+        }
+    );
+});

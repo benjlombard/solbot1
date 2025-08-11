@@ -425,17 +425,6 @@ def debug_wallet_overview():
             'data': None
         }), 500
 
-@dashboard_bp.route('/dashboard-data', methods=['GET', 'POST'])
-def debug_dashboard_data():
-    """Debug de l'URL problématique"""
-    from flask import request
-    return jsonify({
-        'message': 'URL dashboard-data appelée (avec tiret)',
-        'method': request.method,
-        'url': request.url,
-        'redirect_to': '/api/dashboard/data',
-        'note': 'Cette URL devrait être /dashboard/data avec un slash'
-    })
 
 async def async_get_dashboard_data():
     """Données principales pour le dashboard - VERSION MULTI-WALLETS AMÉLIORÉE"""
@@ -766,7 +755,7 @@ async def async_get_dashboard_data():
         
         return create_success_response("Dashboard data retrieved", dashboard_data)
 
-@dashboard_bp.route('/data')
+@dashboard_bp.route('/data', methods=['GET', 'POST'])
 def get_dashboard_data():
     """Wrapper synchrone pour la route Flask"""
     try:
