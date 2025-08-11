@@ -12,13 +12,11 @@
 {% endblock %}
 
 {% block extra_css %}
-<!-- <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/trading.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/search-theme.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/header-fix.css') }}"> -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-clean.css') }}">
+
 <style>
-//* === OVERRIDE ABSOLU - PLUS RIEN NE CHEVAUCHE === */
+
 
 /* Force l'ordre avec !important maximum */
 .header-buttons-container {
@@ -138,16 +136,18 @@
             <div class="section-controls">
                 <!-- NOUVELLE: Barre de recherche -->
                 <div class="search-container">
-                    <span class="search-icon">🔍</span>
-                    <input 
-                        type="text" 
-                        id="activity-search" 
-                        class="search-input" 
-                        placeholder="Rechercher par wallet, token..."
-                        autocomplete="off"
-                    >
-                    <button class="search-clear" type="button" title="Effacer">×</button>
-                </div>
+    <i class="fas fa-search search-icon"></i>
+    <input 
+        type="text" 
+        id="activity-search" 
+        class="search-input" 
+        placeholder="Search by wallet, token..."
+        autocomplete="off"
+    >
+    <button class="search-clear" type="button" title="Clear">
+        <i class="fas fa-times"></i>
+    </button>
+</div>
                 <div id="activity-search-results" class="search-results-info" style="display: none;"></div>
                 
                 <!-- Contrôles existants -->
@@ -157,8 +157,8 @@
                     <span class="countdown" id="countdown-activity"></span>
                 </div>
                 <button onclick="refreshActivity()" class="refresh-btn-modern" title="Refresh">
-                    <span>🔄</span>
-                </button>
+    <i class="fas fa-sync-alt"></i>
+</button>
             </div>
         </header>
         <div class="table-container-full">
@@ -198,7 +198,7 @@
                         type="text" 
                         id="wallets-search" 
                         class="search-input" 
-                        placeholder="Rechercher par adresse..."
+                        placeholder="Search by wallet, token..."
                         autocomplete="off"
                     >
                     <button class="search-clear" type="button" title="Effacer">×</button>
@@ -212,8 +212,8 @@
                     <span class="countdown" id="countdown-wallets"></span>
                 </div>
                 <button onclick="showWalletModal()" class="add-btn-modern">
-                    <span>➕ Add Wallet</span>
-                </button>
+    <i class="fas fa-plus"></i> Add Wallet
+</button>
             </div>
         </header>
         <div class="table-container-full">
@@ -280,8 +280,12 @@
         </td>
         <td data-column="actions">
             <div class="wallet-actions">
-                <button class="wallet-action-btn copy-btn" data-address="">📋</button>
-                <button class="wallet-action-btn view-btn">👁️</button>
+                <button class="wallet-action-btn copy-btn" data-tooltip="Copy" data-address="" title="Copy Address">
+                    <i class="fas fa-copy"></i>
+                </button>
+                <button class="wallet-action-btn view-btn" title="View Details">
+                    <i class="fas fa-eye"></i>
+                </button>
             </div>
         </td>
     </tr>
@@ -406,5 +410,54 @@ if (typeof performance !== 'undefined' && performance.memory) {
         }
     }, 30000);
 }
+
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('.wallet-action-btn.copy-btn').forEach(button => {
+    button.addEventListener('click', function () {
+      const address = this.getAttribute('data-address');
+      if (address) {
+        // Copier l'adresse dans le presse-papiers
+        navigator.clipboard.write(address).then(() => {
+          // Feedback visuel sur le bouton
+          this.classList.add('copied');
+          setTimeout(() => {
+            this.classList.remove('copied');
+          }, 1000);
+
+          // Afficher le toast
+          const toast = document.getElementById('transaction-toast');
+          const toastMessage = toast.querySelector('.toast-message');
+          const toastIcon = toast.querySelector('.toast-icon');
+          
+          toastMessage.textContent = 'Adresse copiée !';
+          toastIcon.innerHTML = '<i class="fas fa-check"></i>';
+          toast.classList.add('show');
+
+          // Cacher le toast après 3 secondes
+          setTimeout(() => {
+            toast.classList.remove('show');
+          }, 3000);
+        }).catch(err => {
+          console.error('Erreur lors de la copie :', err);
+          showMessage('Erreur lors de la copie de l’adresse', 'error');
+        });
+      }
+    });
+  });
+});
+
+// Fermer le toast manuellement
+function closeTransactionToast() {
+  const toast = document.getElementById('transaction-toast');
+  toast.classList.remove('show');
+}
+
+/* Ripple on buttons */
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.wallet-action-btn');
+  if (!btn) return;
+  btn.classList.add('active');
+  setTimeout(() => btn.classList.remove('active'), 400);
+});
 </script>
 {% endblock %}
