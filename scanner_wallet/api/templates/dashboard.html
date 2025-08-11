@@ -13,577 +13,31 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-<!-- Google Fonts pour le design moderne -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-/* Override pour la nouvelle disposition */
-.main-content-layout {
-    display: flex;
-    flex-direction: column;
-    gap: 32px;
-}
-
-.activity-section {
-    background: var(--glass-bg);
-    backdrop-filter: var(--blur-md);
-    border: 1px solid var(--glass-border);
-    border-radius: 24px;
-    overflow: hidden;
-    box-shadow: var(--shadow-lg);
-}
-
-.wallets-section {
-    background: var(--glass-bg);
-    backdrop-filter: var(--blur-md);
-    border: 1px solid var(--glass-border);
-    border-radius: 24px;
-    overflow: hidden;
-    box-shadow: var(--shadow-lg);
-    width: 100%;
-}
-
-/* Wallet Connection Button */
-.wallet-connect-btn {
-    position: fixed;
-    top: 20px;
-    left: 20px;
-    z-index: 1000;
-    background: var(--glass-bg);
-    backdrop-filter: var(--blur-md);
-    border: 1px solid var(--glass-border);
-    border-radius: 12px;
-    padding: 8px 16px;
-    cursor: pointer;
-    transition: var(--transition-fast);
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    font-size: 14px;
-}
-
-.wallet-connect-btn:hover {
-    transform: scale(1.05);
-    box-shadow: var(--shadow-lg);
-    border-color: var(--solana-purple);
-}
-
-.wallet-connect-btn.connected {
-    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
-    color: white;
-    border-color: transparent;
-}
-
-.wallet-icon {
-    transition: var(--transition-fast);
-}
-
-.wallet-connect-btn:hover .wallet-icon {
-    transform: rotate(5deg);
-}
-
-/* Nouvelle section d'activité moderne */
-.activity-container {
-    max-height: 600px;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-}
-
-.activity-container::-webkit-scrollbar {
-    width: 6px;
-}
-
-.activity-container::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.activity-container::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 3px;
-}
-
-.modern-activity-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--glass-border);
-    transition: var(--transition-normal);
-    position: relative;
-    overflow: hidden;
-}
-
-.modern-activity-item::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 4px;
-    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
-    transform: scaleY(0);
-    transition: var(--transition-fast);
-}
-
-.modern-activity-item:hover {
-    background: var(--glass-bg);
-    transform: translateX(4px);
-}
-
-.modern-activity-item:hover::before {
-    transform: scaleY(1);
-}
-
-.modern-activity-item:last-child {
-    border-bottom: none;
-}
-
-.activity-main-content {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    flex: 1;
-    min-width: 0;
-}
-
-.activity-icon-container {
-    position: relative;
-    flex-shrink: 0;
-}
-
-.activity-icon {
-    width: 56px;
-    height: 56px;
-    border-radius: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-    color: white;
-    box-shadow: var(--shadow-lg);
-    position: relative;
-    overflow: hidden;
-}
-
-.activity-icon::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
-    opacity: 0.9;
-}
-
-.activity-icon::after {
-    content: '⚡';
-    position: relative;
-    z-index: 1;
-}
-
-.activity-icon.buy::after { content: '📈'; }
-.activity-icon.sell::after { content: '📉'; }
-.activity-icon.transfer::after { content: '↔️'; }
-.activity-icon.discovery::after { content: '🔍'; }
-
-.activity-type-badge {
-    position: absolute;
-    bottom: -4px;
-    right: -4px;
-    padding: 2px 6px;
-    border-radius: 8px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border: 2px solid var(--bg-primary);
-    color: white;
-}
-
-.activity-type-badge.buy {
-    background: linear-gradient(135deg, #10b981, #059669);
-}
-
-.activity-type-badge.sell {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-}
-
-.activity-type-badge.transfer {
-    background: linear-gradient(135deg, #9333ea, #7c3aed);
-}
-
-.activity-type-badge.discovery {
-    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
-}
-
-.activity-details {
-    flex: 1;
-    min-width: 0;
-}
-
-.activity-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-}
-
-.activity-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin: 0;
-}
-
-.activity-time {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-weight: 500;
-    background: var(--glass-bg);
-    padding: 4px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--glass-border);
-}
-
-.activity-info-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 16px;
-}
-
-.info-item {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.info-label {
-    font-size: 11px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-}
-
-.wallet-address-display {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--glass-bg);
-    padding: 6px 10px;
-    border-radius: 8px;
-    border: 1px solid var(--glass-border);
-    backdrop-filter: var(--blur-sm);
-}
-
-.wallet-address {
-    font-family: 'Monaco', 'Courier New', monospace;
-    font-size: 12px;
-    color: var(--text-primary);
-    font-weight: 600;
-}
-
-.copy-btn-small {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 2px;
-    border-radius: 4px;
-    transition: var(--transition-fast);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.copy-btn-small:hover {
-    color: var(--solana-green);
-    background: var(--bg-tertiary);
-    transform: scale(1.1);
-}
-
-.token-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.token-symbol {
-    font-weight: 700;
-    color: var(--text-primary);
-    background: var(--glass-bg);
-    padding: 4px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--glass-border);
-    font-size: 12px;
-}
-
-.token-address {
-    font-family: 'Monaco', 'Courier New', monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-    background: var(--glass-bg);
-    padding: 2px 6px;
-    border-radius: 4px;
-    border: 1px solid var(--glass-border);
-}
-
-.activity-amount {
-    font-weight: 700;
-    font-size: 14px;
-    color: var(--solana-green);
-    background: var(--glass-bg);
-    padding: 6px 10px;
-    border-radius: 8px;
-    border: 1px solid var(--glass-border);
-    backdrop-filter: var(--blur-sm);
-}
-
-.activity-amount.negative {
-    color: #ef4444;
-}
-
-.activity-actions {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-}
-
-.action-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    border: none;
-    border-radius: 10px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: var(--transition-fast);
-    backdrop-filter: var(--blur-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.buy-btn {
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
-    box-shadow: var(--shadow-md);
-}
-
-.buy-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
-}
-
-.sell-btn {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-    color: white;
-    box-shadow: var(--shadow-md);
-}
-
-.sell-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
-}
-
-.details-btn {
-    background: var(--glass-bg);
-    color: var(--text-secondary);
-    border: 1px solid var(--glass-border);
-}
-
-.details-btn:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    transform: translateY(-1px);
-}
-
-/* Nouveau tableau responsive pour les wallets */
-.wallets-table-container {
-    width: 100%;
-    overflow: hidden;
-}
-
-.wallets-table-wrapper {
-    width: 100%;
-    overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-}
-
-.wallets-table-wrapper::-webkit-scrollbar {
-    height: 6px;
-}
-
-.wallets-table-wrapper::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.wallets-table-wrapper::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 3px;
-}
-
-.wallets-table {
-    width: 100%;
-    min-width: 900px;
-    border-collapse: collapse;
-    background: transparent;
-    font-family: 'Inter', sans-serif;
-}
-
-.wallets-table th,
-.wallets-table td {
-    padding: 16px 20px;
-    text-align: left;
-    border-bottom: 1px solid var(--glass-border);
-    vertical-align: middle;
-}
-
-.wallets-table th {
-    background: var(--glass-bg);
-    color: var(--text-secondary);
-    font-weight: 600;
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    backdrop-filter: var(--blur-sm);
-}
-
-.wallets-table td {
-    color: var(--text-primary);
-    font-size: 14px;
-    transition: var(--transition-fast);
-}
-
-.wallets-table tbody tr {
-    transition: var(--transition-fast);
-    position: relative;
-}
-
-.wallets-table tbody tr::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 4px;
-    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
-    transform: scaleY(0);
-    transition: var(--transition-fast);
-}
-
-.wallets-table tbody tr:hover {
-    background: var(--glass-bg);
-    transform: translateX(4px);
-}
-
-.wallets-table tbody tr:hover::before {
-    transform: scaleY(1);
-}
-
-/* Colonnes spécifiques du tableau wallets */
-.wallets-table th:nth-child(1), /* Wallet */
-.wallets-table td:nth-child(1) {
-    width: 25%;
-    min-width: 200px;
-}
-
-.wallets-table th:nth-child(2), /* Priorité */
-.wallets-table td:nth-child(2) {
-    width: 12%;
-    min-width: 100px;
-    text-align: center;
-}
-
-.wallets-table th:nth-child(3), /* Tokens */
-.wallets-table td:nth-child(3) {
-    width: 10%;
-    min-width: 80px;
-    text-align: center;
-}
-
-.wallets-table th:nth-child(4), /* TX 24h */
-.wallets-table td:nth-child(4) {
-    width: 10%;
-    min-width: 80px;
-    text-align: center;
-}
-
-.wallets-table th:nth-child(5), /* Balance SOL */
-.wallets-table td:nth-child(5) {
-    width: 15%;
-    min-width: 120px;
-    text-align: right;
-}
-
-.wallets-table th:nth-child(6), /* Dernier Scan */
-.wallets-table td:nth-child(6) {
-    width: 18%;
-    min-width: 140px;
-}
-
-.wallets-table th:nth-child(7), /* Actions */
-.wallets-table td:nth-child(7) {
-    width: 10%;
-    min-width: 120px;
-    text-align: center;
-}
-
-/* Styles pour les cellules du tableau wallets */
-.wallet-cell {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.wallet-avatar-small {
-    width: 36px;
-    height: 36px;
-    border-radius: 12px;
-    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-weight: 700;
-    font-size: 14px;
-    flex-shrink: 0;
-}
-
-.wallet-info-small {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
-
+/* === NEW MODERN STYLES === */
+:root {
+    /* Enhanced color palette */
+    --bg-primary: #0a0a0a;
+    --bg-secondary: #111827;
+    --bg-surface: rgba(31, 41, 55, 0.3);
+    --border: #374151;
+    --border-light: #4b5563;
+    --text-primary: #f9fafb;
+    --text-secondary: #d1d5db;
+    --text-muted: #9ca3af;
+    --solana-green: #14f195;
+    --solana-purple: #9945ff;
+}
+
+/* Classes nécessaires pour le rendu JavaScript */
 .wallet-address-small {
     font-family: 'Monaco', 'Courier New', monospace;
     font-size: 13px;
     font-weight: 600;
     color: var(--text-primary);
-}
-
-.wallet-status-small {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: var(--text-muted);
-}
-
-.status-dot-tiny {
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: var(--primary-500);
 }
 
 .priority-badge-small {
@@ -623,470 +77,473 @@
 .scan-time {
     font-size: 12px;
     color: var(--text-muted);
-    background: var(--glass-bg);
-    padding: 4px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--glass-border);
+}
+
+.wallet-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.wallet-avatar-small {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: white;
+}
+
+.wallet-info-small {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.wallet-status-small {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.status-dot-tiny {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--solana-green);
+}
+
+.status-dot-tiny.warning {
+    background: #f59e0b;
+}
+
+.status-dot-tiny.error {
+    background: #ef4444;
+}
+
+.status-text {
+    font-size: 10px;
+    color: var(--text-muted);
 }
 
 .wallet-actions {
     display: flex;
-    gap: 6px;
-    justify-content: center;
+    gap: 4px;
 }
 
 .wallet-action-btn {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-radius: 8px;
-    padding: 6px 8px;
-    cursor: pointer;
+    padding: 4px 6px;
+    border: none;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
     color: var(--text-secondary);
-    font-size: 11px;
-    transition: var(--transition-fast);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s ease;
 }
 
 .wallet-action-btn:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    transform: scale(1.05);
+    background: var(--solana-green);
+    color: black;
 }
 
-.wallet-action-btn.view-btn:hover {
+/* Container for full-width tables */
+.dashboard-section {
+    margin-bottom: 40px;
+    background: var(--bg-surface);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+.section-header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.section-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.section-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.table-container-full {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.table-modern {
+    width: 100%;
+    border-collapse: collapse;
+    background: transparent;
+}
+
+.table-modern th {
+    padding: 16px 24px;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.table-modern td {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    transition: all 0.2s ease;
+}
+
+.table-modern tbody tr {
+    transition: all 0.2s ease;
+}
+
+.table-modern tbody tr:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.refresh-btn-modern {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.refresh-btn-modern:hover {
+    transform: rotate(180deg);
     border-color: var(--solana-green);
     color: var(--solana-green);
 }
 
-.wallet-action-btn.copy-btn:hover {
-    border-color: var(--solana-purple);
-    color: var(--solana-purple);
+.add-btn-modern {
+    background: linear-gradient(135deg, var(--solana-green), var(--solana-purple));
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
 }
 
-/* Controls pour les wallets */
-.wallets-controls {
-    padding: 20px 28px;
-    border-bottom: 1px solid var(--glass-border);
+.add-btn-modern:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(20, 241, 149, 0.3);
+}
+
+.search-input-modern {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px 16px;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    width: 250px;
+}
+
+.loading {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 20px;
-    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    padding: 32px;
+    color: var(--text-muted);
 }
 
-.search-container {
-    flex: 1;
-    min-width: 200px;
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top: 2px solid var(--solana-green);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
 }
 
-.sort-container {
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.address-container {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
 }
 
-.sort-container span {
+.copy-btn-small {
+    padding: 2px 4px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
     color: var(--text-secondary);
-    font-weight: 500;
-    font-size: 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 10px;
+    transition: all 0.2s ease;
 }
 
-/* Responsive pour mobile */
+.copy-btn-small:hover {
+    background: var(--solana-green);
+    color: black;
+}
+
+.link-group {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.link-group a {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+    text-align: center;
+    line-height: 16px;
+    font-size: 10px;
+    text-decoration: none;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+}
+
+.link-group a:hover {
+    background: var(--solana-green);
+    color: black;
+}
+
+.type-buy {
+    color: #10b981;
+    font-weight: 600;
+}
+
+.type-sell {
+    color: #ef4444;
+    font-weight: 600;
+}
+
+.type-other {
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.amount-sol {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.amount-usd {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.action-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+.btn {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-sm {
+    padding: 3px 6px;
+    font-size: 10px;
+}
+
+.btn-buy {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.btn-buy:hover {
+    background: #10b981;
+    color: white;
+}
+
+.btn-sell {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.btn-sell:hover {
+    background: #ef4444;
+    color: white;
+}
+
 @media (max-width: 768px) {
-    .main-content-layout {
-        gap: 20px;
-    }
-    
-    .wallet-connect-btn {
-        top: 10px;
-        left: 10px;
-        padding: 6px 12px;
-        font-size: 12px;
-    }
-    
-    .modern-activity-item {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 16px;
+    .section-header {
         padding: 16px 20px;
-    }
-    
-    .activity-main-content {
-        gap: 16px;
-    }
-    
-    .activity-info-grid {
-        grid-template-columns: 1fr;
-        gap: 12px;
-    }
-    
-    .activity-actions {
-        justify-content: center;
-        flex-wrap: wrap;
-    }
-    
-    .action-btn {
-        flex: 1;
-        min-width: 80px;
-        justify-content: center;
-    }
-    
-    .wallets-controls {
         flex-direction: column;
-        align-items: flex-start;
         gap: 16px;
+        align-items: flex-start;
     }
     
-    .search-container {
+    .section-controls {
         width: 100%;
+        justify-content: space-between;
     }
     
-    /* Tableau responsive pour mobile */
-    .wallets-table {
-        min-width: 700px;
+    .search-input-modern {
+        width: 100%;
+        max-width: 200px;
     }
     
-    .wallets-table th,
-    .wallets-table td {
+    .table-modern th,
+    .table-modern td {
         padding: 12px 16px;
-        font-size: 13px;
-    }
-    
-    .wallets-table th {
-        font-size: 11px;
-    }
-    
-    .wallet-avatar-small {
-        width: 32px;
-        height: 32px;
-        font-size: 12px;
-    }
-    
-    .wallet-address-small {
-        font-size: 12px;
-    }
-    
-    .wallet-action-btn {
-        padding: 4px 6px;
+        font-size: 0.875rem;
     }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<!-- Theme Toggle Button -->
-<button class="theme-toggle" onclick="toggleTheme()" title="Changer de thème">
+<!-- Theme Toggle -->
+<button class="theme-toggle" onclick="toggleTheme()" title="Toggle Theme">
     <span id="theme-icon">🌙</span>
 </button>
 
-<!-- Wallet Connection Button -->
-<button class="wallet-connect-btn" onclick="connectPhantomWallet()" title="Connecter Phantom Wallet">
-    <svg class="wallet-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+<!-- Wallet Connect -->
+<button class="wallet-connect-btn" onclick="connectPhantomWallet()" title="Connect Phantom">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/>
         <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>
     </svg>
-    <span id="wallet-status">Connecter</span>
+    <span id="wallet-status">Connect</span>
 </button>
 
-<main class="dashboard-container fade-in">
-    <!-- Statistiques principales -->
-    <section class="stats-grid" aria-labelledby="stats-title">
-        <h2 id="stats-title" class="sr-only">Statistiques Principales</h2>
-        <article class="stat-card" aria-labelledby="wallets-stat-label">
-            <div class="stat-header">
-                <div class="stat-icon" role="img" aria-label="Wallets">👛</div>
-                <div class="stat-trend trend-up" id="wallets-trend">
-                    <span>↗</span>
-                    <span>+5.2%</span>
-                </div>
-            </div>
-            <div class="stat-value" id="total-wallets">-</div>
-            <div class="stat-label" id="wallets-stat-label">Wallets Surveillés</div>
-            <div class="stat-sublabel" id="wallets-subtitle">Actifs et monitorés</div>
-        </article>
+<!-- Dashboard Container -->
+<div class="dashboard-container">
 
-        <article class="stat-card" aria-labelledby="tokens-stat-label">
-            <div class="stat-header">
-                <div class="stat-icon" role="img" aria-label="Tokens">🪙</div>
-                <div class="stat-trend trend-up" id="tokens-trend">
-                    <span>↗</span>
-                    <span>+12.8%</span>
-                </div>
+    <!-- Section Activité Récente -->
+    <section class="dashboard-section">
+        <header class="section-header">
+            <h2 class="section-title">⚡ Recent Activity</h2>
+            <div class="section-controls">
+                <button onclick="refreshActivity()" class="refresh-btn-modern" title="Refresh">
+                    <span>🔄</span>
+                </button>
             </div>
-            <div class="stat-value" id="active-tokens">-</div>
-            <div class="stat-label" id="tokens-stat-label">Tokens Découverts</div>
-            <div class="stat-sublabel" id="tokens-subtitle">Dernières 24h</div>
-        </article>
-
-        <article class="stat-card" aria-labelledby="activity-stat-label">
-            <div class="stat-header">
-                <div class="stat-icon" role="img" aria-label="Activité">⚡</div>
-                <div class="stat-trend trend-up" id="activity-trend">
-                    <span>↗</span>
-                    <span>+8.3%</span>
-                </div>
-            </div>
-            <div class="stat-value" id="changes-1h">-</div>
-            <div class="stat-label" id="activity-stat-label">Activité (1h)</div>
-            <div class="stat-sublabel" id="activity-subtitle">Changements détectés</div>
-        </article>
-
-        <article class="stat-card" aria-labelledby="scan-stat-label">
-            <div class="stat-header">
-                <div class="stat-icon" role="img" aria-label="Scan">🔍</div>
-                <div class="stat-trend trend-neutral" id="scan-trend">
-                    <span>→</span>
-                    <span>2m 30s</span>
-                </div>
-            </div>
-            <div class="stat-value" id="last-scan">-</div>
-            <div class="stat-label" id="scan-stat-label">Dernier Scan</div>
-            <div class="stat-sublabel" id="scan-subtitle">Temps moyen: 45s</div>
-        </article>
-    </section>
-
-    <!-- Visualisations -->
-    <section class="visualizations-grid">
-        <div class="card" id="portfolio-distribution-card">
-            <header class="card-header">
-                <h2 class="card-title">
-                    <span role="img" aria-label="Cible">📊</span>
-                    Répartition du Portefeuille
-                </h2>
-            </header>
-            <div class="card-body">
-                <canvas id="portfolio-pie-chart"></canvas>
-            </div>
-        </div>
-        <div class="card" id="top-tokens-volume-card">
-             <header class="card-header">
-                <h2 class="card-title">
-                    <span role="img" aria-label="Cible">🔥</span>
-                    Volume des Tokens Actifs
-                </h2>
-            </header>
-            <div class="card-body">
-                <canvas id="top-tokens-bar-chart"></canvas>
-            </div>
-        </div>
-    </section>
-
-    <!-- Nouveau layout principal -->
-    <div class="main-content-layout">
-        <!-- Section Activité Récente -->
-        <section class="activity-section" aria-labelledby="activity-panel-title">
-            <header class="panel-header">
-                <h2 class="panel-title" id="activity-panel-title">
-                    <span role="img" aria-label="Éclair">⚡</span>
-                    Activité Récente
-                </h2>
-                <div class="panel-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="refreshActivity()">
-                        <span role="img" aria-label="Actualiser">🔄</span>
-                        Actualiser
-                    </button>
-                </div>
-            </header>
-            
-            <!-- Nouvelle version moderne de l'activité -->
-            <div class="activity-container">
-                <div class="activity-list" id="activity-list">
-                    <!-- Les éléments seront insérés ici par JavaScript -->
-                </div>
-            </div>
-            
-            <div id="activity-list-loading" class="loading">
-                <div class="spinner"></div>
-                Chargement de l'activité...
-            </div>
-        </section>
-
-        <!-- Section Wallets Surveillés - Maintenant en tableau responsive -->
-        <section class="wallets-section" aria-labelledby="wallets-panel-title">
-            <header class="panel-header">
-                <h2 class="panel-title" id="wallets-panel-title">
-                    <span role="img" aria-label="Cible">🎯</span>
-                    Wallets Surveillés
-                </h2>
-                <div class="panel-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="refreshWallets()">
-                        <span role="img" aria-label="Actualiser">🔄</span>
-                        Actualiser
-                    </button>
-                    <button class="btn btn-primary btn-sm" onclick="showWalletModal()">
-                        <span role="img" aria-label="Ajouter">➕</span>
-                        Ajouter
-                    </button>
-                </div>
-            </header>
-            
-            <!-- Controls for filtering and sorting -->
-            <div class="wallets-controls">
-                <div class="search-container">
-                    <input type="text" id="wallet-search-input" class="form-input" placeholder="Rechercher par adresse...">
-                </div>
-                <div class="sort-container">
-                    <span>Trier par:</span>
-                    <button class="btn btn-sm btn-secondary active" data-sort="last_scan_time">Récent</button>
-                    <button class="btn btn-sm btn-secondary" data-sort="priority_score">Priorité</button>
-                    <button class="btn btn-sm btn-secondary" data-sort="sol_balance">Solde SOL</button>
-                    <button class="btn btn-sm btn-secondary" data-sort="transactions_24h">Activité</button>
-                </div>
-            </div>
-            
-            <!-- Nouveau tableau responsive pour les wallets -->
-            <div class="wallets-table-container">
-                <div class="wallets-table-wrapper">
-                    <table class="wallets-table">
-                        <thead>
-                            <tr>
-                                <th>Wallet</th>
-                                <th>Priorité</th>
-                                <th>Tokens</th>
-                                <th>TX 24h</th>
-                                <th>Balance SOL</th>
-                                <th>Dernier Scan</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="wallets-table-body">
-                            <!-- Les lignes seront insérées ici par JavaScript -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            
-            <div id="wallets-loading" class="loading">
-                <div class="spinner"></div>
-                Chargement des wallets...
-            </div>
-            
-            <!-- Pagination controls -->
-            <div class="pagination-container" id="wallets-pagination">
-                <!-- Pagination buttons will be generated here by JS -->
-            </div>
-        </section>
-
-        <!-- Section des tokens populaires -->
-        <section class="tokens-section" aria-labelledby="tokens-section-title">
-            <header class="card-header">
-                <h2 class="card-title" id="tokens-section-title">
-                    <span role="img" aria-label="Feu">🔥</span>
-                    Tokens Populaires (24h)
-                </h2>
-                <div class="panel-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="refreshTokens()">
-                        <span role="img" aria-label="Actualiser">🔄</span>
-                        Actualiser
-                    </button>
-                    <button class="btn btn-primary btn-sm" onclick="navigateTo('/tokens')">
-                        <span role="img" aria-label="Oeil">👁️</span>
-                        Voir Tous
-                    </button>
-                </div>
-            </header>
-            <div class="tokens-grid" id="tokens-grid">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    Chargement des tokens...
-                </div>
-            </div>
-        </section>
-    </div>
-</main>
-
-<!-- Modal pour les détails -->
-<div class="modal" id="details-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" style="display: none;">
-    <div class="modal-content">
-        <header class="modal-header">
-            <h3 class="modal-title" id="modal-title">Détails</h3>
-            <button class="modal-close" onclick="closeModal()" aria-label="Fermer la modale">&times;</button>
         </header>
-        <div class="modal-body" id="modal-body">
-            <!-- Contenu dynamique -->
+        <div class="table-container-full">
+            <table class="table-modern">
+                <thead>
+                    <tr>
+                        <th>Wallet</th>
+                        <th>Token</th>
+                        <th>Token Address</th>
+                        <th>ATA</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="activity-table-body">
+                    <tr>
+                        <td colspan="7" class="loading">
+                            <div class="spinner"></div>
+                            Loading recent activity...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
+        <!-- Loading indicateur caché pour compatibilité -->
+        <div id="activity-list-loading" style="display: none;"></div>
+    </section>
+
+    <!-- Section Wallets Surveillés -->
+    <section class="dashboard-section">
+        <header class="section-header">
+            <h2 class="section-title">🎯 Monitored Wallets</h2>
+            <div class="section-controls">
+                <input type="search" id="wallet-search-input" class="search-input-modern" placeholder="Search by address...">
+                <button onclick="showWalletModal()" class="add-btn-modern">
+                    <span>➕ Add Wallet</span>
+                </button>
+            </div>
+        </header>
+        <div class="table-container-full">
+            <table class="table-modern">
+                <thead>
+                    <tr>
+                        <th>Wallet</th>
+                        <th>Priority</th>
+                        <th>Tokens</th>
+                        <th>24h TX</th>
+                        <th>Balance SOL</th>
+                        <th>Last Scan</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="wallets-table-body">
+                    <tr>
+                        <td colspan="7" class="loading">
+                            <div class="spinner"></div>
+                            Loading wallets...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="wallets-pagination" style="padding: 20px; text-align: center;"></div>
+        <!-- Loading indicateur caché pour compatibilité -->
+        <div id="wallets-loading" style="display: none;"></div>
+    </section>
+
+</div>
+
+<!-- Modal -->
+<div class="modal" id="details-modal" style="display: none;">
+    <div class="modal-content">
+        <h3 id="modal-title">Details</h3>
+        <button onclick="closeModal()">&times;</button>
+        <div id="modal-body"></div>
     </div>
 </div>
 
-<!-- Template pour les éléments d'activité -->
-<template id="activity-item-template">
-    <div class="modern-activity-item fade-in-up">
-        <div class="activity-main-content">
-            <div class="activity-icon-container">
-                <div class="activity-icon"></div>
-                <div class="activity-type-badge"></div>
-            </div>
-            
-            <div class="activity-details">
-                <div class="activity-header">
-                    <h4 class="activity-title"></h4>
-                    <div class="activity-time"></div>
-                </div>
-                
-                <div class="activity-info-grid">
-                    <div class="info-item">
-                        <span class="info-label">Wallet</span>
-                        <div class="wallet-address-display">
-                            <span class="wallet-address"></span>
-                            <button class="copy-btn-small" onclick="copyToClipboard(this)">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="info-item">
-                        <span class="info-label">Token</span>
-                        <div class="token-info">
-                            <span class="token-symbol"></span>
-                            <span class="token-address"></span>
-                        </div>
-                    </div>
-                    
-                    <div class="info-item">
-                        <span class="info-label">Montant</span>
-                        <span class="activity-amount"></span>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="activity-actions">
-            <button class="action-btn buy-btn" onclick="openPhantomBuy(this)" title="Acheter sur Phantom">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 5v14l7-7-7-7z"/>
-                    <path d="M5 12h14"/>
-                </svg>
-                Buy
-            </button>
-            <button class="action-btn sell-btn" onclick="openPhantomSell(this)" title="Vendre sur Phantom">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 19V5l-7 7 7 7z"/>
-                    <path d="M19 12H5"/>
-                </svg>
-                Sell
-            </button>
-            <button class="action-btn details-btn" onclick="showActivityDetails(this)" title="Voir les détails">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="1"/>
-                    <circle cx="19" cy="12" r="1"/>
-                    <circle cx="5" cy="12" r="1"/>
-                </svg>
-            </button>
-        </div>
-    </div>
-</template>
-
-<!-- Template pour les lignes du tableau wallets -->
+<!-- Templates corrigés -->
 <template id="wallet-row-template">
-    <tr class="wallet-row fade-in-up">
-        <!-- Colonne 1: Wallet -->
-        <td>
+    <tr>
+        <td data-column="wallet">
             <div class="wallet-cell">
                 <div class="wallet-avatar-small"></div>
                 <div class="wallet-info-small">
@@ -1098,120 +555,39 @@
                 </div>
             </div>
         </td>
-        <!-- Colonne 2: Priorité -->
-        <td>
-            <div class="priority-badge-small"></div>
+        <td data-column="priority">
+            <span class="priority-badge-small"></span>
         </td>
-        <!-- Colonne 3: Tokens -->
-        <td class="tokens-count">-</td>
-        <!-- Colonne 4: TX 24h -->
-        <td class="tx-count">-</td>
-        <!-- Colonne 5: Balance SOL -->
-        <td>
-            <div class="balance-amount">- SOL</div>
+        <td data-column="tokens">-</td>
+        <td data-column="tx_24h">-</td>
+        <td data-column="balance">
+            <span class="balance-amount">- SOL</span>
         </td>
-        <!-- Colonne 6: Dernier Scan -->
-        <td>
-            <div class="scan-time">-</div>
+        <td data-column="last_scan">
+            <span class="scan-time">-</span>
         </td>
-        <!-- Colonne 7: Actions -->
-        <td>
+        <td data-column="actions">
             <div class="wallet-actions">
-                <button class="wallet-action-btn view-btn" onclick="viewWalletDetails(this)" title="Voir détails">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                        <circle cx="12" cy="12" r="3"/>
-                    </svg>
-                </button>
-                <button class="wallet-action-btn copy-btn" onclick="copyWalletAddress(this)" title="Copier adresse">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                    </svg>
-                </button>
+                <button class="wallet-action-btn copy-btn" data-address="">📋</button>
+                <button class="wallet-action-btn view-btn">👁️</button>
             </div>
         </td>
     </tr>
 </template>
 
-<!-- Templates pour le contenu dynamique -->
-<template id="wallet-item-template">
-    <div class="wallet-item fade-in-up" role="listitem">
-        <div class="wallet-header">
-            <div class="wallet-address-container">
-                <div class="wallet-avatar"></div>
-                <div class="wallet-info">
-                    <a href="#" class="wallet-address-link" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();">
-                        <span class="wallet-address"></span>
-                    </a>
-                    <div class="wallet-status">
-                        <div class="status-dot-small"></div>
-                        <span></span>
-                    </div>
-                </div>
-                <button class="copy-btn" title="Copy address" onclick="copyAddress(this, event)">
-                    <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                    <svg class="check-icon" style="display:none;" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                </button>
-            </div>
-            <div class="wallet-priority"></div>
+<template id="activity-item-template">
+    <div class="modern-activity-item">
+        <div class="activity-icon-container">
+            <div class="activity-icon"></div>
+            <div class="activity-type-badge"></div>
         </div>
-        <div class="wallet-stats">
-            <div class="wallet-stat">
-                <span class="wallet-stat-value" data-stat="priority_score"></span>
-                <span class="wallet-stat-label">Score</span>
-            </div>
-            <div class="wallet-stat">
-                <span class="wallet-stat-value" data-stat="total_token_accounts"></span>
-                <span class="wallet-stat-label">Tokens</span>
-            </div>
-            <div class="wallet-stat">
-                <span class="wallet-stat-value" data-stat="transactions_24h"></span>
-                <span class="wallet-stat-label">TX 24h</span>
-            </div>
-            <div class="wallet-stat">
-                <span class="wallet-stat-value" data-stat="total_scans"></span>
-                <span class="wallet-stat-label">Scans</span>
-            </div>
-            <div class="wallet-stat">
-                <span class="wallet-stat-value" data-stat="last_scan_time"></span>
-                <span class="wallet-stat-label">Scan</span>
-            </div>
-            <div class="wallet-stat">
-                <span class="wallet-stat-value" data-stat="balance"></span>
-                <!-- <span class="wallet-stat-label">Balance</span> -->
-            </div>
-        </div>
-    </div>
-</template>
-
-<template id="token-card-template">
-    <div class="token-card fade-in-up">
-        <div class="token-header">
-            <div class="token-logo"></div>
-            <div class="token-info">
-                <h3></h3>
-                <div class="token-symbol"></div>
-            </div>
-        </div>
-        <div class="token-metrics">
-            <div class="token-metric">
-                <div class="token-metric-value" data-metric="transaction_count"></div>
-                <div class="token-metric-label">Transactions</div>
-            </div>
-            <div class="token-metric">
-                <div class="token-metric-value" data-metric="sol_volume"></div>
-                <div class="token-metric-label">Volume SOL</div>
-            </div>
-        </div>
-        <div class="token-activity">
-            <div class="token-activity-score">
-                <span>Activité:</span>
-                <div class="activity-bar">
-                    <div class="activity-bar-fill"></div>
-                </div>
-                <span></span>
-            </div>
+        <div class="activity-details">
+            <h4 class="activity-title"></h4>
+            <div class="activity-time"></div>
+            <div class="wallet-address"></div>
+            <div class="token-symbol"></div>
+            <div class="token-address"></div>
+            <div class="activity-amount"></div>
         </div>
     </div>
 </template>
@@ -1219,7 +595,6 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/phantom-integration.js') }}" defer></script>
 {% endblock %}

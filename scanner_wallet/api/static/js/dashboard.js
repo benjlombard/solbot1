@@ -310,9 +310,12 @@ function setContainerState(container, state, message = '') {
 
 
 function renderWalletsList() {
-    const container = document.getElementById('wallets-list');
-    const template = document.getElementById('wallet-item-template');
-    if (!container || !template) return;
+    const container = document.getElementById('wallets-table-body');
+    const template = document.getElementById('wallet-row-template');
+    if (!container || !template) {
+        console.error('Tableau ou template manquant pour renderWalletsList');
+        return;
+    }
 
     // 1. Filtering
     let processedWallets = fullWalletsList.filter(wallet => {
@@ -321,16 +324,14 @@ function renderWalletsList() {
 
     // 2. Sorting
     processedWallets.sort((a, b) => {
-        const valA = a[currentSort.key];
-        const valB = b[currentSort.key];
-        
+        const valA = a[currentSort.key] || 0;
+        const valB = b[currentSort.key] || 0;
         let comparison = 0;
         if (valA > valB) {
             comparison = 1;
         } else if (valA < valB) {
             comparison = -1;
         }
-        
         return currentSort.order === 'desc' ? comparison * -1 : comparison;
     });
 
@@ -344,48 +345,45 @@ function renderWalletsList() {
     container.innerHTML = '';
     if (walletsToDisplay.length === 0) {
         setContainerState(container, 'empty', 'Aucun wallet ne correspond à vos critères.');
-       
     } else {
         walletsToDisplay.forEach(wallet => {
-        const clone = template.content.cloneNode(true);
-        const walletItem = clone.querySelector('.wallet-item');
-        
-        walletItem.onclick = () => showWalletDetails(wallet.wallet_address);
-        walletItem.dataset.address = wallet.wallet_address;
-        
-        clone.querySelector('.wallet-avatar').textContent = wallet.wallet_address ? wallet.wallet_address.substring(0, 2).toUpperCase() : 'WX';
-        
-        const link = clone.querySelector('.wallet-address-link');
-        if (link) {
-            link.href = wallet.solscan_url || '#';
-        }
-        clone.querySelector('.wallet-address').textContent = wallet.wallet_short || 'Unknown';
+            const clone = template.content.cloneNode(true);
 
-        const copyBtn = clone.querySelector('.copy-btn');
-        if(copyBtn) {
+            // Wallet column
+            const walletCell = clone.querySelector('[data-column="wallet"]');
+            walletCell.querySelector('.wallet-address-small').textContent = wallet.wallet_short || 'Unknown';
+            walletCell.querySelector('.wallet-address-small').setAttribute('title', wallet.wallet_address || '');
+            walletCell.querySelector('.status-text').textContent = getWalletStatusText(wallet);
+            walletCell.querySelector('.status-dot-tiny').className = 'status-dot-tiny ' + getWalletStatusClass(wallet);
+            walletCell.querySelector('.wallet-avatar-small').textContent = wallet.wallet_address ? wallet.wallet_address.substring(0, 2).toUpperCase() : 'WX';
+            walletCell.querySelector('.wallet-cell').onclick = () => showWalletDetails(wallet.wallet_address);
+            walletCell.querySelector('.wallet-cell').dataset.address = wallet.wallet_address;
+
+            // Priority column
+            const priorityCell = clone.querySelector('[data-column="priority"] .priority-badge-small');
+            const priorityCategory = getPriorityCategory(wallet.priority_score);
+            priorityCell.textContent = priorityCategory.toUpperCase();
+            priorityCell.className = `priority-badge-small priority-${priorityCategory}-small`;
+
+            // Tokens column
+            clone.querySelector('[data-column="tokens"]').textContent = formatNumber(wallet.total_token_accounts || 0);
+
+            // TX 24h column
+            clone.querySelector('[data-column="tx_24h"]').textContent = formatNumber(wallet.transactions_24h || 0);
+
+            // Balance SOL column
+            clone.querySelector('[data-column="balance"] .balance-amount').textContent = `${formatNumber(wallet.sol_balance || 0)} SOL`;
+
+            // Dernier Scan column
+            clone.querySelector('[data-column="last_scan"] .scan-time').textContent = formatTimeAgo(wallet.last_scan_time) || 'N/A';
+
+            // Actions column
+            const copyBtn = clone.querySelector('[data-column="actions"] .copy-btn');
             copyBtn.dataset.address = wallet.wallet_address;
-        }
-        
-        const statusDot = clone.querySelector('.status-dot-small');
-        statusDot.className = 'status-dot-small ' + getWalletStatusClass(wallet);
-        clone.querySelector('.wallet-status span').textContent = getWalletStatusText(wallet);
+            copyBtn.onclick = (e) => copyAddress(copyBtn, e);
 
-        const priorityEl = clone.querySelector('.wallet-priority');
-        const priorityCategory = getPriorityCategory(wallet.priority_score);
-        priorityEl.className = 'wallet-priority ' + `priority-${priorityCategory}`;
-        priorityEl.textContent = priorityCategory;
-
-        clone.querySelector('[data-stat="priority_score"]').textContent = formatNumber(wallet.priority_score || 0);
-        clone.querySelector('[data-stat="total_token_accounts"]').textContent = formatNumber(wallet.total_token_accounts || 0);
-        clone.querySelector('[data-stat="transactions_24h"]').textContent = formatNumber(wallet.transactions_24h || 0);
-        clone.querySelector('[data-stat="total_scans"]').textContent = formatNumber(wallet.total_scans || 0);
-        clone.querySelector('[data-stat="last_scan_time"]').textContent = formatTimeAgo(wallet.last_scan_time);
-
-        const balance_text = `${formatNumber(wallet.sol_balance)} SOL ($${formatNumber(wallet.usd_balance)} / €${formatNumber(wallet.eur_balance)})`;
-        clone.querySelector('[data-stat="balance"]').textContent = balance_text;
-
-        container.appendChild(clone);
-    });
+            container.appendChild(clone);
+        });
     }
 
     renderPaginationControls(totalPages, processedWallets.length);
