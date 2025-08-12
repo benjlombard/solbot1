@@ -61,7 +61,7 @@
           <span class="auto-refresh-text">Auto 15s</span>
           <span class="countdown" id="countdown-activity"></span>
         </div>
-        <button onclick="refreshActivity()" class="refresh-btn-modern" title="Refresh">
+        <button onclick="window.dashboard.refreshActivity()" class="refresh-btn-modern" title="Refresh">
           <i class="fas fa-sync-alt"></i>
         </button>
       </div>
@@ -176,13 +176,6 @@
 
 <script>
 console.log('🔒 Secure context:', window.isSecureContext);
-
-function refreshActivity() {
-  const refreshBtn = document.querySelector('.refresh-btn-modern');
-  refreshBtn.classList.add('loading');
-  setTimeout(() => refreshBtn.classList.remove('loading'), 2000);
-  window.dashboard.refreshActivity();
-}
 
 function toggleAutoRefresh(type) {
   window.dashboard.toggleAutoRefresh(type);

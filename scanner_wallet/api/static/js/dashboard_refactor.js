@@ -166,6 +166,7 @@
 
       const json = await safeFetch(url, {
         method: 'GET',
+        cache: 'no-cache', // Prevent browser caching
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
