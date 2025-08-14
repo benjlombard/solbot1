@@ -971,10 +971,15 @@ def main():
             time_limit_seconds = time_filter_options[selected_time_filter]
         
         with col2:
+            # Fix: Handle case where max value might be NaN or invalid
+            max_buyers = overview_df['unique_buyers'].max() if len(overview_df) > 0 and overview_df['unique_buyers'].notna().any() else 50
+            max_buyers = int(max_buyers) if not pd.isna(max_buyers) else 50
+            max_buyers = max(max_buyers, 1)  # Ensure minimum value of 1
+            
             min_buyers = st.slider(
                 "Min. Buyer Wallets",
                 min_value=1,
-                max_value=int(overview_df['unique_buyers'].max()),
+                max_value=max_buyers,
                 value=1
             )
 
@@ -1442,7 +1447,7 @@ def main():
 
          # HOT tokens alerts
         display_hot_tokens_alert(filtered_df)
-        
+
         if time_limit_seconds:
             st.subheader(f"🔥 Statistiques - {selected_time_filter}")
             col1, col2, col3, col4 = st.columns(4)
