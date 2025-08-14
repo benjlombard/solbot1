@@ -165,15 +165,18 @@ class SolanaWalletMonitor:
         self.scan_queue: queue.Queue = queue.Queue()
         self.results_queue: queue.Queue = queue.Queue()
         
+        #ancienne config
         # Initialize wallets by combining wallets from the DB and the config file
-        db_wallets = list(self.priority_manager.get_wallet_priorities().keys())
-        config_wallets = wallet_addresses if wallet_addresses else []
+        # db_wallets = list(self.priority_manager.get_wallet_priorities().keys())
+        # config_wallets = wallet_addresses if wallet_addresses else []
+        # unique_wallets = set(db_wallets + config_wallets)
         
-        # Create a single, unique list of all known wallets
-        unique_wallets = set(db_wallets + config_wallets)
-        
+        #nouvelle config : 
+        unique_wallets = set(wallet_addresses) if wallet_addresses else set()
         if unique_wallets:
             self.add_wallets(list(unique_wallets))
+        
+        self.sync_active_wallets()
         
         # Signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -181,6 +184,39 @@ class SolanaWalletMonitor:
         
         logger.info("🧠 Solana Wallet Monitor initialized")
     
+
+    def sync_active_wallets(self):  # ← AJOUTER ICI
+        """Synchronise les wallets actifs avec la DB"""
+        if not self.wallets or not self.db_manager:
+            return
+            
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # 1. Marquer TOUS les wallets comme inactifs
+                cursor.execute("UPDATE wallet_priorities SET is_active = 0")
+                
+                # 2. Marquer les wallets du .env comme actifs (créer si nécessaire)
+                for wallet in self.wallets:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO wallet_priorities 
+                        (wallet_address, priority_score, is_active, last_scan_time, total_scans, created_at)
+                        VALUES (?, 
+                            COALESCE((SELECT priority_score FROM wallet_priorities WHERE wallet_address = ?), 1.0),
+                            1,
+                            COALESCE((SELECT last_scan_time FROM wallet_priorities WHERE wallet_address = ?), 0),
+                            COALESCE((SELECT total_scans FROM wallet_priorities WHERE wallet_address = ?), 0),
+                            COALESCE((SELECT created_at FROM wallet_priorities WHERE wallet_address = ?), datetime('now'))
+                        )
+                    """, (wallet, wallet, wallet, wallet, wallet))
+                
+                conn.commit()
+                logger.info(f"✅ Synchronized {len(self.wallets)} active wallets with database")
+                
+        except Exception as e:
+            logger.error(f"❌ Error synchronizing active wallets: {e}")
+
     def add_wallets(self, wallet_addresses: List[str]) -> Dict[str, bool]:
         """Add wallets to monitoring"""
         results = {}

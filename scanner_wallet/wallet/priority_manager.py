@@ -118,6 +118,20 @@ class WalletPriorityManager:
         self._initialize_system()
         logger.info("🎯 Wallet priority manager initialized")
     
+    def _is_wallet_active(self, wallet_address: str) -> bool:
+        """Check if wallet is active in database"""
+        if not self.db_manager:
+            return True  # Si pas de DB, considérer comme actif
+        
+        try:
+            with self.db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT is_active FROM wallet_priorities WHERE wallet_address = ?", (wallet_address,))
+                result = cursor.fetchone()
+                return result and result[0] == 1
+        except Exception:
+            return True  # En cas d'erreur, considérer comme actif
+
     def _initialize_system(self):
         """Initialize priority system from database"""
         try:
@@ -135,7 +149,7 @@ class WalletPriorityManager:
             with self.db_manager.get_connection() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
-                cursor.execute("SELECT * FROM wallet_priorities")
+                cursor.execute("SELECT * FROM wallet_priorities WHERE is_active = 1")
                 
                 for row in cursor.fetchall():
                     wallet_priority = WalletPriority(
@@ -387,7 +401,7 @@ class WalletPriorityManager:
         
         return penalty
     
-    def select_next_wallet(self) -> Optional[str]:
+    def select_next_wallet_old_with_priority(self) -> Optional[str]:
         """Select the next wallet to scan based on priority"""
         try:
             # --- Absolute Priority Rule for Overdue Wallets ---
@@ -400,7 +414,14 @@ class WalletPriorityManager:
                     logger.warning("No wallets available in priority manager.")
                     return None
                 
-                for wallet_address, priority in self._wallet_priorities.items():
+                active_priorities = {k: v for k, v in self._wallet_priorities.items() 
+                               if self._is_wallet_active(k)}
+            
+                if not active_priorities:
+                    logger.warning("No active wallets available.")
+                    return None
+
+                for wallet_address, priority in active_priorities.items():
                     if priority.last_scan_time == 0:  # Never scanned
                         # Prioritize by creation time for fairness among new wallets
                         overdue_wallets.append((priority.created_at, wallet_address))
@@ -418,7 +439,7 @@ class WalletPriorityManager:
             with self._lock:
                 # Calculate scores for all wallets
                 all_wallets_scores = []
-                for wallet_address in self._wallet_priorities:
+                for wallet_address in active_priorities:
                     score = self.calculate_priority_score(wallet_address)
                     all_wallets_scores.append(score)
 
@@ -463,6 +484,66 @@ class WalletPriorityManager:
             logger.error(f"❌ Error selecting next wallet: {e}", exc_info=True)
             return None
     
+    def select_next_wallet(self) -> Optional[str]:
+        """Select the next wallet to scan based on priority with fair rotation"""
+        try:
+            now = get_current_timestamp()
+            
+            with self._lock:
+                if not self._wallet_priorities:
+                    logger.warning("No wallets available in priority manager.")
+                    return None
+                
+                active_priorities = {k: v for k, v in self._wallet_priorities.items() 
+                            if self._is_wallet_active(k)}
+            
+                if not active_priorities:
+                    logger.warning("No active wallets available.")
+                    return None
+
+                # Convert to list for consistent ordering
+                active_wallets = list(active_priorities.keys())
+                active_wallets.sort()  # Ensure consistent order
+                
+                # --- ROTATION ÉQUITABLE : Round-Robin avec priorité pour les non-scannés ---
+                
+                # 1. Trouver les wallets jamais scannés (priorité absolue)
+                never_scanned = []
+                for wallet in active_wallets:
+                    if active_priorities[wallet].last_scan_time == 0:
+                        never_scanned.append(wallet)
+                
+                if never_scanned:
+                    # Pour les wallets jamais scannés, prendre le premier par ordre alphabétique
+                    selected = sorted(never_scanned)[0]
+                    logger.info(f"🆕 Selecting never-scanned wallet: {selected}")
+                    return selected
+                
+                # 2. Round-Robin basé sur last_scan_time (le plus ancien d'abord)
+                # Trier par last_scan_time croissant pour avoir une rotation équitable
+                wallets_by_scan_time = sorted(
+                    active_wallets, 
+                    key=lambda w: active_priorities[w].last_scan_time
+                )
+                
+                # Le wallet avec le last_scan_time le plus ancien
+                selected_wallet = wallets_by_scan_time[0]
+                
+                # Log pour debug
+                logger.info(f"🔄 Round-Robin Selection:")
+                for i, wallet in enumerate(wallets_by_scan_time[:3]):  # Show top 3
+                    last_scan = active_priorities[wallet].last_scan_time
+                    age_hours = (now - last_scan) / 3600 if last_scan > 0 else float('inf')
+                    marker = "👉" if wallet == selected_wallet else "  "
+                    logger.info(f"{marker} {wallet[:8]}... | Last scan: {age_hours:.1f}h ago")
+                
+                logger.info(f"✅ Selected wallet: {selected_wallet}")
+                return selected_wallet
+                
+        except Exception as e:
+            logger.error(f"❌ Error selecting next wallet: {e}", exc_info=True)
+            return None
+
     def update_priority(self, wallet_address: str, new_score: float, reason: str = "manual") -> bool:
         """Update wallet priority score"""
         try:
@@ -563,8 +644,9 @@ class WalletPriorityManager:
                     (wallet_address, priority_score, last_scan_time, scan_count_1h, 
                      scan_count_24h, activity_score, volume_score_1h, new_tokens_score_1h,
                      total_scans, avg_scan_duration, last_activity_detected, 
-                     consecutive_empty_scans, priority_history, updated_at, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     consecutive_empty_scans, priority_history, updated_at, created_at, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                        COALESCE((SELECT is_active FROM wallet_priorities WHERE wallet_address = ?), 1))
                 """, (
                     priority.wallet_address,
                     priority.priority_score,
@@ -580,7 +662,8 @@ class WalletPriorityManager:
                     priority.consecutive_empty_scans,
                     json.dumps(priority.priority_history),
                     priority.updated_at,
-                    priority.created_at
+                    priority.created_at,
+                    priority.wallet_address
                 ))
                 
                 conn.commit()

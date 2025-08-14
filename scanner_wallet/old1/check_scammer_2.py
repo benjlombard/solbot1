@@ -518,7 +518,7 @@ if __name__ == "__main__":
     #csv_file = "balance_changes_4xLmxHNV_20250802_202604_full.csv"
     #csv_file = "balance_changes_AK1TDZ8T_20250802_212152_full.csv"
     #csv_file = "balance_changes_EuFC4PtY_20250802_215250_full.csv"
-    csv_file = "balance_changes_35nfat8B_Aotb4fdF_20250803_053456_full.csv"
+    csv_file = "export_balance_change_3S3wPvBnGegy9Zj9LDMaRPn2d2pxakE9YdKPm8UM3WLP_1755110869587.csv"
     print("🚀 Lancement de la détection de scam pour créateur de token...")
     print(f"📁 Fichier: {csv_file}")
     print()

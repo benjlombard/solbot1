@@ -1,0 +1,173 @@
+{
+  "SOL": {
+    "token_info": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL",
+      "name": "Solana",
+      "chain": "solana",
+      "pair_address": null,
+      "dex": "raydium",
+      "price_change_24h": 2.5,
+      "volume_24h": 1000000,
+      "liquidity": 5000000,
+      "price_usd": 150.0,
+      "market_cap": 70000000000
+    },
+    "top_buyers": [
+      [
+        "5GcS4cj397W8jTbXaXxTyZwRAW9NzxpqVPX3xtmNhKtQ",
+        3183.5512836000003
+      ],
+      [
+        "BMnT51N4iSNhWU5PyFFgWwFvN1jgaiiDr9ZHgnkm3iLJ",
+        86.7105177
+      ],
+      [
+        "HvqfcxNGR6HLxsZtfSC5j9DmDrBB7KLphqxwwHFhax3d",
+        78.64300635
+      ],
+      [
+        "6FyfAzQH31SySdJ9AMvpB7gMoWVu2vHWJmdypMgBoRcM",
+        64.414998
+      ],
+      [
+        "5kTMBLVQJjJGuN3M983wDBsbspJ2et92uLmUUkUdD7tg",
+        63.21369
+      ],
+      [
+        "6m43tLNa5f3YUKFT1DmrCzBZaxgXz7aKP668Aq7msaWu",
+        48.36506835
+      ],
+      [
+        "H4xeTG121v5Q1b8xYCVR8XhvtC2Rwp7iFdvY6kYkRKMD",
+        1.0242687
+      ],
+      [
+        "5g6Spfou4gPbyJpJzAhTj31X2jSi5EcLYCnovur51pBh",
+        0.9994984499999999
+      ],
+      [
+        "A4qs8TH2z5fNusePGNnFKT5GhhdMxC17xiv1vhj53iX9",
+        0.7473366
+      ],
+      [
+        "SEw3BTJqwo3Hf49E1gbccMLeNWKWu1QsuxJYbhiMWTU",
+        0.00232965
+      ]
+    ]
+  },
+  "USDC": {
+    "token_info": {
+      "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "symbol": "USDC",
+      "name": "USD Coin",
+      "chain": "solana",
+      "pair_address": null,
+      "dex": "raydium",
+      "price_change_24h": 0.1,
+      "volume_24h": 500000,
+      "liquidity": 2000000,
+      "price_usd": 1.0,
+      "market_cap": 35000000000
+    },
+    "top_buyers": [
+      [
+        "7dRX5YGVg5qnEkZrVhapid6ufWzdMNEYyfSTnhsfdr6p",
+        410.25243900000004
+      ],
+      [
+        "BBqy6gAVMzRH1S7y9XvBNaS3axRovqe2VgNrgwYc3mYM",
+        378.83858505
+      ],
+      [
+        "rvj7Dc3xGh1eVFw9UTRpkxks9cdYyJd4MQk4Bk9zA9b",
+        74.59051545
+      ],
+      [
+        "1aTFUD4BJL3CXAK5NSgDJVR99nVpQrK1BqD5SGSix23",
+        72.3026808
+      ],
+      [
+        "ATM1XinPKKQGds9VFbh3ocguxbnZfbcZyxa6YL757k5r",
+        16.502785499999998
+      ],
+      [
+        "9XLcx4qeRMef4S1uMTsyv5Uv8SAXpo8aE9d97NDxYRvL",
+        9.839497199999999
+      ],
+      [
+        "54XhyKRs55mLEBcCip8VLRCmZpKFZg7k1JbWRbDpLoph",
+        8.610911999999999
+      ],
+      [
+        "2F84N2vvtZi6z798gJTSgT5c7fBALnZzLZ9oZVcHUibU",
+        2.4443058
+      ],
+      [
+        "39zibr9V8nNFpL8ReJFWFWyxn1A4g1PBtMz4ZByduEs8",
+        1.4880216000000002
+      ],
+      [
+        "F2jzJBfWgtCSbS7iNwYfmBVX6FxVdQcL99rCbZ5p9J4F",
+        0.011999099999999999
+      ]
+    ]
+  },
+  "RAY": {
+    "token_info": {
+      "address": "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+      "symbol": "RAY",
+      "name": "Raydium",
+      "chain": "solana",
+      "pair_address": null,
+      "dex": "raydium",
+      "price_change_24h": 5.2,
+      "volume_24h": 300000,
+      "liquidity": 1500000,
+      "price_usd": 3.45,
+      "market_cap": 1500000000
+    },
+    "top_buyers": [
+      [
+        "FeK1YfB1PYWhXk2XmsfrB953P1HCV3MtTDF2KPSTU8XT",
+        219.7992624
+      ],
+      [
+        "MfDuWeqSHEqTFVYZ7LoexgAK9dxk7cy4DFJWjWMGVWa",
+        172.56343410000002
+      ],
+      [
+        "2hSbqFCYBNq8ZVgUN6aaxDaAaVsxxYyroEts5w6rkAab",
+        138.858858
+      ],
+      [
+        "2hSbqFCYBNq8ZVgUN6aaxDaAaVsxxYyroEts5w6rkAab",
+        138.84324585000002
+      ],
+      [
+        "5T8oBn7ZGs1KaVNGMU17L99eXzytPfaTGLLafJo1fYAh",
+        76.57825785
+      ],
+      [
+        "MfDuWeqSHEqTFVYZ7LoexgAK9dxk7cy4DFJWjWMGVWa",
+        71.1292272
+      ],
+      [
+        "ProCXqRcXJjoUd1RNoo28bSizAA6EEqt9wURZYPDc5u",
+        7.2290307
+      ],
+      [
+        "ProCXqRcXJjoUd1RNoo28bSizAA6EEqt9wURZYPDc5u",
+        5.719924799999999
+      ],
+      [
+        "HuTshmtwcQkWBLzgW3m4uwcmik7Lmz4YFpYcTqMJpXiP",
+        2.2540188
+      ],
+      [
+        "Akv8uJTW7kduJPQ9jPkyLfFda73fujeYbPNAU2viE9WH",
+        2.07393315
+      ]
+    ]
+  }
+}
