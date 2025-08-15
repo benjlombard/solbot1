@@ -19,6 +19,10 @@ from dataclasses import dataclass
 import sys
 import signal
 import functools
+from collections import deque, defaultdict
+import threading
+
+
 
 # Configuration
 CONFIG = {
@@ -47,6 +51,115 @@ CONFIG = {
         'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So'   # mSOL
     }
 }
+
+
+@dataclass
+class ApiCallStats:
+    """Statistics for a specific API endpoint"""
+    total_calls: int = 0
+    total_duration: float = 0.0
+    calls_5m: deque = None
+    calls_30m: deque = None
+    calls_1h: deque = None
+    
+    def __post_init__(self):
+        if self.calls_5m is None:
+            self.calls_5m = deque()
+        if self.calls_30m is None:
+            self.calls_30m = deque()
+        if self.calls_1h is None:
+            self.calls_1h = deque()
+
+class ApiStatsTracker:
+    """Track detailed API statistics per endpoint"""
+    
+    def __init__(self):
+        self.stats = defaultdict(lambda: ApiCallStats())
+        self.lock = threading.Lock()
+    
+    def record_call(self, api_name: str, duration: float):
+        """Record an API call with duration"""
+        current_time = time.time()
+        
+        with self.lock:
+            api_stats = self.stats[api_name]
+            
+            # Update totals
+            api_stats.total_calls += 1
+            api_stats.total_duration += duration
+            
+            # Add to time windows
+            call_record = (current_time, duration)
+            api_stats.calls_5m.append(call_record)
+            api_stats.calls_30m.append(call_record)
+            api_stats.calls_1h.append(call_record)
+            
+            # Clean old records
+            self._clean_old_records(api_stats, current_time)
+    
+    def _clean_old_records(self, api_stats: ApiCallStats, current_time: float):
+        """Remove old records from time windows"""
+        # 5 minutes
+        while api_stats.calls_5m and current_time - api_stats.calls_5m[0][0] > 300:
+            api_stats.calls_5m.popleft()
+        
+        # 30 minutes
+        while api_stats.calls_30m and current_time - api_stats.calls_30m[0][0] > 1800:
+            api_stats.calls_30m.popleft()
+        
+        # 1 hour
+        while api_stats.calls_1h and current_time - api_stats.calls_1h[0][0] > 3600:
+            api_stats.calls_1h.popleft()
+    
+    def get_stats(self, api_name: str = None) -> Dict:
+        """Get statistics for specific API or all APIs"""
+        current_time = time.time()
+        
+        with self.lock:
+            if api_name:
+                if api_name not in self.stats:
+                    return {}
+                return self._format_api_stats(api_name, self.stats[api_name], current_time)
+            else:
+                # Return all APIs
+                result = {}
+                for name, stats in self.stats.items():
+                    result[name] = self._format_api_stats(name, stats, current_time)
+                return result
+    
+    def _format_api_stats(self, name: str, stats: ApiCallStats, current_time: float) -> Dict:
+        """Format stats for a single API"""
+        # Clean old records first
+        self._clean_old_records(stats, current_time)
+        
+        # Calculate averages
+        avg_duration = stats.total_duration / stats.total_calls if stats.total_calls > 0 else 0
+        
+        # Count calls in time windows
+        calls_5m = len(stats.calls_5m)
+        calls_30m = len(stats.calls_30m)
+        calls_1h = len(stats.calls_1h)
+        
+        # Calculate average durations for time windows
+        avg_5m = sum(d for _, d in stats.calls_5m) / calls_5m if calls_5m > 0 else 0
+        avg_30m = sum(d for _, d in stats.calls_30m) / calls_30m if calls_30m > 0 else 0
+        avg_1h = sum(d for _, d in stats.calls_1h) / calls_1h if calls_1h > 0 else 0
+        
+        return {
+            'total_calls': stats.total_calls,
+            'total_duration_seconds': round(stats.total_duration, 2),
+            'avg_duration_seconds': round(avg_duration, 3),
+            'calls_5m': calls_5m,
+            'calls_30m': calls_30m,
+            'calls_1h': calls_1h,
+            'avg_duration_5m': round(avg_5m, 3),
+            'avg_duration_30m': round(avg_30m, 3),
+            'avg_duration_1h': round(avg_1h, 3),
+            'rate_per_minute_5m': round(calls_5m / 5, 2),
+            'rate_per_minute_30m': round(calls_30m / 30, 2),
+            'rate_per_minute_1h': round(calls_1h / 60, 2)
+        }
+
 
 @dataclass
 class TokenData:
@@ -363,7 +476,13 @@ class TokenSyncService:
         self.running = False
         self.logger = self._setup_logger()
         self.analyzer = TokenAnalyzer()
-        
+        try:
+            self.api_tracker = ApiStatsTracker()
+            self.logger.info("✅ API tracker initialized successfully")
+        except Exception as e:
+            self.logger.error(f"❌ Failed to initialize API tracker: {e}")
+            raise
+            
         # Request session for connection pooling
         self.session = requests.Session()
         self.session.headers.update({
@@ -384,6 +503,26 @@ class TokenSyncService:
             'start_time': None
         }
     
+        self.logger.info(f"🔧 API tracker verification: {type(self.api_tracker)}")
+
+    def test_api_tracking(self):
+        """Test method to verify API tracking is working"""
+        self.logger.info("🧪 Testing API tracking...")
+        
+        # Record a test call
+        self.api_tracker.record_call('test_api', 1.5)
+        
+        # Get stats
+        stats = self.api_tracker.get_stats()
+        self.logger.info(f"Test stats: {stats}")
+        
+        if 'test_api' in stats:
+            self.logger.info("✅ API tracking is working correctly")
+        else:
+            self.logger.error("❌ API tracking is not working")
+        
+        return 'test_api' in stats
+
     def _setup_logger(self) -> logging.Logger:
         """Setup logging configuration"""
         logger = logging.getLogger('TokenSync')
@@ -828,7 +967,10 @@ class TokenSyncService:
         
         for i, url in enumerate(pump_fun_urls):
             try:
+                start_time = time.time()
                 response = self.session.get(url, timeout=CONFIG['request_timeout'])
+                api_duration = time.time() - start_time
+                self.api_tracker.record_call(f'pumpfun_v{i+1}', api_duration)
                 self.stats['api_calls'] += 1
                 
                 if response.status_code == 200:
@@ -911,7 +1053,10 @@ class TokenSyncService:
         """Get comprehensive analysis from rugcheck.xyz"""
         try:
             url = f"https://api.rugcheck.xyz/v1/tokens/{token_address}/report"
+            start_time = time.time()
             response = self.session.get(url, timeout=CONFIG['request_timeout'])
+            api_duration = time.time() - start_time
+            self.api_tracker.record_call('rugcheck', api_duration)
             self.stats['api_calls'] += 1
             
             if response.status_code == 200:
@@ -1240,14 +1385,19 @@ class TokenSyncService:
             original_address = address
             token_data = None
             
-            # Identify address type
+            start_time = time.time()
             address_type = self.identify_address_type(address)
+            identify_duration = time.time() - start_time
+            self.api_tracker.record_call('dexscreener_identify', identify_duration)
             
             # If it's a pair, extract token address
             if address_type == 'pair':
                 self.logger.info(f"Pair detected {address[:8]}..., extracting token")
+                start_time = time.time()
                 token_address = self.extract_token_from_pair(address)
-                
+                extract_duration = time.time() - start_time
+                self.api_tracker.record_call('dexscreener_extract_pair', extract_duration)
+
                 if not token_address:
                     self.logger.warning(f"Could not extract token from pair {address}")
                     return None
@@ -1256,7 +1406,10 @@ class TokenSyncService:
             
             # Get token data
             url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+            start_time = time.time()
             response = self.session.get(url, timeout=CONFIG['request_timeout'])
+            api_duration = time.time() - start_time
+            self.api_tracker.record_call('dexscreener_tokens', api_duration)
             self.stats['api_calls'] += 1
             
             if response.status_code == 200:
@@ -1322,8 +1475,11 @@ class TokenSyncService:
             token_data = None
 
         if not token_data:
+            start_time = time.time()
             token_data = self.get_pumpfun_data(token_address)
+            pumpfun_duration = time.time() - start_time
             if token_data:
+                self.api_tracker.record_call('pumpfun_fallback', pumpfun_duration)
                 token_data.metadata_source = "pumpfun"
 
         return token_data
@@ -1582,7 +1738,9 @@ class TokenSyncService:
                             rugcheck_data = self.extract_rugcheck_data(rugcheck_response)
                             # Enrichir token_data avec holder_count de rugcheck si meilleur
                             if rugcheck_data.get('holder_count', 0) > token_data.holder_count:
+                                old_count = token_data.holder_count
                                 token_data.holder_count = rugcheck_data['holder_count']
+                                self.logger.info(f"📊 Updated holder_count for {token_data.address[:8]}... from {old_count} to {token_data.holder_count}")
 
                                 # Ajouter les attributs manquants à token_data pour l'historisation
                                 token_data.top_holder_percentage = rugcheck_data.get('top_holder_percentage', 0.0)
@@ -1635,8 +1793,8 @@ class TokenSyncService:
                                     ELSE timestamp_token_created 
                                 END,
                                 creator_address = COALESCE(?, creator_address),
-                                bonding_curve_progress = ?,  
-                                holder_count = ?,  
+                                bonding_curve_progress = MAX(COALESCE(bonding_curve_progress, 0), COALESCE(?, 0)),
+                                holder_count = MAX(COALESCE(holder_count, 0), COALESCE(?, 0)),
                                 market_cap = ?,
                                 fdv = ?,
                                 liquidity_usd = ?,
@@ -1825,7 +1983,7 @@ class TokenSyncService:
 
         return False
 
-        
+
     def get_dashboard_priority_tokens(self) -> List[str]:
         """Get tokens that appear in the dashboard overview (high priority for updates)"""
         try:
@@ -2449,21 +2607,113 @@ class TokenSyncService:
             success_rate = (self.stats['successful_updates'] / self.stats['processed_tokens']) * 100
             self.logger.info(f"Success rate: {success_rate:.1f}%")
 
+        self.print_api_statistics()
+    
+
+    def print_api_statistics(self):
+        """Print detailed API statistics"""
+        try:
+            api_stats = self.api_tracker.get_stats()
+            
+            if not api_stats:
+                self.logger.info("=== 📡 API STATISTICS ===")
+                self.logger.info("No API statistics available")
+                return
+            
+            self.logger.info("=== 📡 API STATISTICS ===")
+            
+            # Sort by total calls for better readability
+            sorted_apis = sorted(api_stats.items(), key=lambda x: x[1].get('total_calls', 0), reverse=True)
+            
+            for api_name, stats in sorted_apis:
+                if stats.get('total_calls', 0) > 0:  # Only show APIs that have been called
+                    self.logger.info(f"🔗 {api_name.upper()}")
+                    self.logger.info(f"   Total: {stats.get('total_calls', 0)} calls | {stats.get('total_duration_seconds', 0)}s | avg {stats.get('avg_duration_seconds', 0)}s")
+                    self.logger.info(f"   Recent: 5m={stats.get('calls_5m', 0)} | 30m={stats.get('calls_30m', 0)} | 1h={stats.get('calls_1h', 0)}")
+                    self.logger.info(f"   Rate/min: 5m={stats.get('rate_per_minute_5m', 0)} | 30m={stats.get('rate_per_minute_30m', 0)} | 1h={stats.get('rate_per_minute_1h', 0)}")
+                    
+                    # Alert if rate is too high
+                    if stats.get('rate_per_minute_5m', 0) > 10:  # Plus de 10 appels/min sur 5min
+                        self.logger.warning(f"   ⚠️ HIGH RATE: {stats.get('rate_per_minute_5m', 0)} calls/min")
+            
+            # Summary
+            total_calls = sum(stats.get('total_calls', 0) for stats in api_stats.values())
+            total_duration = sum(stats.get('total_duration_seconds', 0) for stats in api_stats.values())
+            total_5m = sum(stats.get('calls_5m', 0) for stats in api_stats.values())
+            
+            self.logger.info(f"📊 SUMMARY: {total_calls} total calls | {total_duration:.1f}s total | {total_5m} calls last 5min")
+            
+        except Exception as e:
+            self.logger.error(f"Error printing API statistics: {e}")
+            # Debug info
+            self.logger.debug(f"API tracker exists: {hasattr(self, 'api_tracker')}")
+            if hasattr(self, 'api_tracker'):
+                self.logger.debug(f"API tracker type: {type(self.api_tracker)}")
+                self.logger.debug(f"API tracker stats keys: {list(self.api_tracker.stats.keys()) if hasattr(self.api_tracker, 'stats') else 'No stats'}")
+
+    def record_call(self, api_name: str, duration: float):
+        """Record an API call with duration - Enhanced with logging"""
+        current_time = time.time()
+        
+        try:
+            with self.lock:
+                api_stats = self.stats[api_name]
+                
+                # Update totals
+                api_stats.total_calls += 1
+                api_stats.total_duration += duration
+                
+                # Add to time windows
+                call_record = (current_time, duration)
+                api_stats.calls_5m.append(call_record)
+                api_stats.calls_30m.append(call_record)
+                api_stats.calls_1h.append(call_record)
+                
+                # Clean old records
+                self._clean_old_records(api_stats, current_time)
+                
+                # Debug logging (remove in production)
+                if api_stats.total_calls <= 5:  # Only log first few calls
+                    print(f"DEBUG: Recorded call to {api_name}: {duration:.3f}s (total: {api_stats.total_calls})")
+                    
+        except Exception as e:
+            print(f"ERROR recording API call for {api_name}: {e}")
+
+    def get_api_summary(self) -> str:
+        """Get a quick API summary for live monitoring"""
+        api_stats = self.api_tracker.get_stats()
+        
+        if not api_stats:
+            return "No API data"
+        
+        total_5m = sum(stats['calls_5m'] for stats in api_stats.values())
+        total_30m = sum(stats['calls_30m'] for stats in api_stats.values())
+        
+        # Top 3 APIs by recent activity
+        top_apis = sorted(api_stats.items(), key=lambda x: x[1]['calls_5m'], reverse=True)[:3]
+        top_summary = " | ".join([f"{name}:{stats['calls_5m']}" for name, stats in top_apis if stats['calls_5m'] > 0])
+        
+        return f"APIs 5m: {total_5m} total ({top_summary}) | 30m: {total_30m}"
+
     def run_sync_cycle(self):
         """Run one complete synchronization cycle"""
         self.logger.info("Starting synchronization cycle...")
-        
+        self.logger.info(f"🔍 API tracker status: {hasattr(self, 'api_tracker')}")
         try:
             # 1. Sync new tokens from transactions
             new_tokens_updated = self.sync_new_tokens()
-            
+            self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+            self.print_api_statistics()
             # 2. Update existing token prices
             prices_updated = self.update_existing_prices()
-            
+            self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+            self.print_api_statistics()
             # 3. Run historization cycle (every few cycles)
             if not hasattr(self, 'cycle_count'):
                 self.cycle_count = 0
             
+            self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+            self.print_api_statistics()
             self.cycle_count += 1
             creation_timestamps_updated = 0
             historized_count = 0
@@ -2472,20 +2722,28 @@ class TokenSyncService:
             # Every 3 cycles - run historization
             if self.cycle_count % 3 == 0:
                 historized_count = self.run_historization_cycle()
-            
+                self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+                self.print_api_statistics()
+
             # Every 5 cycles - update missing creation timestamps
             if self.cycle_count % 5 == 0:
                 creation_timestamps_updated = self.update_missing_creation_timestamps()
+                self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+                self.print_api_statistics()
             
             # Every 6 cycles - check for dead tokens
             if self.cycle_count % 6 == 0:
                 dead_tokens_marked = self.run_dead_token_check()
-            
+                self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+                self.print_api_statistics()
+
             # Every 10 cycles - update Pump.fun tokens
             if self.cycle_count % 10 == 0:
                 pumpfun_updated = self.update_pumpfun_tokens()
                 self.logger.info(f"Pump.fun tokens updated: {pumpfun_updated}")
-
+                self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+                self.print_api_statistics()
+                
             # 4. Print statistics
             self.print_statistics()
             
