@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """
-Token Data Synchronization Backend with Historical Tracking
+Token Data Synchronization Backend
 Continuously monitors new tokens from transactions table and enriches them with DexScreener data
-Now includes historical tracking and intelligent filtering
 """
 
-#script à finir 
+#original script
+
 import sqlite3
 import requests
 import time
 import logging
 import json
-import math
 from datetime import datetime, timedelta
-from typing import Dict, Optional, List, Set, Tuple
+from typing import Dict, Optional, List, Set
 import threading
 from dataclasses import dataclass
 import sys
@@ -22,7 +21,7 @@ import signal
 # Configuration
 CONFIG = {
     'db_path': 'solana_wallet_monitor.db',
-    'api_rate_limit': 2.5,  # seconds between API calls
+    'api_rate_limit': 2.0,  # seconds between API calls
     'batch_size': 50,       # tokens to process per batch
     'update_interval': 60,  # seconds between sync cycles
     'price_update_interval': 300,  # 5 minutes for price updates
@@ -33,9 +32,6 @@ CONFIG = {
     'request_timeout': 10,
     'retry_failed_after_days': 7,  # Réessayer les tokens flaggés après X jours
     'max_failed_attempts': 1,      # Nombre max de tentatives avant flagging définitif
-    'historization_interval': 3600,  # 30 minutes entre historisations
-    'dead_token_check_interval': 3600,  # 1 heure pour vérifier tokens morts
-    'db_timeout': 30.0,
     'known_quote_tokens': {
         'So11111111111111111111111111111111111111112',  # SOL
         'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
@@ -69,272 +65,16 @@ class TokenData:
     price_change_1h: float = 0.0
     price_change_6h: float = 0.0
     price_change_24h: float = 0.0
-    liquidity_usd: float = 0.0
-    liquidity_sol: float = 0.0
-    fdv: float = 0.0
     metadata_source: str = None
     original_address: str = None  # For tracking pair -> token conversion
 
-@dataclass
-class HistoricalSnapshot:
-    """Structure for historical token data snapshot"""
-    token_address: str
-    snapshot_timestamp: int
-    previous_snapshot_id: Optional[int] = None
-    # Metrics
-    price_usd: float = 0.0
-    market_cap: float = 0.0
-    volume_24h: float = 0.0
-    holder_count: int = 0
-    liquidity_usd: float = 0.0
-    # Calculated deltas
-    price_delta_usd: float = 0.0
-    market_cap_delta: float = 0.0
-    volume_24h_delta: float = 0.0
-    holder_count_delta: int = 0
-    # Scores
-    viability_score: float = 50.0
-    risk_score: float = 50.0
-    momentum_score: float = 0.0
-
-class TokenAnalyzer:
-    """Advanced token analysis and scoring system"""
-    
-    def __init__(self):
-        self.logger = logging.getLogger('TokenAnalyzer')
-    
-    def calculate_viability_score(self, current_data: TokenData, historical_data: List[Dict] = None) -> float:
-        """Calculate token viability score (0-100)"""
-        score = 0.0
-        
-        try:
-            # 1. Market Cap Stability (25 points)
-            if current_data.market_cap > 1000000:  # >1M
-                score += 25
-            elif current_data.market_cap > 100000:  # >100K
-                score += 20
-            elif current_data.market_cap > 10000:   # >10K
-                score += 15
-            elif current_data.market_cap > 1000:    # >1K
-                score += 10
-            
-            # 2. Liquidity Health (25 points)
-            if current_data.market_cap > 0:
-                liquidity_ratio = current_data.liquidity_usd / current_data.market_cap
-                if liquidity_ratio > 0.15:
-                    score += 25
-                elif liquidity_ratio > 0.10:
-                    score += 20
-                elif liquidity_ratio > 0.05:
-                    score += 15
-                elif liquidity_ratio > 0.02:
-                    score += 10
-            
-            # 3. Volume Activity (20 points)
-            if current_data.market_cap > 0:
-                volume_ratio = current_data.volume_24h / current_data.market_cap
-                if volume_ratio > 0.5:
-                    score += 20
-                elif volume_ratio > 0.2:
-                    score += 15
-                elif volume_ratio > 0.1:
-                    score += 10
-                elif volume_ratio > 0.05:
-                    score += 5
-            
-            # 4. Holder Count (15 points)
-            if current_data.holder_count > 1000:
-                score += 15
-            elif current_data.holder_count > 500:
-                score += 12
-            elif current_data.holder_count > 100:
-                score += 10
-            elif current_data.holder_count > 50:
-                score += 8
-            elif current_data.holder_count > 10:
-                score += 5
-            
-            # 5. Price Stability (15 points)
-            if abs(current_data.price_change_24h) < 10:  # <10% change
-                score += 15
-            elif abs(current_data.price_change_24h) < 25:  # <25% change
-                score += 10
-            elif abs(current_data.price_change_24h) < 50:  # <50% change
-                score += 5
-            
-            # Bonus/Penalty adjustments
-            if current_data.is_verified:
-                score += 5
-            
-            if historical_data and len(historical_data) >= 2:
-                # Penalize if consistently declining
-                recent_prices = [h.get('price_usd', 0) for h in historical_data[-3:]]
-                if len(recent_prices) >= 2 and all(recent_prices[i] <= recent_prices[i-1] for i in range(1, len(recent_prices))):
-                    score -= 10
-        
-        except Exception as e:
-            self.logger.error(f"Error calculating viability score: {e}")
-            return 50.0
-        
-        return max(0.0, min(100.0, score))
-    
-    def calculate_risk_score(self, current_data: TokenData, historical_data: List[Dict] = None) -> float:
-        """Calculate token risk score (0-100, higher = more risky)"""
-        risk = 0.0
-        
-        try:
-            # 1. Liquidity Risk (30 points)
-            if current_data.market_cap > 0:
-                liquidity_ratio = current_data.liquidity_usd / current_data.market_cap
-                if liquidity_ratio < 0.02:
-                    risk += 30
-                elif liquidity_ratio < 0.05:
-                    risk += 20
-                elif liquidity_ratio < 0.10:
-                    risk += 10
-            
-            # 2. Volume Risk (25 points)
-            if current_data.volume_24h < 1000:  # Very low volume
-                risk += 25
-            elif current_data.volume_24h < 10000:
-                risk += 15
-            elif current_data.volume_24h < 50000:
-                risk += 10
-            
-            # 3. Price Volatility Risk (25 points)
-            if abs(current_data.price_change_24h) > 80:
-                risk += 25
-            elif abs(current_data.price_change_24h) > 50:
-                risk += 15
-            elif abs(current_data.price_change_24h) > 30:
-                risk += 10
-            
-            # 4. Market Cap Risk (20 points)
-            if current_data.market_cap < 1000:
-                risk += 20
-            elif current_data.market_cap < 10000:
-                risk += 15
-            elif current_data.market_cap < 100000:
-                risk += 10
-            
-            # Historical trend analysis
-            if historical_data and len(historical_data) >= 3:
-                # Check for consistent decline
-                recent_volumes = [h.get('volume_24h', 0) for h in historical_data[-3:]]
-                if len(recent_volumes) >= 2:
-                    volume_declining = all(recent_volumes[i] <= recent_volumes[i-1] * 0.8 for i in range(1, len(recent_volumes)))
-                    if volume_declining:
-                        risk += 10
-        
-        except Exception as e:
-            self.logger.error(f"Error calculating risk score: {e}")
-            return 50.0
-        
-        return max(0.0, min(100.0, risk))
-    
-    def calculate_momentum_score(self, current_data: TokenData, historical_data: List[Dict] = None) -> float:
-        """Calculate momentum score (-100 to +100)"""
-        momentum = 0.0
-        
-        try:
-            # 1. Price momentum (40%)
-            price_momentum = current_data.price_change_24h
-            momentum += price_momentum * 0.4
-            
-            # 2. Volume momentum (30%)
-            if historical_data and len(historical_data) >= 2:
-                current_volume = current_data.volume_24h
-                previous_volume = historical_data[-1].get('volume_24h', 0)
-                if previous_volume > 0:
-                    volume_change = ((current_volume - previous_volume) / previous_volume) * 100
-                    momentum += volume_change * 0.3
-            
-            # 3. Holder momentum (20%)
-            if historical_data and len(historical_data) >= 2:
-                current_holders = current_data.holder_count
-                previous_holders = historical_data[-1].get('holder_count', 0)
-                if previous_holders > 0:
-                    holder_change = ((current_holders - previous_holders) / previous_holders) * 100
-                    momentum += holder_change * 0.2
-            
-            # 4. Liquidity momentum (10%)
-            if historical_data and len(historical_data) >= 2:
-                current_liquidity = current_data.liquidity_usd
-                previous_liquidity = historical_data[-1].get('liquidity_usd', 0)
-                if previous_liquidity > 0:
-                    liquidity_change = ((current_liquidity - previous_liquidity) / previous_liquidity) * 100
-                    momentum += liquidity_change * 0.1
-        
-        except Exception as e:
-            self.logger.error(f"Error calculating momentum score: {e}")
-            return 0.0
-        
-        return max(-100.0, min(100.0, momentum))
-    
-    def detect_dead_token(self, current_data: TokenData, historical_data: List[Dict] = None) -> Tuple[bool, str]:
-        """Detect if a token should be marked as dead"""
-        reasons = []
-        
-        try:
-            # 1. Price crash (>90% drop in 24h)
-            if current_data.price_change_24h < -90:
-                reasons.append("price_crash_90pct")
-            
-            # 2. Volume death (volume < $100 for 24h)
-            if current_data.volume_24h < 100:
-                reasons.append("volume_death")
-            
-            # 3. Liquidity drain (liquidity < 1% of market cap)
-            if current_data.market_cap > 0:
-                liquidity_ratio = current_data.liquidity_usd / current_data.market_cap
-                if liquidity_ratio < 0.01:
-                    reasons.append("liquidity_drain")
-            
-            # 4. Market cap too low
-            if current_data.market_cap < 500:  # Less than $500
-                reasons.append("market_cap_too_low")
-            
-            # 5. Historical decline pattern
-            if historical_data and len(historical_data) >= 5:
-                # Check if consistently declining for 5 snapshots
-                recent_prices = [h.get('price_usd', 0) for h in historical_data[-5:]]
-                if len(recent_prices) == 5:
-                    declining_trend = all(recent_prices[i] <= recent_prices[i-1] * 0.9 for i in range(1, 5))
-                    if declining_trend:
-                        reasons.append("consistent_decline")
-            
-            # 6. Zero holders (if data available)
-            if current_data.holder_count == 0:
-                reasons.append("zero_holders")
-            
-            # Decision logic
-            critical_reasons = ["price_crash_90pct", "liquidity_drain", "market_cap_too_low"]
-            has_critical = any(reason in critical_reasons for reason in reasons)
-            
-            # Mark as dead if:
-            # - Has critical reason, OR
-            # - Has 3+ reasons, OR
-            # - Has volume death + another reason
-            is_dead = (has_critical or 
-                      len(reasons) >= 3 or 
-                      ("volume_death" in reasons and len(reasons) >= 2))
-            
-            death_reason = ", ".join(reasons) if is_dead else None
-            
-            return is_dead, death_reason
-        
-        except Exception as e:
-            self.logger.error(f"Error detecting dead token: {e}")
-            return False, None
-
 class TokenSyncService:
-    """Main service for token synchronization with historical tracking"""
+    """Main service for token synchronization"""
     
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.running = False
         self.logger = self._setup_logger()
-        self.analyzer = TokenAnalyzer()
         
         # Request session for connection pooling
         self.session = requests.Session()
@@ -351,8 +91,6 @@ class TokenSyncService:
             'successful_updates': 0,
             'failed_updates': 0,
             'api_calls': 0,
-            'tokens_historized': 0,
-            'tokens_marked_dead': 0,
             'start_time': None
         }
     
@@ -380,350 +118,15 @@ class TokenSyncService:
     def get_db_connection(self) -> sqlite3.Connection:
         """Get database connection with error handling"""
         try:
-            conn = sqlite3.connect(self.db_path, timeout=30.0)  # AJOUTER timeout
+            conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
-        
-            # AJOUTER ces configurations
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL") 
-            conn.execute("PRAGMA cache_size=10000")
-            conn.execute("PRAGMA temp_store=memory")
-            conn.execute("PRAGMA busy_timeout=30000")
             return conn
         except Exception as e:
             self.logger.error(f"Database connection error: {e}")
             raise
     
-    def historize_token_data(self, token_address: str, current_data: TokenData = None) -> bool:
-        """
-        Historize current token data before updating
-        """
-        max_retries = 3
-        retry_delay = 0.1
-        for attempt in range(max_retries):
-            try:
-                conn = self.get_db_connection()
-                conn.execute("BEGIN IMMEDIATE")
-                cursor = conn.cursor()
-                
-                # Get the last snapshot ID for this token
-                cursor.execute("""
-                    SELECT id FROM tokens_history 
-                    WHERE token_address = ? 
-                    ORDER BY snapshot_timestamp DESC 
-                    LIMIT 1
-                """, (token_address,))
-                last_snapshot = cursor.fetchone()
-                previous_snapshot_id = last_snapshot[0] if last_snapshot else None
-                
-                # Get historical data for score calculations
-                cursor.execute("""
-                    SELECT * FROM tokens_history 
-                    WHERE token_address = ? 
-                    ORDER BY snapshot_timestamp DESC 
-                    LIMIT 10
-                """, (token_address,))
-                historical_data = [dict(row) for row in cursor.fetchall()]
-                
-                current_timestamp = int(time.time())
-                
-                if current_data is None:
-                    # Mode UPDATE : utiliser les données actuelles de la DB (avant mise à jour)
-                    cursor.execute("""
-                        SELECT * FROM tokens WHERE address = ?
-                    """, (token_address,))
-                    token_row = cursor.fetchone()
-                    if not token_row:
-                        self.logger.warning(f"No current data found for token {token_address}")
-                        conn.close()
-                        return False
-
-
-                    def safe_get(row, column, default=0.0):
-                        """Safely get value from sqlite3.Row with None handling"""
-                        try:
-                            value = row[column] if column in row.keys() else default
-                            return value if value is not None else default
-                        except (KeyError, TypeError):
-                            return default
-
-                    snapshot_data = {
-                        'price_usd': safe_get(token_row, 'price_usd', 0.0),
-                        'market_cap': safe_get(token_row, 'market_cap', 0.0),
-                        'fdv': safe_get(token_row, 'fdv', 0.0),
-                        'liquidity_usd': safe_get(token_row, 'liquidity_usd', 0.0),
-                        'liquidity_sol': safe_get(token_row, 'liquidity_sol', 0.0),
-                        'liquidity_mc_ratio': safe_get(token_row, 'liquidity_mc_ratio', 0.0),
-                        'volume_mc_ratio': safe_get(token_row, 'volume_mc_ratio', 0.0),
-                        'price_volatility_1h': safe_get(token_row, 'price_volatility_1h', 0.0),
-                        'volume_5m': safe_get(token_row, 'volume_5m', 0.0),
-                        'volume_1h': safe_get(token_row, 'volume_1h', 0.0),
-                        'volume_6h': safe_get(token_row, 'volume_6h', 0.0),
-                        'volume_24h': safe_get(token_row, 'volume_24h', 0.0),
-                        'price_change_5m': safe_get(token_row, 'price_change_5m', 0.0),
-                        'price_change_1h': safe_get(token_row, 'price_change_1h', 0.0),
-                        'price_change_6h': safe_get(token_row, 'price_change_6h', 0.0),
-                        'price_change_24h': safe_get(token_row, 'price_change_24h', 0.0),
-                        'holder_count': safe_get(token_row, 'holder_count', 0),
-                        'bonding_curve_progress': safe_get(token_row, 'bonding_curve_progress', 0.0),
-                        # ✅ FIX: Ces champs étaient mal récupérés
-                        'top_holder_percentage': safe_get(token_row, 'top_holder_percentage', 0.0),
-                        'top_10_holders_percentage': safe_get(token_row, 'top_10_holders_percentage', 0.0),
-                        'insider_holders_count': safe_get(token_row, 'insider_holders_count', 0),
-                        'insider_networks_detected': safe_get(token_row, 'insider_networks_detected', 0),
-                        'lp_providers_count': safe_get(token_row, 'lp_providers_count', 0),
-                        'has_low_liquidity': safe_get(token_row, 'has_low_liquidity', False),
-                        'rug_risk_score': safe_get(token_row, 'rug_risk_score', 50),
-                        'rug_raw_score': safe_get(token_row, 'rug_raw_score', 0),
-                        'is_rugged': safe_get(token_row, 'is_rugged', False),
-                        'risk_count': safe_get(token_row, 'risk_count', 0),
-                        'symbol': safe_get(token_row, 'symbol', ''),
-                        'name': safe_get(token_row, 'name', ''),
-                        'decimals': safe_get(token_row, 'decimals', 9),
-                        'creator_address': safe_get(token_row, 'creator_address', None),
-                        'logo_uri': safe_get(token_row, 'logo_uri', None),
-                        'is_verified': safe_get(token_row, 'is_verified', False),
-                        'metadata_source': safe_get(token_row, 'metadata_source', None)
-                    }
-
-                    if snapshot_data['market_cap'] > 0:
-                        snapshot_data['liquidity_mc_ratio'] = snapshot_data['liquidity_usd'] / snapshot_data['market_cap']
-                        snapshot_data['volume_mc_ratio'] = snapshot_data['volume_24h'] / snapshot_data['market_cap']
-                    else:
-                        snapshot_data['liquidity_mc_ratio'] = 0.0
-                        snapshot_data['volume_mc_ratio'] = 0.0
-
-                    score_data = TokenData(
-                        address=token_address,
-                        symbol=snapshot_data['symbol'],
-                        price_usd=snapshot_data['price_usd'],
-                        market_cap=snapshot_data['market_cap'],
-                        fdv=snapshot_data['fdv'],
-                        volume_5m=snapshot_data['volume_5m'],
-                        volume_1h=snapshot_data['volume_1h'],
-                        volume_6h=snapshot_data['volume_6h'],
-                        volume_24h=snapshot_data['volume_24h'],
-                        price_change_5m=snapshot_data['price_change_5m'],
-                        price_change_1h=snapshot_data['price_change_1h'],
-                        price_change_6h=snapshot_data['price_change_6h'],
-                        price_change_24h=snapshot_data['price_change_24h'],
-                        holder_count=snapshot_data['holder_count'],
-                        liquidity_usd=snapshot_data['liquidity_usd'],
-                        liquidity_sol=snapshot_data['liquidity_sol'],
-                        bonding_curve_progress=snapshot_data['bonding_curve_progress']
-                    )
-                    self.logger.debug(f"📊 Historizing from DB for {token_address[:8]}... - TH: {snapshot_data['top_holder_percentage']:.2f}%, T10H: {snapshot_data['top_10_holders_percentage']:.2f}%")
-
-                else:
-                    snapshot_data = {
-                        'price_usd': current_data.price_usd,
-                        'market_cap': current_data.market_cap,
-                        'fdv': current_data.fdv,
-                        'liquidity_usd': current_data.liquidity_usd,
-                        'liquidity_sol': current_data.liquidity_sol,
-                        'liquidity_mc_ratio': (current_data.liquidity_usd / current_data.market_cap) if current_data.market_cap > 0 else 0.0,
-                        'volume_mc_ratio': (current_data.volume_24h / current_data.market_cap) if current_data.market_cap > 0 else 0.0,
-                        'price_volatility_1h': getattr(current_data, 'price_volatility_1h', 0.0),
-                        'volume_5m': current_data.volume_5m,
-                        'volume_1h': current_data.volume_1h,
-                        'volume_6h': current_data.volume_6h,
-                        'volume_24h': current_data.volume_24h,
-                        'price_change_5m': current_data.price_change_5m,
-                        'price_change_1h': current_data.price_change_1h,
-                        'price_change_6h': current_data.price_change_6h,
-                        'price_change_24h': current_data.price_change_24h,
-                        'holder_count': current_data.holder_count,
-                        'bonding_curve_progress': current_data.bonding_curve_progress,
-                        'top_holder_percentage': getattr(current_data, 'top_holder_percentage', 0.0),
-                        'top_10_holders_percentage': getattr(current_data, 'top_10_holders_percentage', 0.0),
-                        'insider_holders_count': getattr(current_data, 'insider_holders_count', 0),
-                        'insider_networks_detected': getattr(current_data, 'insider_networks_detected', 0),
-                        'lp_providers_count': getattr(current_data, 'lp_providers_count', 0),
-                        'has_low_liquidity': getattr(current_data, 'has_low_liquidity', False),
-                        'rug_risk_score': getattr(current_data, 'rug_risk_score', 50),
-                        'rug_raw_score': getattr(current_data, 'rug_raw_score', 0),
-                        'is_rugged': getattr(current_data, 'is_rugged', False),
-                        'risk_count': getattr(current_data, 'risk_count', 0),
-                        'symbol': current_data.symbol,
-                        'name': current_data.name,
-                        'decimals': current_data.decimals,
-                        'creator_address': getattr(current_data, 'creator_address', None),
-                        'logo_uri': getattr(current_data, 'logo_uri', None),
-                        'is_verified': getattr(current_data, 'is_verified', False),
-                        'metadata_source': getattr(current_data, 'metadata_source', None)
-                    }
-                    score_data = current_data
-                
-                deltas = {
-                    'price_delta_usd': 0.0, 
-                    'market_cap_delta': 0.0, 
-                    'volume_24h_delta': 0.0, 
-                    'holder_count_delta': 0,
-                    'rug_risk_score_delta': 0.0,
-                    'top_holder_percentage_delta': 0.0,
-                    'insider_holders_delta': 0
-                }
-                
-                if historical_data:
-                    last_snapshot_data = historical_data[0]
-                    deltas['price_delta_usd'] = snapshot_data['price_usd'] - (last_snapshot_data.get('price_usd', 0) or 0)
-                    deltas['market_cap_delta'] = snapshot_data['market_cap'] - (last_snapshot_data.get('market_cap', 0) or 0)
-                    deltas['volume_24h_delta'] = snapshot_data['volume_24h'] - (last_snapshot_data.get('volume_24h', 0) or 0)
-                    deltas['holder_count_delta'] = snapshot_data['holder_count'] - (last_snapshot_data.get('holder_count', 0) or 0)
-                    deltas['rug_risk_score_delta'] = snapshot_data['rug_risk_score'] - (last_snapshot_data.get('rug_risk_score', 50) or 50)
-                    deltas['top_holder_percentage_delta'] = snapshot_data['top_holder_percentage'] - (last_snapshot_data.get('top_holder_percentage', 0) or 0)
-                    deltas['insider_holders_delta'] = snapshot_data['insider_holders_count'] - (last_snapshot_data.get('insider_holders_count', 0) or 0)
-                
-                viability_score = self.analyzer.calculate_viability_score(score_data, historical_data)
-                risk_score = self.analyzer.calculate_risk_score(score_data, historical_data)
-                momentum_score = self.analyzer.calculate_momentum_score(score_data, historical_data)
-                
-                # INSERT aligné au schéma tokens_history
-                cursor.execute("""
-                    INSERT INTO tokens_history (
-                        token_address,
-                        price_usd, market_cap, fdv, liquidity_usd, liquidity_sol, liquidity_mc_ratio, volume_mc_ratio,
-                        price_volatility_1h,
-                        volume_5m, volume_1h, volume_6h, volume_24h,
-                        price_change_5m, price_change_1h, price_change_6h, price_change_24h,
-                        holder_count, bonding_curve_progress,
-                        top_holder_percentage, top_10_holders_percentage, insider_holders_count, insider_networks_detected,
-                        lp_providers_count, has_low_liquidity,
-                        viability_score, risk_score, momentum_score,
-                        rug_risk_score, rug_raw_score, is_rugged, risk_count,
-                        creator_address, symbol, name, decimals, logo_uri, is_verified, metadata_source,
-                        snapshot_timestamp, previous_snapshot_id,
-                        price_delta_usd, market_cap_delta, volume_24h_delta, holder_count_delta,
-                        rug_risk_score_delta, top_holder_percentage_delta, insider_holders_delta
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    token_address,
-                    snapshot_data['price_usd'], snapshot_data['market_cap'], snapshot_data['fdv'],
-                    snapshot_data['liquidity_usd'], snapshot_data['liquidity_sol'],
-                    snapshot_data.get('liquidity_mc_ratio', 0.0), snapshot_data.get('volume_mc_ratio', 0.0),
-                    snapshot_data.get('price_volatility_1h', 0.0),
-                    snapshot_data['volume_5m'], snapshot_data['volume_1h'], snapshot_data['volume_6h'], snapshot_data['volume_24h'],
-                    snapshot_data['price_change_5m'], snapshot_data['price_change_1h'], snapshot_data['price_change_6h'], snapshot_data['price_change_24h'],
-                    snapshot_data['holder_count'], snapshot_data['bonding_curve_progress'],
-                    snapshot_data['top_holder_percentage'], snapshot_data['top_10_holders_percentage'],
-                    snapshot_data['insider_holders_count'], snapshot_data['insider_networks_detected'],
-                    snapshot_data['lp_providers_count'], snapshot_data['has_low_liquidity'],
-                    viability_score, risk_score, momentum_score,
-                    snapshot_data['rug_risk_score'], snapshot_data['rug_raw_score'],
-                    snapshot_data['is_rugged'], snapshot_data['risk_count'],
-                    snapshot_data.get('creator_address'), snapshot_data['symbol'], snapshot_data['name'],
-                    snapshot_data['decimals'], snapshot_data.get('logo_uri'),
-                    snapshot_data.get('is_verified', False), snapshot_data.get('metadata_source'),
-                    current_timestamp, previous_snapshot_id,
-                    deltas['price_delta_usd'], deltas['market_cap_delta'], deltas['volume_24h_delta'], deltas['holder_count_delta'],
-                    deltas.get('rug_risk_score_delta', 0.0),
-                    deltas.get('top_holder_percentage_delta', 0.0),
-                    deltas.get('insider_holders_delta', 0)
-                ))
-                
-                cursor.execute("""
-                    UPDATE tokens 
-                    SET last_historized_at = ?, history_snapshots_count = COALESCE(history_snapshots_count, 0) + 1
-                    WHERE address = ?
-                """, (current_timestamp, token_address))
-                
-                conn.commit()
-                conn.close()
-                self.stats['tokens_historized'] += 1
-                
-                data_source = "new_data" if current_data else "db_data"
-                self.logger.debug(f"✅ Historized token {token_address[:8]}... ({data_source}): V={viability_score:.1f}, R={risk_score:.1f}, M={momentum_score:.1f}, TH={snapshot_data['top_holder_percentage']:.1f}%")
-                return True
-                
-            except sqlite3.OperationalError as e:
-                if conn:
-                    conn.close()
-                if "database is locked" in str(e) and attempt < max_retries - 1:
-                    time.sleep(retry_delay * (2 ** attempt))
-                    continue
-                else:
-                    self.logger.error(f"❌ Error historizing token {token_address}: {e}")
-                    return False
-            except Exception as e:
-                if conn:
-                    conn.close()
-                self.logger.error(f"❌ Error historizing token {token_address}: {e}")
-                return False
-
-        return False
-
-    
-    def check_and_mark_dead_tokens(self) -> int:
-        """Check for dead tokens and mark them"""
-        marked_count = 0
-        
-        try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Get tokens that are not marked as dead and have recent data
-                cursor.execute("""
-                    SELECT address, symbol, price_usd, market_cap, volume_24h, 
-                           holder_count, liquidity_usd, price_change_24h, 
-                           viability_score, risk_score
-                    FROM tokens 
-                    WHERE is_dead = 0 
-                    AND updated_at > datetime('now', '-7 days')
-                """)
-                
-                tokens_to_check = cursor.fetchall()
-                
-                for token_row in tokens_to_check:
-                    token_address = token_row['address']
-                    
-                    # Create TokenData object for analysis
-                    token_data = TokenData(
-                        address=token_address,
-                        symbol=token_row['symbol'],
-                        price_usd=token_row['price_usd'] or 0.0,
-                        market_cap=token_row['market_cap'] or 0.0,
-                        volume_24h=token_row['volume_24h'] or 0.0,
-                        holder_count=token_row['holder_count'] or 0,
-                        liquidity_usd=getattr(token_row, 'liquidity_usd', 0.0) or 0.0,
-                        price_change_24h=token_row['price_change_24h'] or 0.0
-                    )
-                    
-                    # Get historical data
-                    cursor.execute("""
-                        SELECT * FROM tokens_history 
-                        WHERE token_address = ? 
-                        ORDER BY snapshot_timestamp DESC 
-                        LIMIT 10
-                    """, (token_address,))
-                    historical_data = [dict(row) for row in cursor.fetchall()]
-                    
-                    # Check if token should be marked as dead
-                    is_dead, death_reason = self.analyzer.detect_dead_token(token_data, historical_data)
-                    
-                    if is_dead:
-                        # Mark token as dead
-                        cursor.execute("""
-                            UPDATE tokens 
-                            SET is_dead = 1, 
-                                death_reason = ?, 
-                                death_timestamp = ?
-                            WHERE address = ?
-                        """, (death_reason, int(time.time()), token_address))
-                        
-                        marked_count += 1
-                        self.stats['tokens_marked_dead'] += 1
-                        
-                        self.logger.info(f"💀 Marked token {token_address} ({token_data.symbol}) as dead: {death_reason}")
-                
-                conn.commit()
-                
-        except Exception as e:
-            self.logger.error(f"❌ Error checking dead tokens: {e}")
-        
-        return marked_count
-    
     def get_pumpfun_data(self, token_address: str) -> Optional[TokenData]:
-        """Get token data from Pump.fun API (unchanged from original)"""
+        """Get token data from Pump.fun API"""
         # URLs Pump.fun (comme dans le script qui fonctionne)
         pump_fun_urls = [
             f"https://frontend-api.pump.fun/coins/{token_address}",
@@ -811,158 +214,6 @@ class TokenSyncService:
         # Aucune URL n'a fonctionné
         self.logger.debug(f"Token not found on any Pump.fun URL: {token_address[:8]}...")
         return None
-
-    def get_rugcheck_data(self, token_address: str) -> Optional[dict]:
-        """Get comprehensive analysis from rugcheck.xyz"""
-        try:
-            url = f"https://api.rugcheck.xyz/v1/tokens/{token_address}/report"
-            response = self.session.get(url, timeout=CONFIG['request_timeout'])
-            self.stats['api_calls'] += 1
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.logger.debug(f"✅ Got rugcheck data for {token_address[:8]}...")
-                return data
-            
-            return None
-        except Exception as e:
-            self.logger.debug(f"Rugcheck error for {token_address[:8]}...: {e}")
-            return None
-
-    def extract_rugcheck_data(self, rugcheck_response: dict) -> dict:
-        """Extract useful data from rugcheck response"""
-        try:
-            # Add proper None check and type validation
-            if not rugcheck_response or not isinstance(rugcheck_response, dict):
-                self.logger.debug("Invalid or empty rugcheck response")
-                return {}
-            
-            # Additional check for empty dict or missing critical data
-            if not rugcheck_response:
-                self.logger.debug("Empty rugcheck response dict")
-                return {}
-                
-            security_data = {}
-            
-            # Scores de sécurité (with safe defaults)
-            security_data['rug_risk_score'] = rugcheck_response.get('score_normalised', 50)
-            security_data['rug_raw_score'] = rugcheck_response.get('score', 0)
-            security_data['is_rugged'] = rugcheck_response.get('rugged', False)
-            
-            # Autorités (safe access with defaults)
-            token_info = rugcheck_response.get('token', {})
-            if isinstance(token_info, dict):
-                security_data['mint_authority_revoked'] = token_info.get('mintAuthority') is None
-                security_data['freeze_authority_revoked'] = token_info.get('freezeAuthority') is None
-            else:
-                security_data['mint_authority_revoked'] = False
-                security_data['freeze_authority_revoked'] = False
-            
-            # Holders analysis (safe access)
-            top_holders = rugcheck_response.get('topHolders', [])
-            if isinstance(top_holders, list) and top_holders:
-                try:
-                    # Get top holder percentage safely
-                    first_holder = top_holders[0] if len(top_holders) > 0 else {}
-                    security_data['top_holder_percentage'] = float(first_holder.get('pct', 0))
-                    
-                    # Calculate top 10 holders percentage safely
-                    top_10_pct = 0.0
-                    for i, holder in enumerate(top_holders[:10]):
-                        if isinstance(holder, dict) and 'pct' in holder:
-                            try:
-                                top_10_pct += float(holder.get('pct', 0))
-                            except (ValueError, TypeError):
-                                continue
-                    security_data['top_10_holders_percentage'] = top_10_pct
-                    
-                    # Count insider holders safely
-                    insider_count = 0
-                    for holder in top_holders:
-                        if isinstance(holder, dict) and holder.get('insider', False):
-                            insider_count += 1
-                    security_data['insider_holders_count'] = insider_count
-                    
-                except Exception as e:
-                    self.logger.debug(f"Error processing top holders data: {e}")
-                    security_data['top_holder_percentage'] = 0.0
-                    security_data['top_10_holders_percentage'] = 0.0
-                    security_data['insider_holders_count'] = 0
-            else:
-                security_data['top_holder_percentage'] = 0.0
-                security_data['top_10_holders_percentage'] = 0.0
-                security_data['insider_holders_count'] = 0
-            
-            # Autres données (safe access with type checking)
-            security_data['holder_count'] = rugcheck_response.get('totalHolders', 0)
-            if not isinstance(security_data['holder_count'], (int, float)):
-                security_data['holder_count'] = 0
-            else:
-                security_data['holder_count'] = int(security_data['holder_count'])
-                
-            security_data['insider_networks_detected'] = rugcheck_response.get('graphInsidersDetected', 0)
-            if not isinstance(security_data['insider_networks_detected'], (int, float)):
-                security_data['insider_networks_detected'] = 0
-            else:
-                security_data['insider_networks_detected'] = int(security_data['insider_networks_detected'])
-                
-            security_data['lp_providers_count'] = rugcheck_response.get('totalLPProviders', 0)
-            if not isinstance(security_data['lp_providers_count'], (int, float)):
-                security_data['lp_providers_count'] = 0
-            else:
-                security_data['lp_providers_count'] = int(security_data['lp_providers_count'])
-                
-            # Liquidity with safe conversion
-            liquidity_raw = rugcheck_response.get('totalMarketLiquidity', 0.0)
-            try:
-                security_data['liquidity_usd'] = float(liquidity_raw) if liquidity_raw is not None else 0.0
-            except (ValueError, TypeError):
-                security_data['liquidity_usd'] = 0.0
-            
-            # Launchpad info (safe access)
-            launchpad = rugcheck_response.get('launchpad', {})
-            if isinstance(launchpad, dict):
-                security_data['launchpad_name'] = launchpad.get('name')
-                security_data['is_pump_fun'] = launchpad.get('platform') == 'pump_fun'
-            else:
-                security_data['launchpad_name'] = None
-                security_data['is_pump_fun'] = False
-            
-            # Risques (safe access)
-            risks = rugcheck_response.get('risks', [])
-            if isinstance(risks, list):
-                security_data['risk_count'] = len(risks)
-                security_data['has_low_liquidity'] = any(
-                    isinstance(risk, dict) and risk.get('name') == 'Low Liquidity' 
-                    for risk in risks
-                )
-            else:
-                security_data['risk_count'] = 0
-                security_data['has_low_liquidity'] = False
-            
-            self.logger.debug(f"Successfully extracted rugcheck data: score={security_data.get('rug_risk_score')}, holders={security_data.get('holder_count')}")
-            return security_data
-            
-        except Exception as e:
-            self.logger.error(f"Error extracting rugcheck data: {e}")
-            return {
-                'rug_risk_score': 50,
-                'rug_raw_score': 0,
-                'is_rugged': False,
-                'mint_authority_revoked': False,
-                'freeze_authority_revoked': False,
-                'top_holder_percentage': 0.0,
-                'top_10_holders_percentage': 0.0,
-                'insider_holders_count': 0,
-                'holder_count': 0,
-                'insider_networks_detected': 0,
-                'lp_providers_count': 0,
-                'liquidity_usd': 0.0,
-                'launchpad_name': None,
-                'is_pump_fun': False,
-                'risk_count': 0,
-                'has_low_liquidity': False
-            }
 
     def clean_token_data(self, token_data: TokenData) -> TokenData:
         """Clean token data to avoid SQL injection and special characters"""
@@ -1205,17 +456,12 @@ class TokenSyncService:
                             bonding_curve_progress=float(data.get('bonding_curve_progress', 0)),
                             holder_count=int(data.get('holder_count', 0) or data.get('holders', 0)),
                             market_cap=float(best_pair.get('fdv', 0) or 0),
-                            volume_5m=float(best_pair.get('volume', {}).get('m5', 0) or 0),
                             volume_1h=float(best_pair.get('volume', {}).get('h1', 0) or 0),
                             volume_6h=float(best_pair.get('volume', {}).get('h6', 0) or 0),
                             volume_24h=float(best_pair.get('volume', {}).get('h24', 0) or 0),
-                            price_change_5m=float(best_pair.get('priceChange', {}).get('m5', 0) or 0),
                             price_change_1h=float(best_pair.get('priceChange', {}).get('h1', 0) or 0),
                             price_change_6h=float(best_pair.get('priceChange', {}).get('h6', 0) or 0),
                             price_change_24h=float(best_pair.get('priceChange', {}).get('h24', 0) or 0),
-                            liquidity_usd=float(best_pair.get('liquidity', {}).get('usd', 0) or 0),
-                            liquidity_sol=float(best_pair.get('liquidity', {}).get('base', 0) or 0),
-                            fdv=float(best_pair.get('fdv', 0) or 0),
                             metadata_source=f"dexscreener_{address_type}",
                             original_address=original_address
                         )
@@ -1284,7 +530,6 @@ class TokenSyncService:
                 AND (no_data_available = 0 OR no_data_available IS NULL
                     OR (no_data_available = 1 AND no_data_last_check < datetime('now', '-' || ? || ' days')))
                 AND (failed_attempts < ? OR failed_attempts IS NULL)
-                AND is_dead = 0
                 ORDER BY last_price_update ASC NULLS FIRST
                 LIMIT ?
                 """
@@ -1296,33 +541,6 @@ class TokenSyncService:
                 
         except Exception as e:
             self.logger.error(f"Error getting tokens for price update: {e}")
-            return []
-    
-    def get_tokens_needing_historization(self) -> List[str]:
-        """Get tokens that need historization"""
-        try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor()
-                
-                cutoff_time = int(time.time()) - CONFIG['historization_interval']
-                
-                query = """
-                SELECT address 
-                FROM tokens 
-                WHERE is_dead = 0
-                AND (last_historized_at < ? OR last_historized_at IS NULL)
-                AND (price_usd > 0 OR market_cap > 0)
-                ORDER BY last_historized_at ASC NULLS FIRST
-                LIMIT ?
-                """
-                
-                cursor.execute(query, (cutoff_time, CONFIG['batch_size']))
-                results = cursor.fetchall()
-                
-                return [row[0] for row in results]
-                
-        except Exception as e:
-            self.logger.error(f"Error getting tokens for historization: {e}")
             return []
     
     def mark_token_no_data(self, token_address: str, increment_attempts: bool = True) -> bool:
@@ -1371,6 +589,7 @@ class TokenSyncService:
             self.logger.error(f"Error marking token as no data {token_address}: {e}")
             return False
 
+    # 5. AJOUTER nouvelle méthode pour créer un token stub quand aucune donnée n'est trouvée
     def create_token_stub(self, token_address: str) -> bool:
         """Create a minimal token entry when no data is found"""
         try:
@@ -1416,106 +635,30 @@ class TokenSyncService:
             return False
 
     def upsert_token(self, token_data: TokenData) -> bool:
-        """Insert or update token in database with historization"""
+        """Insert or update token in database"""
         try:
-            # Clean data before insertion
+            self.logger.debug(f"Raw token data for {token_data.address[:8]}... - Symbol: '{token_data.symbol}', Name: '{token_data.name}'")
             original_symbol = token_data.symbol
             original_name = token_data.name
+            # Nettoyer les données avant insertion
             token_data = self.clean_token_data(token_data)
-            rugcheck_data = {}
-            current_timestamp = int(time.time())
-
             if original_symbol != token_data.symbol:
                 self.logger.info(f"Symbol cleaned for {token_data.address[:8]}... - '{original_symbol}' -> '{token_data.symbol}'")
             if original_name != token_data.name:
                 self.logger.info(f"Name cleaned for {token_data.address[:8]}... - '{original_name}' -> '{token_data.name}'")
-            
-            # 1. Check if token exists (transaction séparée)
-            token_exists = False
             with self.get_db_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT address FROM tokens WHERE address = ?", (token_data.address,))
-                token_exists = cursor.fetchone() is not None
-            
-            # 2. Si token existe, historiser AVANT la mise à jour (transaction séparée)
-            if token_exists:
-                with self.get_db_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT price_usd, market_cap FROM tokens WHERE address = ?", (token_data.address,))
-                    existing_row = cursor.fetchone()
-                    
-                    # Historiser seulement si le token a déjà des données réelles (pas des zéros)
-                    if existing_row and (existing_row['price_usd'] > 0 or existing_row['market_cap'] > 0):
-                        time.sleep(0.05)
-                        self.historize_token_data(token_data.address, token_data)
-                        time.sleep(0.05)
-                    else:
-                        self.logger.debug(f"Skipping historization for {token_data.address[:8]}... - no significant data yet")
-            
-            # 3. Faire l'update/insert (nouvelle transaction)
-            with self.get_db_connection() as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                cursor = conn.cursor()
+                
                 current_timestamp = int(time.time())
-
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor()
-                if token_exists:
-                    cursor.execute("""
-                        SELECT last_rugcheck_update, rug_risk_score 
-                        FROM tokens 
-                        WHERE address = ? AND last_rugcheck_update > ?
-                    """, (token_data.address, current_timestamp - 86400))
-                    recent_rugcheck = cursor.fetchone()
-                else:
-                    recent_rugcheck = None
-
-            if not recent_rugcheck:
-                # Récupérer nouvelles données rugcheck
-                rugcheck_response = self.get_rugcheck_data(token_data.address)
-                if rugcheck_response:
-                    rugcheck_data = self.extract_rugcheck_data(rugcheck_response)
-                    # Enrichir token_data avec holder_count de rugcheck si meilleur
-                    if rugcheck_data.get('holder_count', 0) > token_data.holder_count:
-                        token_data.holder_count = rugcheck_data['holder_count']
-
-                        # ✅ Ajouter les attributs manquants à token_data pour l'historisation
-                        # Ces attributs seront utilisés dans historize_token_data quand current_data est fourni
-                        token_data.top_holder_percentage = rugcheck_data.get('top_holder_percentage', 0.0)
-                        token_data.top_10_holders_percentage = rugcheck_data.get('top_10_holders_percentage', 0.0)
-                        token_data.insider_holders_count = rugcheck_data.get('insider_holders_count', 0)
-                        token_data.insider_networks_detected = rugcheck_data.get('insider_networks_detected', 0)
-                        token_data.lp_providers_count = rugcheck_data.get('lp_providers_count', 0)
-                        token_data.has_low_liquidity = rugcheck_data.get('has_low_liquidity', False)
-                        token_data.rug_risk_score = rugcheck_data.get('rug_risk_score', 50)
-                        token_data.rug_raw_score = rugcheck_data.get('rug_raw_score', 0)
-                        token_data.is_rugged = rugcheck_data.get('is_rugged', False)
-                        token_data.risk_count = rugcheck_data.get('risk_count', 0)
-                        token_data.mint_authority_revoked = rugcheck_data.get('mint_authority_revoked', False)
-                        token_data.freeze_authority_revoked = rugcheck_data.get('freeze_authority_revoked', False)
-                        token_data.launchpad_name = rugcheck_data.get('launchpad_name')
-                        token_data.is_pump_fun = rugcheck_data.get('is_pump_fun', False)
-                        
-                        # ✅ LOG pour debug
-                        self.logger.debug(f"🔒 Enriched token_data with rugcheck: TH={token_data.top_holder_percentage:.2f}%, T10H={token_data.top_10_holders_percentage:.2f}%")
-                        
-                        self.logger.info(f"🔒 Got rugcheck data for {token_data.address[:8]}... (score: {rugcheck_data.get('rug_risk_score', 50)})")
-
-                    
-
-                # Calculate advanced metrics
-                liquidity_mc_ratio = 0.0
-                volume_mc_ratio = 0.0
-                if token_data.market_cap > 0:
-                    liquidity_mc_ratio = token_data.liquidity_usd / token_data.market_cap
-                    volume_mc_ratio = token_data.volume_24h / token_data.market_cap
                 
-                # Calculate scores
-                viability_score = self.analyzer.calculate_viability_score(token_data, [])
-                risk_score = self.analyzer.calculate_risk_score(token_data, [])
-                momentum_score = self.analyzer.calculate_momentum_score(token_data, [])
-                
-                if token_exists:
+                # Check if token exists
+                cursor.execute("SELECT address FROM tokens WHERE address = ?", (token_data.address,))
+                exists = cursor.fetchone() is not None
+                self.logger.debug(f"Token {token_data.address[:8]}... exists: {exists}")
+
+                if exists:
+                    self.logger.debug(f"Updating token {token_data.address[:8]}... with symbol='{token_data.symbol}', name='{token_data.name}'")
+
                     # Update existing token
                     query = """
                     UPDATE tokens SET
@@ -1535,11 +678,6 @@ class TokenSyncService:
                         bonding_curve_progress = ?,  
                         holder_count = ?,  
                         market_cap = ?,
-                        fdv = ?,
-                        liquidity_usd = ?,
-                        liquidity_sol = ?,
-                        liquidity_mc_ratio = ?,
-                        volume_mc_ratio = ?,
                         volume_5m = ?,
                         volume_1h = ?,
                         volume_6h = ?,
@@ -1548,32 +686,13 @@ class TokenSyncService:
                         price_change_1h = ?,
                         price_change_6h = ?,
                         price_change_24h = ?,
-                        viability_score = ?,
-                        risk_score = ?,
-                        momentum_score = ?,
-                        rug_risk_score = COALESCE(?, rug_risk_score),
-                        rug_raw_score = COALESCE(?, rug_raw_score),
-                        is_rugged = COALESCE(?, is_rugged),
-                        mint_authority_revoked = COALESCE(?, mint_authority_revoked),
-                        freeze_authority_revoked = COALESCE(?, freeze_authority_revoked),
-                        top_holder_percentage = COALESCE(?, top_holder_percentage),
-                        top_10_holders_percentage = COALESCE(?, top_10_holders_percentage),
-                        insider_holders_count = COALESCE(?, insider_holders_count),
-                        insider_networks_detected = COALESCE(?, insider_networks_detected),
-                        launchpad_name = COALESCE(?, launchpad_name),
-                        is_pump_fun = COALESCE(?, is_pump_fun),
-                        lp_providers_count = COALESCE(?, lp_providers_count),
-                        has_low_liquidity = COALESCE(?, has_low_liquidity),
-                        risk_count = COALESCE(?, risk_count),
-                        last_rugcheck_update = CASE WHEN ? IS NOT NULL THEN ? ELSE last_rugcheck_update END,
                         last_price_update = ?,
                         metadata_source = COALESCE(?, metadata_source),
-                        updated_at = CURRENT_TIMESTAMP,
-                        failed_attempts = 0,
-                        no_data_available = 0
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE address = ?
                     """
-                    
+                    self.logger.debug(f"UPDATE params: symbol='{token_data.symbol}', name='{token_data.name}', creator='{token_data.creator_address}'")
+
                     cursor.execute(query, (
                         token_data.symbol,
                         token_data.name,
@@ -1588,11 +707,6 @@ class TokenSyncService:
                         token_data.bonding_curve_progress,  
                         token_data.holder_count,  
                         token_data.market_cap,
-                        token_data.fdv,
-                        token_data.liquidity_usd,
-                        token_data.liquidity_sol,
-                        liquidity_mc_ratio,
-                        volume_mc_ratio,
                         token_data.volume_5m,
                         token_data.volume_1h,
                         token_data.volume_6h,
@@ -1601,50 +715,23 @@ class TokenSyncService:
                         token_data.price_change_1h,
                         token_data.price_change_6h,
                         token_data.price_change_24h,
-                        viability_score,
-                        risk_score,
-                        momentum_score,
-                        rugcheck_data.get('rug_risk_score'),
-                        rugcheck_data.get('rug_raw_score'),
-                        rugcheck_data.get('is_rugged'),
-                        rugcheck_data.get('mint_authority_revoked'),
-                        rugcheck_data.get('freeze_authority_revoked'),
-                        rugcheck_data.get('top_holder_percentage'),
-                        rugcheck_data.get('top_10_holders_percentage'),
-                        rugcheck_data.get('insider_holders_count'),
-                        rugcheck_data.get('insider_networks_detected'),
-                        rugcheck_data.get('launchpad_name'),
-                        rugcheck_data.get('is_pump_fun'),
-                        rugcheck_data.get('lp_providers_count'),
-                        rugcheck_data.get('has_low_liquidity'),
-                        rugcheck_data.get('risk_count'),
-                        current_timestamp if rugcheck_data else None,
-                        current_timestamp if rugcheck_data else None,
                         current_timestamp,
                         token_data.metadata_source,
                         token_data.address
                     ))
                 else:
                     # Insert new token
+                    self.logger.debug(f"Inserting new token {token_data.address[:8]}... with symbol='{token_data.symbol}', name='{token_data.name}'")
                     query = """
                     INSERT INTO tokens (
                         address, symbol, name, decimals, price_usd, logo_uri,
                         coingecko_id, is_verified, timestamp_token_created, creator_address,
-                        bonding_curve_progress, holder_count, market_cap, fdv,
-                        liquidity_usd, liquidity_sol, liquidity_mc_ratio, volume_mc_ratio,
-                        volume_5m, volume_1h, volume_6h, volume_24h, 
-                        price_change_5m, price_change_1h, price_change_6h, price_change_24h,
-                        viability_score, risk_score, momentum_score,
-                        rug_risk_score, rug_raw_score, is_rugged,
-                        mint_authority_revoked, freeze_authority_revoked,
-                        top_holder_percentage, top_10_holders_percentage,
-                        insider_holders_count, insider_networks_detected,
-                        launchpad_name, is_pump_fun, lp_providers_count,
-                        has_low_liquidity, risk_count, last_rugcheck_update,
-                        last_price_update, metadata_source, last_historized_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        bonding_curve_progress, holder_count, market_cap, volume_5m,
+                        volume_1h, volume_6h, volume_24h, price_change_5m, price_change_1h, 
+                        price_change_6h, price_change_24h, last_price_update, metadata_source
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """
-
+                    self.logger.debug(f"INSERT params: symbol='{token_data.symbol}', name='{token_data.name}', creator='{token_data.creator_address}'")
                     cursor.execute(query, (
                         token_data.address,
                         token_data.symbol,
@@ -1659,11 +746,6 @@ class TokenSyncService:
                         token_data.bonding_curve_progress,  
                         token_data.holder_count,  
                         token_data.market_cap,
-                        token_data.fdv,
-                        token_data.liquidity_usd,
-                        token_data.liquidity_sol,
-                        liquidity_mc_ratio,
-                        volume_mc_ratio,
                         token_data.volume_5m,
                         token_data.volume_1h,
                         token_data.volume_6h,
@@ -1672,45 +754,18 @@ class TokenSyncService:
                         token_data.price_change_1h,
                         token_data.price_change_6h,
                         token_data.price_change_24h,
-                        viability_score,
-                        risk_score,
-                        momentum_score,
-                        # Données rugcheck
-                        rugcheck_data.get('rug_risk_score', 50),
-                        rugcheck_data.get('rug_raw_score', 0),
-                        rugcheck_data.get('is_rugged', False),
-                        rugcheck_data.get('mint_authority_revoked', False),
-                        rugcheck_data.get('freeze_authority_revoked', False),
-                        rugcheck_data.get('top_holder_percentage', 0.0),
-                        rugcheck_data.get('top_10_holders_percentage', 0.0),
-                        rugcheck_data.get('insider_holders_count', 0),
-                        rugcheck_data.get('insider_networks_detected', 0),
-                        rugcheck_data.get('launchpad_name'),
-                        rugcheck_data.get('is_pump_fun', False),
-                        rugcheck_data.get('lp_providers_count', 0),
-                        rugcheck_data.get('has_low_liquidity', False),
-                        rugcheck_data.get('risk_count', 0),
-                        current_timestamp if rugcheck_data else None,
                         current_timestamp,
-                        token_data.metadata_source,
-                        current_timestamp
+                        token_data.metadata_source
                     ))
-                    
-            
                 
-                    conn.commit()
-                # 4. Historiser le nouveau token après insertion (si nouveau)
-                if not token_exists and (token_data.price_usd > 0 or token_data.market_cap > 0):
-                    time.sleep(0.05)
-                    self.historize_token_data(token_data.address, token_data)  # ← Passer token_data
-                elif not token_exists:
-                    self.logger.debug(f"Skipping initial historization for {token_data.address[:8]}... - no significant data")
-                
+                conn.commit()
                 return True
                 
         except Exception as e:
             self.logger.error(f"Error upserting token {token_data.address}: {e}")
             return False
+    
+
 
     def get_dashboard_priority_tokens(self) -> List[str]:
         """Get tokens that appear in the dashboard overview (high priority for updates)"""
@@ -1796,6 +851,7 @@ class TokenSyncService:
             self.logger.error(f"Error getting dashboard priority tokens: {e}")
             return []
 
+    # 2. AJOUTER cette méthode pour les tokens dashboard qui ont besoin de mise à jour
     def get_dashboard_tokens_needing_update(self) -> List[str]:
         """Get dashboard tokens that need data updates (prioritized)"""
         try:
@@ -1815,7 +871,6 @@ class TokenSyncService:
                 SELECT t.address 
                 FROM tokens t
                 WHERE t.address IN ({placeholders})
-                AND t.is_dead = 0
                 AND (
                     t.last_price_update < ? 
                     OR t.last_price_update IS NULL
@@ -1852,8 +907,7 @@ class TokenSyncService:
                 query = """
                 SELECT address 
                 FROM tokens 
-                WHERE (timestamp_token_created IS NULL OR timestamp_token_created = 0)
-                AND is_dead = 0
+                WHERE timestamp_token_created IS NULL OR timestamp_token_created = 0
                 ORDER BY created_at DESC
                 LIMIT ?
                 """
@@ -1926,6 +980,7 @@ class TokenSyncService:
         self.logger.info(f"Creation timestamp update completed: {successful_updates}/{len(tokens_to_update)} successful")
         
         return successful_updates
+    
 
     def get_tokens_needing_pumpfun_update(self) -> List[str]:
         """Get tokens with missing market data (likely Pump.fun tokens)"""
@@ -1939,7 +994,6 @@ class TokenSyncService:
                 WHERE (market_cap IS NULL OR market_cap = 0 OR market_cap < 1000)
                 AND (metadata_source IS NULL OR metadata_source NOT LIKE '%pumpfun%')
                 AND (created_at >= datetime('now', '-7 days'))
-                AND is_dead = 0
                 ORDER BY created_at DESC
                 LIMIT ?
                 """
@@ -2050,41 +1104,6 @@ class TokenSyncService:
         except Exception as e:
             self.logger.error(f"Error updating token with Pump.fun data {token_address}: {e}")
             return False
-
-    def run_historization_cycle(self) -> int:
-        """Run historization for tokens that need it"""
-        self.logger.info("Starting historization cycle...")
-        
-        tokens_to_historize = self.get_tokens_needing_historization()
-        
-        if not tokens_to_historize:
-            self.logger.info("No tokens need historization")
-            return 0
-        
-        historized_count = 0
-        
-        for token_address in tokens_to_historize:
-            try:
-                if self.historize_token_data(token_address):
-                    historized_count += 1
-                
-            except Exception as e:
-                self.logger.error(f"Error historizing token {token_address}: {e}")
-                continue
-        
-        self.logger.info(f"Historization cycle completed: {historized_count}/{len(tokens_to_historize)} successful")
-        
-        return historized_count
-
-    def run_dead_token_check(self) -> int:
-        """Run dead token detection cycle"""
-        self.logger.info("Starting dead token check cycle...")
-        
-        marked_count = self.check_and_mark_dead_tokens()
-        
-        self.logger.info(f"Dead token check completed: {marked_count} tokens marked as dead")
-        
-        return marked_count
 
     def process_token_batch(self, token_addresses: List[str]) -> int:
         """Process a batch of token addresses"""
@@ -2199,7 +1218,6 @@ class TokenSyncService:
                     AND name IS NOT NULL
                     AND price_usd > 0
                     AND market_cap > 0
-                    AND is_dead = 0
                 """, dashboard_tokens)
                 complete_data = cursor.fetchone()[0]
                 
@@ -2209,7 +1227,6 @@ class TokenSyncService:
                     SELECT COUNT(*) FROM tokens 
                     WHERE address IN ({placeholders})
                     AND last_price_update > ?
-                    AND is_dead = 0
                 """, dashboard_tokens + [recent_cutoff])
                 recent_updates = cursor.fetchone()[0]
                 
@@ -2280,15 +1297,10 @@ class TokenSyncService:
                 """, (CONFIG['retry_failed_after_days'],))
                 retry_eligible = cursor.fetchone()[0]
                 
-                # Tokens morts
-                cursor.execute("SELECT COUNT(*) FROM tokens WHERE is_dead = 1")
-                dead_count = cursor.fetchone()[0]
-                
                 return {
                     'no_data_flagged': no_data_count,
                     'partial_failures': partial_failures,
-                    'retry_eligible': retry_eligible,
-                    'dead_tokens': dead_count
+                    'retry_eligible': retry_eligible
                 }
                 
         except Exception as e:
@@ -2313,8 +1325,6 @@ class TokenSyncService:
         self.logger.info(f"Successful updates: {self.stats['successful_updates']}")
         self.logger.info(f"Failed updates: {self.stats['failed_updates']}")
         self.logger.info(f"API calls made: {self.stats['api_calls']}")
-        self.logger.info(f"Tokens historized: {self.stats['tokens_historized']}")
-        self.logger.info(f"Tokens marked dead: {self.stats['tokens_marked_dead']}")
         
         # Stats dashboard
         if dashboard_stats and 'error' not in dashboard_stats:
@@ -2329,12 +1339,12 @@ class TokenSyncService:
             self.logger.info(f"Tokens marked as no-data: {flagged_stats.get('no_data_flagged', 0)}")
             self.logger.info(f"Tokens with partial failures: {flagged_stats.get('partial_failures', 0)}")
             self.logger.info(f"Tokens eligible for retry: {flagged_stats.get('retry_eligible', 0)}")
-            self.logger.info(f"Dead tokens: {flagged_stats.get('dead_tokens', 0)}")
 
         if self.stats['processed_tokens'] > 0:
             success_rate = (self.stats['successful_updates'] / self.stats['processed_tokens']) * 100
             self.logger.info(f"Success rate: {success_rate:.1f}%")
 
+    
     def run_sync_cycle(self):
         """Run one complete synchronization cycle"""
         self.logger.info("Starting synchronization cycle...")
@@ -2346,36 +1356,24 @@ class TokenSyncService:
             # 2. Update existing token prices
             prices_updated = self.update_existing_prices()
             
-            # 3. Run historization cycle (every few cycles)
+            # 3. Update missing creation timestamps (periodically)
+            # Only run this every 5 cycles to avoid too many API calls
             if not hasattr(self, 'cycle_count'):
                 self.cycle_count = 0
             
             self.cycle_count += 1
             creation_timestamps_updated = 0
-            historized_count = 0
-            dead_tokens_marked = 0
             
-            # Every 3 cycles - run historization
-            if self.cycle_count % 3 == 0:
-                historized_count = self.run_historization_cycle()
-            
-            # Every 5 cycles - update missing creation timestamps
-            if self.cycle_count % 5 == 0:
+            if self.cycle_count % 5 == 0:  # Every 5 cycles
                 creation_timestamps_updated = self.update_missing_creation_timestamps()
             
-            # Every 6 cycles - check for dead tokens
-            if self.cycle_count % 6 == 0:
-                dead_tokens_marked = self.run_dead_token_check()
-            
-            # Every 10 cycles - update Pump.fun tokens
-            if self.cycle_count % 10 == 0:
+            if self.cycle_count % 10 == 0:  # Tous les 10 cycles
                 pumpfun_updated = self.update_pumpfun_tokens()
-                self.logger.info(f"Pump.fun tokens updated: {pumpfun_updated}")
 
             # 4. Print statistics
             self.print_statistics()
             
-            self.logger.info(f"Sync cycle completed: {new_tokens_updated} new, {prices_updated} price updates, {creation_timestamps_updated} creation timestamps, {historized_count} historized, {dead_tokens_marked} marked dead")
+            self.logger.info(f"Sync cycle completed: {new_tokens_updated} new, {prices_updated} price updates, {creation_timestamps_updated} creation timestamps")
             
         except Exception as e:
             self.logger.error(f"Error in sync cycle: {e}")
@@ -2424,15 +1422,13 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    print("Token Data Synchronization Backend with Historical Tracking")
-    print("=" * 60)
+    print("Token Data Synchronization Backend")
+    print("=" * 40)
     print(f"Database: {CONFIG['db_path']}")
     print(f"Update interval: {CONFIG['update_interval']} seconds")
     print(f"Price update interval: {CONFIG['price_update_interval']} seconds")
-    print(f"Historization interval: {CONFIG['historization_interval']} seconds")
-    print(f"Dead token check interval: {CONFIG['dead_token_check_interval']} seconds")
     print(f"API rate limit: {CONFIG['api_rate_limit']} seconds")
-    print("=" * 60)
+    print("=" * 40)
     
     # Initialize service
     service = TokenSyncService(CONFIG['db_path'])
