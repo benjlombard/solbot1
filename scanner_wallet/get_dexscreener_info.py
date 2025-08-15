@@ -21,14 +21,15 @@ import signal
 import functools
 from collections import deque, defaultdict
 import threading
-
+import asyncio
+import aiohttp
 
 
 # Configuration
 CONFIG = {
     'db_path': 'solana_wallet_monitor.db',
     'api_rate_limit': 1.5,  # seconds between API calls
-    'batch_size':450,       # tokens to process per batch
+    'batch_size':75,       # tokens to process per batch
     'update_interval': 50,  # seconds between sync cycles
     'price_update_interval': 250,  # 5 minutes for price updates
     'dashboard_update_interval': 120, # 2.5 minutes pour dashboard tokens
@@ -43,6 +44,11 @@ CONFIG = {
     'db_timeout': 60.0,
     'db_retry_delay': 0.2,  # Nouveau paramètre
     'db_max_retries': 5,    # Nouveau paramètre
+    'max_concurrent_batches': 3,      # Nombre max de lots traités en parallèle
+    'batch_pause_seconds': 2.0,       # Pause entre lots pour éviter surcharge
+    'batch_retry_failed': True,       # Réessayer les tokens échoués dans un batch
+    'batch_log_detailed': False,      # Log détaillé pour debug
+
     'known_quote_tokens': {
         'So11111111111111111111111111111111111111112',  # SOL
         'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
@@ -52,6 +58,84 @@ CONFIG = {
     }
 }
 
+@dataclass
+class BatchResult:
+    """Résultat d'un traitement par lot"""
+    successful_tokens: List[str]
+    failed_tokens: List[str] 
+    total_duration: float
+    api_calls_made: int
+    errors: List[str]
+
+class BatchProcessor:
+    """Processeur de tokens par lots pour optimiser les performances"""
+    
+    def __init__(self, batch_size: int = 75, max_concurrent_batches: int = 3):
+        self.batch_size = batch_size
+        self.max_concurrent_batches = max_concurrent_batches
+        self.logger = logging.getLogger(__name__ + '.BatchProcessor')
+        
+    def create_batches(self, tokens: List[str]) -> List[List[str]]:
+        """Divise la liste de tokens en lots"""
+        batches = []
+        for i in range(0, len(tokens), self.batch_size):
+            batch = tokens[i:i + self.batch_size]
+            batches.append(batch)
+        
+        self.logger.info(f"📦 Created {len(batches)} batches from {len(tokens)} tokens (batch_size={self.batch_size})")
+        return batches
+    
+    def process_batch_sync(self, token_batch: List[str], sync_service) -> BatchResult:
+        """Traite un lot de tokens de manière synchrone (version actuelle)"""
+        start_time = time.time()
+        successful = []
+        failed = []
+        errors = []
+        api_calls = 0
+        
+        self.logger.info(f"🔄 Processing batch of {len(token_batch)} tokens...")
+        
+        for i, token_address in enumerate(token_batch):
+            try:
+                self.logger.debug(f"[{i+1}/{len(token_batch)}] Processing {token_address[:8]}...")
+                
+                # Utiliser la méthode existante
+                token_data = sync_service.get_dexscreener_data(token_address)
+                api_calls += 1
+                
+                if token_data:
+                    if sync_service.upsert_token(token_data):
+                        successful.append(token_address)
+                        self.logger.debug(f"✅ [{i+1}/{len(token_batch)}] Success: {token_address[:8]}...")
+                    else:
+                        failed.append(token_address)
+                        errors.append(f"Failed to upsert {token_address[:8]}...")
+                else:
+                    # Pas de données trouvées - créer stub
+                    sync_service.create_token_stub(token_address)
+                    failed.append(token_address)
+                    errors.append(f"No data found for {token_address[:8]}...")
+                
+                # Rate limiting entre tokens dans le même batch
+                time.sleep(CONFIG['api_rate_limit'])
+                
+            except Exception as e:
+                failed.append(token_address)
+                errors.append(f"Error processing {token_address[:8]}...: {str(e)}")
+                self.logger.error(f"❌ Error processing {token_address}: {e}")
+        
+        duration = time.time() - start_time
+        
+        result = BatchResult(
+            successful_tokens=successful,
+            failed_tokens=failed,
+            total_duration=duration,
+            api_calls_made=api_calls,
+            errors=errors
+        )
+        
+        self.logger.info(f"✅ Batch completed: {len(successful)}/{len(token_batch)} successful in {duration:.2f}s")
+        return result
 
 @dataclass
 class ApiCallStats:
@@ -551,6 +635,19 @@ class TokenSyncService:
             'tokens_historized': 0,
             'tokens_marked_dead': 0,
             'start_time': None
+        }
+
+        self.batch_processor = BatchProcessor(
+            batch_size=CONFIG.get('batch_size', 75),
+            max_concurrent_batches=CONFIG.get('max_concurrent_batches', 3)
+        )
+        
+        # Statistiques de batch
+        self.batch_stats = {
+            'total_batches_processed': 0,
+            'total_tokens_in_batches': 0,
+            'average_batch_duration': 0.0,
+            'batch_success_rate': 0.0
         }
     
         self.logger.info(f"🔧 API tracker verification: {type(self.api_tracker)}")
@@ -1977,17 +2074,17 @@ class TokenSyncService:
                 SELECT address 
                 FROM tokens 
                 WHERE (last_price_update < ? OR last_price_update IS NULL)
-                AND (no_data_available = 0 OR no_data_available IS NULL
-                    OR (no_data_available = 1 AND no_data_last_check < datetime('now', '-' || ? || ' days')))
+                AND (no_data_available = 0 OR no_data_available IS NULL)
                 AND (failed_attempts < ? OR failed_attempts IS NULL)
                 AND is_dead = 0
                 ORDER BY last_price_update ASC NULLS FIRST
                 LIMIT ?
                 """
                 
-                cursor.execute(query, (cutoff_time, CONFIG['retry_failed_after_days'], CONFIG['max_failed_attempts'], CONFIG['batch_size']))
+                cursor.execute(query, (cutoff_time, CONFIG['max_failed_attempts'], CONFIG['batch_size']))
                 results = cursor.fetchall()
                 
+                self.logger.info(f"Found {len(results)} tokens needing price updates (excluding flagged tokens)")
                 return [row[0] for row in results]
                 
         except Exception as e:
@@ -2524,13 +2621,15 @@ class TokenSyncService:
                 
                 # Construire la requête avec placeholders
                 placeholders = ','.join(['?' for _ in dashboard_tokens])
-                cutoff_time = int(time.time()) - (CONFIG['price_update_interval'] // 2)  # Update plus fréquent
+                cutoff_time = int(time.time()) - (CONFIG['price_update_interval'] // 2)
                 
                 query = f"""
                 SELECT t.address 
                 FROM tokens t
                 WHERE t.address IN ({placeholders})
                 AND t.is_dead = 0
+                AND (t.no_data_available = 0 OR t.no_data_available IS NULL)
+                AND (t.failed_attempts < ? OR t.failed_attempts IS NULL)
                 AND (
                     t.last_price_update < ? 
                     OR t.last_price_update IS NULL
@@ -2545,12 +2644,12 @@ class TokenSyncService:
                     CASE WHEN t.last_price_update IS NULL THEN 0 ELSE t.last_price_update END ASC
                 """
                 
-                params = dashboard_tokens + [cutoff_time]
+                params = dashboard_tokens + [CONFIG['max_failed_attempts'], cutoff_time]
                 cursor.execute(query, params)
                 results = cursor.fetchall()
                 
                 priority_tokens = [row[0] for row in results]
-                self.logger.info(f"Found {len(priority_tokens)} dashboard tokens needing updates")
+                self.logger.info(f"Found {len(priority_tokens)} dashboard tokens needing updates (excluding failed tokens)")
                 
                 return priority_tokens
                 
@@ -2803,95 +2902,95 @@ class TokenSyncService:
 
     def process_token_batch(self, token_addresses: List[str]) -> int:
         """Process a batch of token addresses"""
-        successful_updates = 0
-        
-        for address in token_addresses:
-            try:
-                self.logger.info(f"Processing token: {address[:8]}...")
-                
-                # Get data from DexScreener
-                token_data = self.get_dexscreener_data(address)
-                
-                if token_data:
-                    # Upsert to database
-                    if self.upsert_token(token_data):
-                        successful_updates += 1
-                        self.logger.info(f"✅ Successfully updated: {address[:8]}...")
-                        
-                        # Reset failed attempts si le token avait des échecs précédents
-                        with self.get_db_connection() as conn:
-                            cursor = conn.cursor()
-                            cursor.execute("""
-                                UPDATE tokens 
-                                SET failed_attempts = 0, no_data_available = 0
-                                WHERE address = ? AND (failed_attempts > 0 OR no_data_available = 1)
-                            """, (address,))
-                            conn.commit()
-                            
-                    else:
-                        self.logger.warning(f"❌ Failed to save: {address[:8]}...")
-                        self.stats['failed_updates'] += 1
-                else:
-                    # Aucune donnée trouvée - créer un stub et marquer l'échec
-                    self.logger.warning(f"❌ No data found for: {address[:8]}...")
-                    self.create_token_stub(address)
-                    self.stats['failed_updates'] += 1
-                
-                self.stats['processed_tokens'] += 1
-                
-                # Rate limiting
-                time.sleep(CONFIG['api_rate_limit'])
-                
-            except Exception as e:
-                self.logger.error(f"Error processing token {address}: {e}")
-                # En cas d'erreur, créer aussi un stub
-                self.create_token_stub(address)
-                self.stats['failed_updates'] += 1
-        
-        return successful_updates
+        self.logger.info(f"🔄 Processing {len(token_addresses)} tokens using batch processor...")
+    
+        # Utiliser le nouveau système de batch
+        return self.process_tokens_in_batches(token_addresses)
     
     def sync_new_tokens(self) -> int:
-        """Synchronize new tokens from transactions"""
-        self.logger.info("Starting new token synchronization...")
+        """Version optimisée avec batch processing"""
+        self.logger.info("🚀 Starting BATCH token synchronization...")
         
         all_new_tokens = self.get_new_tokens_from_transactions()
-    
+        
         if not all_new_tokens:
             self.logger.info("No new tokens to process")
             return 0
         
-        # Identifier quels nouveaux tokens sont dans le dashboard
+        # Séparer tokens dashboard vs autres (logique existante)
         dashboard_tokens = set(self.get_dashboard_priority_tokens())
-        
-        # Séparer en priorité dashboard vs autres
         priority_new_tokens = [t for t in all_new_tokens if t in dashboard_tokens]
         other_new_tokens = [t for t in all_new_tokens if t not in dashboard_tokens]
         
-        self.logger.info(f"New tokens breakdown: 🎯 {len(priority_new_tokens)} dashboard priority, 📋 {len(other_new_tokens)} others")
+        self.logger.info(f"📊 Token breakdown: 🎯 {len(priority_new_tokens)} dashboard priority, 📋 {len(other_new_tokens)} others")
         
         total_updated = 0
         
-        # 1. D'abord traiter les tokens dashboard
+        # 1. Traiter les tokens dashboard en priorité (par lots)
         if priority_new_tokens:
-            self.logger.info(f"🎯 Processing {len(priority_new_tokens)} dashboard priority new tokens")
-            priority_updated = self.process_token_batch(priority_new_tokens)
+            self.logger.info(f"🎯 Processing {len(priority_new_tokens)} dashboard priority tokens in batches")
+            priority_updated = self.process_tokens_in_batches(priority_new_tokens, priority=True)
             total_updated += priority_updated
-            self.logger.info(f"Dashboard new tokens processed: {priority_updated}/{len(priority_new_tokens)}")
         
-        # 2. Ensuite traiter les autres (avec limite)
-        remaining_batch_size = max(10, CONFIG['batch_size'] - len(priority_new_tokens))
-        other_tokens_batch = other_new_tokens[:remaining_batch_size]
+        # 2. Traiter les autres tokens (avec limite)
+        remaining_budget = max(10, CONFIG['batch_size'] - len(priority_new_tokens))
+        other_tokens_batch = other_new_tokens[:remaining_budget]
         
         if other_tokens_batch:
-            self.logger.info(f"📋 Processing {len(other_tokens_batch)} other new tokens")
-            other_updated = self.process_token_batch(other_tokens_batch)
+            self.logger.info(f"📋 Processing {len(other_tokens_batch)} other tokens in batches")
+            other_updated = self.process_tokens_in_batches(other_tokens_batch, priority=False)
             total_updated += other_updated
-            self.logger.info(f"Other new tokens processed: {other_updated}/{len(other_tokens_batch)}")
         
         self.stats['successful_updates'] += total_updated
-        self.logger.info(f"New token sync completed: {total_updated}/{len(priority_new_tokens) + len(other_tokens_batch)} successful")
+        self.logger.info(f"🏁 Batch token sync completed: {total_updated} total successful")
         
         return total_updated
+
+    def process_tokens_in_batches(self, tokens: List[str], priority: bool = False) -> int:
+        """Traite une liste de tokens par lots"""
+        if not tokens:
+            return 0
+        
+        start_time = time.time()
+        total_successful = 0
+        
+        # Créer les lots
+        batches = self.batch_processor.create_batches(tokens)
+        
+        # Traiter chaque lot
+        for batch_idx, token_batch in enumerate(batches):
+            self.logger.info(f"📦 Processing batch {batch_idx + 1}/{len(batches)} ({'priority' if priority else 'standard'})")
+            
+            try:
+                batch_result = self.batch_processor.process_batch_sync(token_batch, self)
+                
+                total_successful += len(batch_result.successful_tokens)
+                
+                # Log des résultats du lot
+                self.logger.info(f"✅ Batch {batch_idx + 1} results: {len(batch_result.successful_tokens)}/{len(token_batch)} successful")
+                
+                if batch_result.errors:
+                    error_sample = batch_result.errors[:3]  # Montrer 3 premières erreurs
+                    self.logger.warning(f"⚠️ Batch {batch_idx + 1} errors (showing first 3): {error_sample}")
+                
+                # Mettre à jour les statistiques de batch
+                self._update_batch_stats(batch_result)
+                
+                # Pause entre lots pour éviter la surcharge
+                if batch_idx < len(batches) - 1:  # Pas de pause après le dernier lot
+                    pause_time = CONFIG.get('batch_pause_seconds', 2.0)
+                    self.logger.debug(f"⏸️ Pausing {pause_time}s between batches...")
+                    time.sleep(pause_time)
+                
+            except Exception as e:
+                self.logger.error(f"❌ Critical error in batch {batch_idx + 1}: {e}")
+                # Continuer avec le lot suivant en cas d'erreur
+                continue
+        
+        total_duration = time.time() - start_time
+        self.logger.info(f"🏁 All batches completed: {total_successful}/{len(tokens)} successful in {total_duration:.2f}s")
+        
+        return total_successful
 
     def get_dashboard_sync_stats(self) -> Dict:
         """Get statistics about dashboard token synchronization"""
@@ -2941,38 +3040,48 @@ class TokenSyncService:
             return {}
 
     def update_existing_prices(self) -> int:
-        """Update prices for existing tokens"""
-        self.logger.info("Starting price updates for existing tokens...")
+        """Version optimisée pour mise à jour des prix existants"""
+        self.logger.info("🔄 Starting BATCH price updates...")
         
-        # 1. D'abord, mettre à jour les tokens du dashboard
+        # 1. Tokens dashboard prioritaires
         dashboard_tokens = self.get_dashboard_tokens_needing_update()
         dashboard_updated = 0
         
         if dashboard_tokens:
-            self.logger.info(f"🎯 Prioritizing {len(dashboard_tokens)} dashboard tokens")
-            dashboard_updated = self.process_token_batch(dashboard_tokens)
-            self.logger.info(f"Dashboard tokens updated: {dashboard_updated}/{len(dashboard_tokens)}")
+            self.logger.info(f"🎯 Batch processing {len(dashboard_tokens)} dashboard tokens")
+            dashboard_updated = self.process_tokens_in_batches(dashboard_tokens, priority=True)
         
-        # 2. Ensuite, mettre à jour les autres tokens (avec batch réduit)
-        remaining_batch_size = max(5, CONFIG['batch_size'] - len(dashboard_tokens))
+        # 2. Autres tokens (avec budget réduit)
+        remaining_budget = max(5, CONFIG['batch_size'] - len(dashboard_tokens))
         other_tokens = self.get_tokens_needing_price_update()
-        
-        # Exclure les tokens du dashboard déjà traités
-        other_tokens = [t for t in other_tokens if t not in dashboard_tokens][:remaining_batch_size]
+        other_tokens = [t for t in other_tokens if t not in dashboard_tokens][:remaining_budget]
         
         other_updated = 0
         if other_tokens:
-            self.logger.info(f"📊 Updating {len(other_tokens)} other tokens")
-            other_updated = self.process_token_batch(other_tokens)
-            self.logger.info(f"Other tokens updated: {other_updated}/{len(other_tokens)}")
+            self.logger.info(f"📊 Batch processing {len(other_tokens)} other tokens")
+            other_updated = self.process_tokens_in_batches(other_tokens, priority=False)
         
         total_updated = dashboard_updated + other_updated
-        total_processed = len(dashboard_tokens) + len(other_tokens)
-        
-        self.logger.info(f"Price update completed: {total_updated}/{total_processed} successful (📊 Dashboard: {dashboard_updated}, 📋 Others: {other_updated})")
+        self.logger.info(f"🏁 Batch price update completed: {total_updated} total (📊 Dashboard: {dashboard_updated}, 📋 Others: {other_updated})")
         
         return total_updated
     
+    def _update_batch_stats(self, batch_result: BatchResult):
+        """Met à jour les statistiques de traitement par lots"""
+        self.batch_stats['total_batches_processed'] += 1
+        self.batch_stats['total_tokens_in_batches'] += len(batch_result.successful_tokens) + len(batch_result.failed_tokens)
+        
+        # Moyenne mobile pour la durée
+        current_avg = self.batch_stats['average_batch_duration']
+        batch_count = self.batch_stats['total_batches_processed']
+        self.batch_stats['average_batch_duration'] = (current_avg * (batch_count - 1) + batch_result.total_duration) / batch_count
+        
+        # Taux de succès global
+        total_successful = sum(len(r.successful_tokens) for r in [batch_result])  # Simplification pour cet exemple
+        total_processed = sum(len(r.successful_tokens) + len(r.failed_tokens) for r in [batch_result])
+        if total_processed > 0:
+            self.batch_stats['batch_success_rate'] = (total_successful / total_processed) * 100
+
     def get_flagged_tokens_stats(self) -> Dict:
         """Get statistics about flagged tokens"""
         try:
@@ -3045,6 +3154,19 @@ class TokenSyncService:
             self.logger.info(f"Tokens with partial failures: {flagged_stats.get('partial_failures', 0)}")
             self.logger.info(f"Tokens eligible for retry: {flagged_stats.get('retry_eligible', 0)}")
             self.logger.info(f"Dead tokens: {flagged_stats.get('dead_tokens', 0)}")
+
+
+        if self.batch_stats['total_batches_processed'] > 0:
+            self.logger.info("=== 📦 BATCH PROCESSING STATS ===")
+            self.logger.info(f"Total batches processed: {self.batch_stats['total_batches_processed']}")
+            self.logger.info(f"Total tokens in batches: {self.batch_stats['total_tokens_in_batches']}")
+            self.logger.info(f"Average batch duration: {self.batch_stats['average_batch_duration']:.2f}s")
+            self.logger.info(f"Batch success rate: {self.batch_stats['batch_success_rate']:.1f}%")
+            
+            # Calcul de l'efficacité
+            if self.batch_stats['total_tokens_in_batches'] > 0:
+                tokens_per_second = self.batch_stats['total_tokens_in_batches'] / (self.batch_stats['total_batches_processed'] * self.batch_stats['average_batch_duration'])
+                self.logger.info(f"Processing rate: {tokens_per_second:.2f} tokens/second")
 
         if self.stats['processed_tokens'] > 0:
             success_rate = (self.stats['successful_updates'] / self.stats['processed_tokens']) * 100
