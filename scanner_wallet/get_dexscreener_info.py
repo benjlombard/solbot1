@@ -76,27 +76,65 @@ class ApiStatsTracker:
     def __init__(self):
         self.stats = defaultdict(lambda: ApiCallStats())
         self.lock = threading.Lock()
+        self.db_service = db_service  # Référence au service pour accès DB
+        self.current_cycle_id = None
     
-    def record_call(self, api_name: str, duration: float):
-        """Record an API call with duration"""
+    def set_current_cycle(self, cycle_id: int):
+        """Set the current sync cycle ID for tracking"""
+        self.current_cycle_id = cycle_id
+
+    def record_call(self, api_name: str, duration: float, success: bool = True, 
+                   http_status: int = None, error_msg: str = None):
+        """Record an API call with duration and store in database"""
         current_time = time.time()
+        duration_ms = int(duration * 1000)  # Convert to milliseconds
         
         with self.lock:
+            # Update in-memory stats (existing logic)
             api_stats = self.stats[api_name]
-            
-            # Update totals
             api_stats.total_calls += 1
             api_stats.total_duration += duration
             
-            # Add to time windows
             call_record = (current_time, duration)
             api_stats.calls_5m.append(call_record)
             api_stats.calls_30m.append(call_record)
             api_stats.calls_1h.append(call_record)
             
-            # Clean old records
             self._clean_old_records(api_stats, current_time)
+        
+        # Store in database (non-blocking)
+        if self.db_service:
+            try:
+                self._store_api_call_to_db(
+                    api_name, int(current_time), duration_ms, 
+                    success, http_status, error_msg
+                )
+            except Exception as e:
+                # Don't fail the API call if DB storage fails
+                print(f"Warning: Failed to store API metric to DB: {e}")
     
+    def _store_api_call_to_db(self, api_name: str, timestamp: int, duration_ms: int,
+                             success: bool, http_status: int, error_msg: str):
+        """Store API call metrics to database"""
+        try:
+            with self.db_service.get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT INTO api_metrics (
+                        api_name, call_timestamp, duration_ms, success,
+                        http_status_code, error_message, sync_cycle_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (api_name, timestamp, duration_ms, success, 
+                      http_status, error_msg, self.current_cycle_id))
+                
+                conn.commit()
+                
+        except Exception as e:
+            # Log but don't raise - DB storage is not critical for API functionality
+            if hasattr(self.db_service, 'logger'):
+                self.db_service.logger.debug(f"Failed to store API metric: {e}")
+
     def _clean_old_records(self, api_stats: ApiCallStats, current_time: float):
         """Remove old records from time windows"""
         # 5 minutes
@@ -477,12 +515,13 @@ class TokenSyncService:
         self.logger = self._setup_logger()
         self.analyzer = TokenAnalyzer()
         try:
-            self.api_tracker = ApiStatsTracker()
+            self.api_tracker = ApiStatsTracker(db_service=self)  # ← Modification
             self.logger.info("✅ API tracker initialized successfully")
         except Exception as e:
             self.logger.error(f"❌ Failed to initialize API tracker: {e}")
             raise
-            
+        
+        self.current_sync_cycle_id = None
         # Request session for connection pooling
         self.session = requests.Session()
         self.session.headers.update({
@@ -1385,10 +1424,16 @@ class TokenSyncService:
             original_address = address
             token_data = None
             
+            # 1. Identify address type (pair or token)
             start_time = time.time()
             address_type = self.identify_address_type(address)
             identify_duration = time.time() - start_time
-            self.api_tracker.record_call('dexscreener_identify', identify_duration)
+            
+            self.api_tracker.record_call(
+                'dexscreener_identify', 
+                identify_duration,
+                success=True  # identify_address_type gère ses propres erreurs
+            )
             
             # If it's a pair, extract token address
             if address_type == 'pair':
@@ -1396,7 +1441,12 @@ class TokenSyncService:
                 start_time = time.time()
                 token_address = self.extract_token_from_pair(address)
                 extract_duration = time.time() - start_time
-                self.api_tracker.record_call('dexscreener_extract_pair', extract_duration)
+                
+                self.api_tracker.record_call(
+                    'dexscreener_extract_pair', 
+                    extract_duration,
+                    success=(token_address is not None)
+                )
 
                 if not token_address:
                     self.logger.warning(f"Could not extract token from pair {address}")
@@ -1404,86 +1454,326 @@ class TokenSyncService:
                 
                 self.logger.info(f"Token extracted: {token_address[:8]}...")
             
-            # Get token data
+            # 2. Get token data from DexScreener
             url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
             start_time = time.time()
-            response = self.session.get(url, timeout=CONFIG['request_timeout'])
-            api_duration = time.time() - start_time
-            self.api_tracker.record_call('dexscreener_tokens', api_duration)
-            self.stats['api_calls'] += 1
             
-            if response.status_code == 200:
-                data = response.json()
+            try:
+                response = self.session.get(url, timeout=CONFIG['request_timeout'])
+                api_duration = time.time() - start_time
                 
-                if 'pairs' in data and data['pairs']:
-                    # Filter valid pairs and sort by liquidity
-                    valid_pairs = [
-                        p for p in data['pairs'] 
-                        if p.get('fdv') and float(p.get('fdv', 0)) > 0
-                    ]
+                # Record API call with detailed metrics
+                self.api_tracker.record_call(
+                    'dexscreener_tokens', 
+                    api_duration, 
+                    success=(response.status_code == 200),
+                    http_status=response.status_code
+                )
+                
+                self.stats['api_calls'] += 1
+                
+                if response.status_code == 200:
+                    data = response.json()
                     
-                    if not valid_pairs:
+                    if 'pairs' in data and data['pairs']:
+                        # Filter valid pairs and sort by liquidity
+                        valid_pairs = [
+                            p for p in data['pairs'] 
+                            if p.get('fdv') and float(p.get('fdv', 0)) > 0
+                        ]
+                        
+                        if not valid_pairs:
+                            token_data = None
+                        else: 
+                            # Take pair with highest liquidity
+                            best_pair = max(
+                                valid_pairs,
+                                key=lambda x: float(x.get('liquidity', {}).get('usd', 0) or 0)
+                            )
+                            
+                            # Get token creation timestamp
+                            creation_timestamp = self.get_token_creation_timestamp(token_address)
+                            if not creation_timestamp:
+                                # If not found via dedicated methods, try from the pair data
+                                if 'pairCreatedAt' in best_pair:
+                                    creation_time = best_pair['pairCreatedAt']
+                                    if creation_time and creation_time > 1e12:  # If in milliseconds
+                                        creation_timestamp = int(creation_time // 1000)
+                                    elif creation_time:
+                                        creation_timestamp = int(creation_time)
+                            
+                            # Create TokenData object
+                            token_data = TokenData(
+                                address=token_address,
+                                symbol=best_pair.get('baseToken', {}).get('symbol'),
+                                name=best_pair.get('baseToken', {}).get('name'),
+                                price_usd=float(best_pair.get('priceUsd', 0) or 0),
+                                timestamp_token_created=creation_timestamp or 0,
+                                creator_address=data.get('creator'),
+                                bonding_curve_progress=float(data.get('bonding_curve_progress', 0)),
+                                holder_count=int(data.get('holder_count', 0) or data.get('holders', 0)),
+                                market_cap=float(best_pair.get('fdv', 0) or 0),
+                                volume_5m=float(best_pair.get('volume', {}).get('m5', 0) or 0),
+                                volume_1h=float(best_pair.get('volume', {}).get('h1', 0) or 0),
+                                volume_6h=float(best_pair.get('volume', {}).get('h6', 0) or 0),
+                                volume_24h=float(best_pair.get('volume', {}).get('h24', 0) or 0),
+                                price_change_5m=float(best_pair.get('priceChange', {}).get('m5', 0) or 0),
+                                price_change_1h=float(best_pair.get('priceChange', {}).get('h1', 0) or 0),
+                                price_change_6h=float(best_pair.get('priceChange', {}).get('h6', 0) or 0),
+                                price_change_24h=float(best_pair.get('priceChange', {}).get('h24', 0) or 0),
+                                liquidity_usd=float(best_pair.get('liquidity', {}).get('usd', 0) or 0),
+                                liquidity_sol=float(best_pair.get('liquidity', {}).get('base', 0) or 0),
+                                fdv=float(best_pair.get('fdv', 0) or 0),
+                                metadata_source=f"dexscreener_{address_type}",
+                                original_address=original_address
+                            )
+                    else:  
                         token_data = None
-                    else: 
-                        # Take pair with highest liquidity
-                        best_pair = max(
-                            valid_pairs,
-                            key=lambda x: float(x.get('liquidity', {}).get('usd', 0) or 0)
-                        )
-                        
-                        # Get token creation timestamp
-                        creation_timestamp = self.get_token_creation_timestamp(token_address)
-                        if not creation_timestamp:
-                            # If not found via dedicated methods, try from the pair data
-                            if 'pairCreatedAt' in best_pair:
-                                creation_time = best_pair['pairCreatedAt']
-                                if creation_time and creation_time > 1e12:  # If in milliseconds
-                                    creation_timestamp = int(creation_time // 1000)
-                                elif creation_time:
-                                    creation_timestamp = int(creation_time)
-                        
-                        # Create TokenData object
-                        token_data = TokenData(
-                            address=token_address,
-                            symbol=best_pair.get('baseToken', {}).get('symbol'),
-                            name=best_pair.get('baseToken', {}).get('name'),
-                            price_usd=float(best_pair.get('priceUsd', 0) or 0),
-                            timestamp_token_created=creation_timestamp or 0,
-                            creator_address=data.get('creator'),
-                            bonding_curve_progress=float(data.get('bonding_curve_progress', 0)),
-                            holder_count=int(data.get('holder_count', 0) or data.get('holders', 0)),
-                            market_cap=float(best_pair.get('fdv', 0) or 0),
-                            volume_5m=float(best_pair.get('volume', {}).get('m5', 0) or 0),
-                            volume_1h=float(best_pair.get('volume', {}).get('h1', 0) or 0),
-                            volume_6h=float(best_pair.get('volume', {}).get('h6', 0) or 0),
-                            volume_24h=float(best_pair.get('volume', {}).get('h24', 0) or 0),
-                            price_change_5m=float(best_pair.get('priceChange', {}).get('m5', 0) or 0),
-                            price_change_1h=float(best_pair.get('priceChange', {}).get('h1', 0) or 0),
-                            price_change_6h=float(best_pair.get('priceChange', {}).get('h6', 0) or 0),
-                            price_change_24h=float(best_pair.get('priceChange', {}).get('h24', 0) or 0),
-                            liquidity_usd=float(best_pair.get('liquidity', {}).get('usd', 0) or 0),
-                            liquidity_sol=float(best_pair.get('liquidity', {}).get('base', 0) or 0),
-                            fdv=float(best_pair.get('fdv', 0) or 0),
-                            metadata_source=f"dexscreener_{address_type}",
-                            original_address=original_address
-                        )
-                else:  
+                else:
+                    # Non-200 status code
+                    self.logger.debug(f"DexScreener API returned status {response.status_code} for {address}")
                     token_data = None
-                    
+                        
+            except requests.exceptions.Timeout:
+                api_duration = time.time() - start_time
+                self.api_tracker.record_call(
+                    'dexscreener_tokens', 
+                    api_duration, 
+                    success=False,
+                    error_msg="Timeout"
+                )
+                self.logger.warning(f"DexScreener API timeout for {address}")
+                token_data = None
+                
+            except requests.exceptions.RequestException as e:
+                api_duration = time.time() - start_time
+                self.api_tracker.record_call(
+                    'dexscreener_tokens', 
+                    api_duration, 
+                    success=False,
+                    error_msg=f"RequestException: {str(e)}"
+                )
+                self.logger.warning(f"DexScreener API request error for {address}: {e}")
+                token_data = None
+                
+            except json.JSONDecodeError as e:
+                api_duration = time.time() - start_time
+                self.api_tracker.record_call(
+                    'dexscreener_tokens', 
+                    api_duration, 
+                    success=False,
+                    error_msg=f"JSON decode error: {str(e)}"
+                )
+                self.logger.warning(f"DexScreener API JSON decode error for {address}: {e}")
+                token_data = None
+                
         except Exception as e:
-            self.logger.error(f"Error fetching DexScreener data for {address}: {e}")
+            self.logger.error(f"Unexpected error fetching DexScreener data for {address}: {e}")
+            # Record error if we have timing info
+            if 'api_duration' in locals():
+                self.api_tracker.record_call(
+                    'dexscreener_tokens', 
+                    api_duration, 
+                    success=False,
+                    error_msg=f"Unexpected error: {str(e)}"
+                )
             token_data = None
 
+        # 3. Fallback to Pump.fun if DexScreener failed
         if not token_data:
             start_time = time.time()
-            token_data = self.get_pumpfun_data(token_address)
-            pumpfun_duration = time.time() - start_time
-            if token_data:
-                self.api_tracker.record_call('pumpfun_fallback', pumpfun_duration)
-                token_data.metadata_source = "pumpfun"
+            try:
+                token_data = self.get_pumpfun_data(token_address)
+                pumpfun_duration = time.time() - start_time
+                
+                if token_data:
+                    self.api_tracker.record_call(
+                        'pumpfun_fallback', 
+                        pumpfun_duration,
+                        success=True
+                    )
+                    token_data.metadata_source = "pumpfun"
+                    self.logger.info(f"✅ Found data via Pump.fun fallback for {token_address[:8]}...")
+                else:
+                    self.api_tracker.record_call(
+                        'pumpfun_fallback', 
+                        pumpfun_duration,
+                        success=False,
+                        error_msg="No data found"
+                    )
+                    
+            except Exception as e:
+                pumpfun_duration = time.time() - start_time if 'start_time' in locals() else 0
+                self.api_tracker.record_call(
+                    'pumpfun_fallback', 
+                    pumpfun_duration,
+                    success=False,
+                    error_msg=str(e)
+                )
+                self.logger.debug(f"Pump.fun fallback also failed for {token_address[:8]}...: {e}")
 
         return token_data
     
+    def print_api_database_stats(self):
+        """Print API statistics from database"""
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Stats du cycle actuel
+                if self.current_sync_cycle_id:
+                    cursor.execute("""
+                        SELECT api_name, COUNT(*) as calls, 
+                            AVG(duration_ms) as avg_duration,
+                            SUM(CASE WHEN success THEN 1 ELSE 0 END) as success_count,
+                            SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) as error_count
+                        FROM api_metrics 
+                        WHERE sync_cycle_id = ?
+                        GROUP BY api_name
+                        ORDER BY calls DESC
+                    """, (self.current_sync_cycle_id,))
+                    
+                    current_cycle_stats = cursor.fetchall()
+                    
+                    if current_cycle_stats:
+                        self.logger.info("=== 📊 API DATABASE STATS (Current Cycle) ===")
+                        for row in current_cycle_stats:
+                            self.logger.info(f"🔗 {row['api_name'].upper()}: {row['calls']} calls, "
+                                        f"avg {row['avg_duration']:.0f}ms, "
+                                        f"✅{row['success_count']} ❌{row['error_count']}")
+                
+                # Stats des dernières 24h
+                yesterday = int(time.time()) - 86400
+                cursor.execute("""
+                    SELECT api_name, COUNT(*) as total_calls,
+                        AVG(duration_ms) as avg_duration,
+                        MIN(duration_ms) as min_duration,
+                        MAX(duration_ms) as max_duration,
+                        SUM(CASE WHEN success THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as success_rate
+                    FROM api_metrics 
+                    WHERE call_timestamp > ?
+                    GROUP BY api_name
+                    HAVING total_calls > 10
+                    ORDER BY total_calls DESC
+                """, (yesterday,))
+                
+                stats_24h = cursor.fetchall()
+                
+                if stats_24h:
+                    self.logger.info("=== 📈 API PERFORMANCE (Last 24h) ===")
+                    for row in stats_24h:
+                        self.logger.info(f"📊 {row['api_name']}: {row['total_calls']} calls, "
+                                    f"avg {row['avg_duration']:.0f}ms "
+                                    f"({row['min_duration']}-{row['max_duration']}ms), "
+                                    f"success {row['success_rate']:.1f}%")
+        
+        except Exception as e:
+            self.logger.debug(f"Error getting API database stats: {e}")
+
+    def get_api_performance_report(self, days: int = 7) -> Dict:
+        """Get detailed API performance report from database"""
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                since_timestamp = int(time.time()) - (days * 86400)
+                
+                cursor.execute("""
+                    SELECT 
+                        api_name,
+                        COUNT(*) as total_calls,
+                        AVG(duration_ms) as avg_duration_ms,
+                        MIN(duration_ms) as min_duration_ms,
+                        MAX(duration_ms) as max_duration_ms,
+                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_ms) as median_duration_ms,
+                        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) as p95_duration_ms,
+                        SUM(CASE WHEN success THEN 1 ELSE 0 END) as successful_calls,
+                        SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) as failed_calls,
+                        COUNT(DISTINCT DATE(call_timestamp, 'unixepoch')) as days_active
+                    FROM api_metrics 
+                    WHERE call_timestamp > ?
+                    GROUP BY api_name
+                    ORDER BY total_calls DESC
+                """, (since_timestamp,))
+                
+                return {
+                    'period_days': days,
+                    'apis': [dict(row) for row in cursor.fetchall()]
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error generating API performance report: {e}")
+            return {}
+
+    def start_sync_cycle(self) -> int:
+        """Start a new sync cycle and return cycle ID"""
+        cycle_id = int(time.time() * 1000)  # Timestamp en millisecondes comme ID
+        self.current_sync_cycle_id = cycle_id
+        self.api_tracker.set_current_cycle(cycle_id)
+        
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO api_cycle_stats (sync_cycle_id, cycle_start_time)
+                    VALUES (?, ?)
+                """, (cycle_id, int(time.time())))
+                conn.commit()
+        except Exception as e:
+            self.logger.debug(f"Failed to record cycle start: {e}")
+        
+        return cycle_id
+
+    def end_sync_cycle(self, tokens_processed: int):
+        """End current sync cycle and update stats"""
+        if not self.current_sync_cycle_id:
+            return
+        
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get aggregated stats for this cycle
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_calls,
+                        SUM(duration_ms) as total_duration,
+                        SUM(CASE WHEN success THEN 1 ELSE 0 END) as successful_calls,
+                        SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) as failed_calls,
+                        COUNT(DISTINCT api_name) as unique_apis
+                    FROM api_metrics 
+                    WHERE sync_cycle_id = ?
+                """, (self.current_sync_cycle_id,))
+                
+                stats = cursor.fetchone()
+                
+                # Update cycle stats
+                cursor.execute("""
+                    UPDATE api_cycle_stats SET
+                        cycle_end_time = ?,
+                        total_api_calls = ?,
+                        total_duration_ms = ?,
+                        successful_calls = ?,
+                        failed_calls = ?,
+                        unique_apis_used = ?,
+                        tokens_processed = ?
+                    WHERE sync_cycle_id = ?
+                """, (
+                    int(time.time()),
+                    stats['total_calls'],
+                    stats['total_duration'] or 0,
+                    stats['successful_calls'],
+                    stats['failed_calls'],
+                    stats['unique_apis'],
+                    tokens_processed,
+                    self.current_sync_cycle_id
+                ))
+                
+                conn.commit()
+                
+        except Exception as e:
+            self.logger.debug(f"Failed to end cycle stats: {e}")
+
     @db_retry(max_retries=3, delay=0.3)
     def get_new_tokens_from_transactions(self) -> Set[str]:
         """Get new token addresses from transactions table (excluding flagged tokens)"""
@@ -2699,6 +2989,8 @@ class TokenSyncService:
         """Run one complete synchronization cycle"""
         self.logger.info("Starting synchronization cycle...")
         self.logger.info(f"🔍 API tracker status: {hasattr(self, 'api_tracker')}")
+        cycle_id = self.start_sync_cycle()
+        total_tokens_processed = 0
         try:
             # 1. Sync new tokens from transactions
             new_tokens_updated = self.sync_new_tokens()
@@ -2708,6 +3000,9 @@ class TokenSyncService:
             prices_updated = self.update_existing_prices()
             self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
             self.print_api_statistics()
+            self.print_api_database_stats()
+            total_tokens_processed = new_tokens_updated + prices_updated
+            self.logger.info(f"Sync cycle completed: {new_tokens_updated} new, {prices_updated} price updates...")
             # 3. Run historization cycle (every few cycles)
             if not hasattr(self, 'cycle_count'):
                 self.cycle_count = 0
@@ -2743,7 +3038,7 @@ class TokenSyncService:
                 self.logger.info(f"Pump.fun tokens updated: {pumpfun_updated}")
                 self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
                 self.print_api_statistics()
-                
+
             # 4. Print statistics
             self.print_statistics()
             
@@ -2751,7 +3046,13 @@ class TokenSyncService:
             
         except Exception as e:
             self.logger.error(f"Error in sync cycle: {e}")
-    
+
+        except Exception as e:
+            self.logger.error(f"Error in sync cycle: {e}")
+        finally:
+            # ✅ AJOUT - Terminer le cycle
+            self.end_sync_cycle(total_tokens_processed)
+
     def start(self):
         """Start the continuous synchronization service"""
         self.logger.info("Starting Token Sync Service...")
