@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import numpy as np
 from typing import Dict, Optional
 from streamlit_autorefresh import st_autorefresh
+from datetime import datetime, timedelta, timezone
 
 # Auto-refresh toutes les 30 secondes
 st_autorefresh(interval=30 * 1000, key="refresh")
@@ -19,6 +20,12 @@ except ImportError:
     TRANSACTION_ANALYTICS_AVAILABLE = False
     st.warning("⚠️ Module d'analyse des transactions non disponible. Assurez-vous que 'transaction_analytics.py' est dans le même répertoire.")
 
+try:
+    from token_history_analytics import display_token_history_analytics, TokenHistoryAnalyzer
+    TOKEN_HISTORY_ANALYTICS_AVAILABLE = True
+except ImportError:
+    TOKEN_HISTORY_ANALYTICS_AVAILABLE = False
+    st.warning("⚠️ Module d'analyse historique non disponible. Assurez-vous que 'token_history_analytics.py' est dans le même répertoire.")
 
 # Streamlit page configuration
 st.set_page_config(
@@ -436,7 +443,7 @@ def format_token_db_added_time(db_timestamp):  # ← Le paramètre s'appelle db_
     try:
         # Convertir le string datetime en objet datetime
         creation_time = datetime.strptime(str(db_timestamp), '%Y-%m-%d %H:%M:%S')  # ← Utiliser db_timestamp
-        now = datetime.utcnow()  # UTC au lieu de local
+        now = datetime.now(datetime.timezone.utc)
         time_diff = now - creation_time
         
         if time_diff.total_seconds() < 300:  # 5 minutes
@@ -831,33 +838,42 @@ def display_detection_analysis_chart(overview_df, analyzer):
 
 
 def add_transaction_analytics_help():
-    """Ajoute l'aide pour le module d'analyse des transactions"""
-    if TRANSACTION_ANALYTICS_AVAILABLE:
+    """Ajoute l'aide pour les modules d'analyse"""
+    if TRANSACTION_ANALYTICS_AVAILABLE or TOKEN_HISTORY_ANALYTICS_AVAILABLE:
         st.sidebar.markdown("---")
-        st.sidebar.header("📊 Transaction Analytics")
-        # st.sidebar.info("""
-        # **Nouvelles fonctionnalités:**
+        st.sidebar.header("📊 Analytics Modules")
         
-        # 🔄 **Surveillance temps réel**
-        # - Activité des 5 dernières minutes
-        # - Métriques horaires et quotidiennes
-        # - Statut du scanner en direct
+        if TRANSACTION_ANALYTICS_AVAILABLE:
+            st.sidebar.markdown("### 🔄 Transaction Analytics")
+            st.sidebar.info("""
+            **Real-time monitoring:**
+            - Activity in the last 5 minutes
+            - Hourly and daily metrics
+            - Live scanner status
+            """)
         
-        # ⚡ **Performances du scanner**
-        # - Délais de détection
-        # - Qualité des wallets détectés
-        # - Analyse des vitesses de traitement
+        if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+            st.sidebar.markdown("### 📈 History Analytics")
+            st.sidebar.info("""
+            **Historical analysis:**
+            - Token performance trends
+            - Score evolution over time
+            - Momentum tracking
+            - Comparative analysis
+            """)
+
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**📊 Module Status:**")
         
-        # 🏆 **Classements**
-        # - Tokens les plus actifs
-        # - Wallets les plus performants
-        # - Tendances d'activité
-        
-        # 📈 **Graphiques avancés**
-        # - Évolution temporelle
-        # - Répartition des types de TX
-        # - Corrélations de performance
-        # """)
+        if TRANSACTION_ANALYTICS_AVAILABLE:
+            st.sidebar.success("✅ Transaction Analytics")
+        else:
+            st.sidebar.error("❌ Transaction Analytics")
+            
+        if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+            st.sidebar.success("✅ History Analytics")  
+        else:
+            st.sidebar.error("❌ History Analytics")
 
 
 def main():
@@ -890,12 +906,15 @@ def main():
     # Ajouter l'option d'analyse des transactions si le module est disponible
     if TRANSACTION_ANALYTICS_AVAILABLE:
         view_options.append("🔄 Transaction Analytics")
+    
+    if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+        view_options.append("📈 History Analytics")
 
     view_mode = st.sidebar.radio(
         "Choose view:",
         view_options,
         index=view_options.index(st.session_state.view_mode) if st.session_state.view_mode in view_options else 0,
-        help="Overview for screening, detailed analysis for specific token, transaction analytics for scanner monitoring"
+        help="Overview for screening, detailed analysis for specific token, transaction analytics for scanner monitoring, history analytics for performance trends"
     )
     st.session_state.view_mode = view_mode
 
@@ -1344,7 +1363,10 @@ def main():
             display_df['🔗 Pump.fun'] = display_df['token_mint'].apply(
                 lambda x: f"https://pump.fun/{x}"
             )
-
+            if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+                display_df['📈 History'] = display_df['token_mint'].apply(
+                    lambda x: f"📈 View History"
+                )
             # Optimized columns for screening
             display_columns = [
                 'Token', '🏷️ Name','⏰ Ajouté DB', '⚡ Detection', 'Signal', 'score', '💰 Market Cap', '💲 Price',
@@ -1352,7 +1374,10 @@ def main():
                 'Age', 
                 '🔗 DexScreener', '🔗 Pump.fun'
             ]
-            
+
+            if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+                display_columns.insert(-2, '📈 History')
+
             # Column renaming and configuration
             column_rename = {
                 'Token': 'Token',
@@ -1373,6 +1398,9 @@ def main():
                 '🔗 Pump.fun': '🚀 Pump.fun'
             }
 
+            if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+                column_rename['📈 History'] = '📈 History'
+
             column_config = {
                 '📊 DexScreener': st.column_config.LinkColumn(
                     '📊 DexScreener',
@@ -1385,6 +1413,13 @@ def main():
                     width="medium"
                 )
             }
+
+            if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+                column_config['📈 History'] = st.column_config.TextColumn(  # Changer de LinkColumn à TextColumn
+                    '📈 History',
+                    help="Click row then use History button below",
+                    width="small"
+                )
 
             # Display with information
             st.markdown("💡 **Tokens sorted by detection speed then by score**")
@@ -1405,7 +1440,7 @@ def main():
                 selected_idx = selected_indices.selection.rows[0]
                 selected_token = display_df.iloc[selected_idx]['token_mint']
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3,col4 = st.columns(4)
 
                 with col1:
                     if st.button("🔍 Analyze Token", type="primary", key="analyze_btn"):
@@ -1420,6 +1455,12 @@ def main():
                         st.rerun()
 
                 with col3:
+                    if TOKEN_HISTORY_ANALYTICS_AVAILABLE and st.button("📈 History", key="history_btn"):
+                        st.session_state.selected_token = selected_token
+                        st.session_state.view_mode = "📈 History Analytics"
+                        st.rerun()
+
+                with col4:
                     with st.expander("👁️ Preview"):
                         token_data = display_df.iloc[selected_idx]
                         st.write(f"**Token:** {token_data['token_mint'][:12]}...")
@@ -1699,6 +1740,11 @@ def main():
                 signal_text,
                 delta=f"Score: {signal_score}/100"
             )
+        with col3:
+            if TOKEN_HISTORY_ANALYTICS_AVAILABLE and st.button("📈 View History", type="secondary", key="view_history_btn"):
+                st.session_state.selected_token = selected_token
+                st.session_state.view_mode = "📈 History Analytics"
+                st.rerun()
 
         # Main metrics
         st.header("📈 Key Indicators")
@@ -2012,6 +2058,20 @@ def main():
             display_transaction_analytics(transaction_analyzer)
         else:
             st.error("❌ Impossible de se connecter à la base de données pour l'analyse des transactions")
+
+    elif view_mode == "📈 History Analytics" and TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+        # =================== HISTORY ANALYTICS ===================
+        # Initialiser l'analyseur d'historique
+        history_analyzer = TokenHistoryAnalyzer(db_path)
+        
+        if history_analyzer.connect():
+            # Récupérer le token sélectionné s'il existe
+            selected_token_for_history = getattr(st.session_state, 'selected_token', None)
+            
+            # Afficher le dashboard d'analyse historique
+            display_token_history_analytics(history_analyzer, selected_token_for_history)
+        else:
+            st.error("❌ Unable to connect to database for history analytics")
 
     else:
         st.error("❌ Mode de vue non reconnu")
