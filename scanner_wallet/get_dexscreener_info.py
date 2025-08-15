@@ -27,14 +27,14 @@ import threading
 # Configuration
 CONFIG = {
     'db_path': 'solana_wallet_monitor.db',
-    'api_rate_limit': 2.5,  # seconds between API calls
-    'batch_size':350,       # tokens to process per batch
-    'update_interval': 60,  # seconds between sync cycles
-    'price_update_interval': 300,  # 5 minutes for price updates
-    'dashboard_update_interval': 150, # 2.5 minutes pour dashboard tokens
+    'api_rate_limit': 1.5,  # seconds between API calls
+    'batch_size':450,       # tokens to process per batch
+    'update_interval': 50,  # seconds between sync cycles
+    'price_update_interval': 250,  # 5 minutes for price updates
+    'dashboard_update_interval': 120, # 2.5 minutes pour dashboard tokens
     'max_retries': 5,
-    'pumpfun_rate_limit': 2.0,  # Rate limit spécifique Pump.fun
-    'pumpfun_batch_size': 15,   # Batch plus petit pour Pump.fun
+    'pumpfun_rate_limit': 1.2,  # Rate limit spécifique Pump.fun
+    'pumpfun_batch_size': 25,   # Batch plus petit pour Pump.fun
     'request_timeout': 10,
     'retry_failed_after_days': 7,  # Réessayer les tokens flaggés après X jours
     'max_failed_attempts': 1,      # Nombre max de tentatives avant flagging définitif
@@ -73,7 +73,7 @@ class ApiCallStats:
 class ApiStatsTracker:
     """Track detailed API statistics per endpoint"""
     
-    def __init__(self):
+    def __init__(self, db_service=None):
         self.stats = defaultdict(lambda: ApiCallStats())
         self.lock = threading.Lock()
         self.db_service = db_service  # Référence au service pour accès DB
@@ -114,9 +114,11 @@ class ApiStatsTracker:
                 print(f"Warning: Failed to store API metric to DB: {e}")
     
     def _store_api_call_to_db(self, api_name: str, timestamp: int, duration_ms: int,
-                             success: bool, http_status: int, error_msg: str):
-        """Store API call metrics to database"""
+                         success: bool, http_status: int, error_msg: str):
+        """Store API call metrics to database - DEBUG VERSION"""
         try:
+            print(f"🔍 DEBUG DB: Storing {api_name} - cycle: {self.current_cycle_id}, duration: {duration_ms}ms")
+            
             with self.db_service.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
@@ -126,14 +128,23 @@ class ApiStatsTracker:
                         http_status_code, error_message, sync_cycle_id
                     ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (api_name, timestamp, duration_ms, success, 
-                      http_status, error_msg, self.current_cycle_id))
+                    http_status, error_msg, self.current_cycle_id))
                 
                 conn.commit()
                 
+                # DEBUG: Verify insertion
+                cursor.execute("SELECT last_insert_rowid()")
+                row_id = cursor.fetchone()[0]
+                print(f"🔍 DEBUG DB: Inserted API metric with ID {row_id}")
+                
+                return True
+                
         except Exception as e:
+            print(f"❌ DEBUG DB: Failed to store API metric: {e}")
             # Log but don't raise - DB storage is not critical for API functionality
             if hasattr(self.db_service, 'logger'):
                 self.db_service.logger.debug(f"Failed to store API metric: {e}")
+            return False
 
     def _clean_old_records(self, api_stats: ApiCallStats, current_time: float):
         """Remove old records from time windows"""
@@ -1706,73 +1717,215 @@ class TokenSyncService:
             return {}
 
     def start_sync_cycle(self) -> int:
-        """Start a new sync cycle and return cycle ID"""
+        """Start a new sync cycle and return cycle ID - DEBUG FIXED VERSION"""
         cycle_id = int(time.time() * 1000)  # Timestamp en millisecondes comme ID
+        
+        # DEBUG: Log the exact values
+        print(f"🔍 DEBUG CYCLE: Generated cycle_id = {cycle_id} (type: {type(cycle_id)})")
+        
         self.current_sync_cycle_id = cycle_id
         self.api_tracker.set_current_cycle(cycle_id)
         
         try:
             with self.get_db_connection() as conn:
                 cursor = conn.cursor()
+                
+                # DEBUG: Log the exact query and parameters
+                start_time = int(time.time())
+                print(f"🔍 DEBUG CYCLE: Inserting with sync_cycle_id={cycle_id}, cycle_start_time={start_time}")
+                
                 cursor.execute("""
                     INSERT INTO api_cycle_stats (sync_cycle_id, cycle_start_time)
                     VALUES (?, ?)
-                """, (cycle_id, int(time.time())))
+                """, (cycle_id, start_time))
+                
+                # DEBUG: Verify the insertion immediately
+                cursor.execute("SELECT last_insert_rowid()")
+                row_id = cursor.fetchone()[0]
+                print(f"🔍 DEBUG CYCLE: Inserted row ID: {row_id}")
+                
+                # DEBUG: Verify what was actually inserted
+                cursor.execute("SELECT sync_cycle_id, cycle_start_time FROM api_cycle_stats WHERE id = ?", (row_id,))
+                inserted_record = cursor.fetchone()
+                print(f"🔍 DEBUG CYCLE: Inserted record: sync_cycle_id={inserted_record[0]}, cycle_start_time={inserted_record[1]}")
+                
                 conn.commit()
+                
+                self.logger.info(f"🚀 Started sync cycle {cycle_id}")
+                
+                # Vérifier que l'insertion a fonctionné avec le bon ID
+                cursor.execute("SELECT sync_cycle_id FROM api_cycle_stats WHERE sync_cycle_id = ?", (cycle_id,))
+                verification = cursor.fetchone()
+                if verification:
+                    self.logger.debug(f"✅ Cycle {cycle_id} successfully created in database")
+                    print(f"🔍 DEBUG CYCLE: Verification successful - found cycle {verification[0]}")
+                else:
+                    self.logger.error(f"❌ Failed to create cycle {cycle_id} in database")
+                    print(f"🔍 DEBUG CYCLE: Verification FAILED - cycle {cycle_id} not found")
+                    
+                    # DEBUG: Show what's actually in the table
+                    cursor.execute("SELECT id, sync_cycle_id, cycle_start_time FROM api_cycle_stats ORDER BY id DESC LIMIT 3")
+                    recent_cycles = cursor.fetchall()
+                    print(f"🔍 DEBUG CYCLE: Recent cycles in DB: {[dict(zip(['id', 'sync_cycle_id', 'cycle_start_time'], row)) for row in recent_cycles]}")
+                    
         except Exception as e:
-            self.logger.debug(f"Failed to record cycle start: {e}")
+            self.logger.error(f"❌ Failed to record cycle start: {e}")
+            print(f"🔍 DEBUG CYCLE: Exception during insertion: {e}")
+            import traceback
+            print(f"🔍 DEBUG CYCLE: Full traceback: {traceback.format_exc()}")
         
         return cycle_id
 
     def end_sync_cycle(self, tokens_processed: int):
-        """End current sync cycle and update stats"""
+        """End current sync cycle and update stats - DEBUG FIXED VERSION"""
         if not self.current_sync_cycle_id:
+            self.logger.warning("No current sync cycle ID to end")
             return
+        
+        self.logger.info(f"🔍 DEBUG: Starting end_sync_cycle for cycle {self.current_sync_cycle_id}")
+        self.logger.info(f"🔍 DEBUG: Tokens processed parameter: {tokens_processed}")
         
         try:
             with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Get aggregated stats for this cycle
+                # 1. Vérifier d'abord l'état actuel de la table api_cycle_stats
+                cursor.execute("""
+                    SELECT id, sync_cycle_id, cycle_start_time 
+                    FROM api_cycle_stats 
+                    ORDER BY id DESC LIMIT 3
+                """)
+                recent_cycles = cursor.fetchall()
+                self.logger.info(f"🔍 DEBUG: Recent cycles: {[dict(zip(['id', 'sync_cycle_id', 'cycle_start_time'], row)) for row in recent_cycles]}")
+                
+                # 2. Chercher notre cycle - d'abord par sync_cycle_id exact
+                cursor.execute("""
+                    SELECT id, sync_cycle_id FROM api_cycle_stats WHERE sync_cycle_id = ?
+                """, (self.current_sync_cycle_id,))
+                exact_match = cursor.fetchone()
+                
+                if exact_match:
+                    self.logger.info(f"🔍 DEBUG: Found exact match for cycle {self.current_sync_cycle_id}: id={exact_match[0]}")
+                    target_cycle_db_id = exact_match[0]
+                    update_condition = "id = ?"
+                    update_param = target_cycle_db_id
+                else:
+                    # 3. Si pas de match exact, chercher le plus récent avec sync_cycle_id NULL
+                    self.logger.warning(f"🔍 DEBUG: No exact match found for cycle {self.current_sync_cycle_id}")
+                    cursor.execute("""
+                        SELECT id, sync_cycle_id, cycle_start_time 
+                        FROM api_cycle_stats 
+                        WHERE sync_cycle_id IS NULL OR sync_cycle_id = ''
+                        ORDER BY id DESC LIMIT 1
+                    """)
+                    null_cycle = cursor.fetchone()
+                    
+                    if null_cycle:
+                        self.logger.info(f"🔍 DEBUG: Found NULL cycle to update: id={null_cycle[0]}, start_time={null_cycle[2]}")
+                        target_cycle_db_id = null_cycle[0]
+                        update_condition = "id = ?"
+                        update_param = target_cycle_db_id
+                        
+                        # Mettre à jour le sync_cycle_id d'abord
+                        cursor.execute("""
+                            UPDATE api_cycle_stats SET sync_cycle_id = ? WHERE id = ?
+                        """, (self.current_sync_cycle_id, target_cycle_db_id))
+                        self.logger.info(f"🔍 DEBUG: Updated sync_cycle_id for record {target_cycle_db_id}")
+                    else:
+                        self.logger.error(f"🔍 DEBUG: No suitable cycle record found to update!")
+                        return
+                
+                # 4. Maintenant, obtenir les statistiques API
+                cursor.execute("""
+                    SELECT COUNT(*) as count FROM api_metrics WHERE sync_cycle_id = ?
+                """, (self.current_sync_cycle_id,))
+                count_result = cursor.fetchone()
+                record_count = count_result['count'] if count_result else 0
+                self.logger.info(f"🔍 DEBUG: Found {record_count} api_metrics records for cycle {self.current_sync_cycle_id}")
+                
+                if record_count == 0:
+                    self.logger.warning(f"🔍 DEBUG: No API metrics found for cycle {self.current_sync_cycle_id}")
+                    # Essayer avec une recherche temporelle approximative
+                    cycle_timestamp = self.current_sync_cycle_id // 1000  # Convertir en secondes
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM api_metrics 
+                        WHERE call_timestamp BETWEEN ? AND ?
+                    """, (cycle_timestamp - 300, cycle_timestamp + 3600))  # ±5min avant, +1h après
+                    approx_count = cursor.fetchone()[0]
+                    self.logger.info(f"🔍 DEBUG: Found {approx_count} API metrics in time range")
+                
+                # 5. Calculer les statistiques
                 cursor.execute("""
                     SELECT 
-                        COUNT(*) as total_calls,
-                        SUM(duration_ms) as total_duration,
-                        SUM(CASE WHEN success THEN 1 ELSE 0 END) as successful_calls,
-                        SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) as failed_calls,
-                        COUNT(DISTINCT api_name) as unique_apis
+                        COALESCE(COUNT(*), 0) as total_calls,
+                        COALESCE(SUM(duration_ms), 0) as total_duration,
+                        COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) as successful_calls,
+                        COALESCE(SUM(CASE WHEN NOT success THEN 1 ELSE 0 END), 0) as failed_calls,
+                        COALESCE(COUNT(DISTINCT api_name), 0) as unique_apis
                     FROM api_metrics 
                     WHERE sync_cycle_id = ?
                 """, (self.current_sync_cycle_id,))
                 
                 stats = cursor.fetchone()
+                self.logger.info(f"🔍 DEBUG: Calculated stats: {dict(stats) if stats else 'None'}")
                 
-                # Update cycle stats
-                cursor.execute("""
-                    UPDATE api_cycle_stats SET
-                        cycle_end_time = ?,
-                        total_api_calls = ?,
-                        total_duration_ms = ?,
-                        successful_calls = ?,
-                        failed_calls = ?,
-                        unique_apis_used = ?,
-                        tokens_processed = ?
-                    WHERE sync_cycle_id = ?
-                """, (
-                    int(time.time()),
-                    stats['total_calls'],
-                    stats['total_duration'] or 0,
-                    stats['successful_calls'],
-                    stats['failed_calls'],
-                    stats['unique_apis'],
-                    tokens_processed,
-                    self.current_sync_cycle_id
-                ))
-                
-                conn.commit()
-                
+                if stats:
+                    total_calls = stats['total_calls'] or 0
+                    total_duration = stats['total_duration'] or 0
+                    successful_calls = stats['successful_calls'] or 0
+                    failed_calls = stats['failed_calls'] or 0
+                    unique_apis = stats['unique_apis'] or 0
+                    
+                    self.logger.info(f"🔍 DEBUG: Final values - calls:{total_calls}, duration:{total_duration}, success:{successful_calls}")
+                    
+                    # 6. Mettre à jour les statistiques du cycle
+                    cursor.execute(f"""
+                        UPDATE api_cycle_stats SET
+                            cycle_end_time = ?,
+                            total_api_calls = ?,
+                            total_duration_ms = ?,
+                            successful_calls = ?,
+                            failed_calls = ?,
+                            unique_apis_used = ?,
+                            tokens_processed = ?
+                        WHERE {update_condition}
+                    """, (
+                        int(time.time()),
+                        total_calls,
+                        total_duration,
+                        successful_calls,
+                        failed_calls,
+                        unique_apis,
+                        tokens_processed,
+                        update_param
+                    ))
+                    
+                    update_count = cursor.rowcount
+                    self.logger.info(f"🔍 DEBUG: UPDATE affected {update_count} rows")
+                    
+                    conn.commit()
+                    
+                    # 7. Vérifier le résultat
+                    cursor.execute("""
+                        SELECT * FROM api_cycle_stats WHERE id = ?
+                    """, (target_cycle_db_id,))
+                    final_record = cursor.fetchone()
+                    self.logger.info(f"🔍 DEBUG: Final record: {dict(final_record) if final_record else 'NOT FOUND'}")
+                    
+                    if update_count > 0:
+                        self.logger.info(f"✅ Successfully updated cycle stats for {self.current_sync_cycle_id}")
+                    else:
+                        self.logger.error(f"❌ Failed to update cycle stats")
+                else:
+                    self.logger.warning(f"⚠️ No stats calculated")
+                    
         except Exception as e:
-            self.logger.debug(f"Failed to end cycle stats: {e}")
+            self.logger.error(f"❌ Failed to end cycle stats: {e}")
+            import traceback
+            self.logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+        
+        # Reset current cycle
+        self.current_sync_cycle_id = None
 
     @db_retry(max_retries=3, delay=0.3)
     def get_new_tokens_from_transactions(self) -> Set[str]:
@@ -2941,33 +3094,42 @@ class TokenSyncService:
                 self.logger.debug(f"API tracker type: {type(self.api_tracker)}")
                 self.logger.debug(f"API tracker stats keys: {list(self.api_tracker.stats.keys()) if hasattr(self.api_tracker, 'stats') else 'No stats'}")
 
-    def record_call(self, api_name: str, duration: float):
-        """Record an API call with duration - Enhanced with logging"""
+    
+    def record_call(self, api_name: str, duration: float, success: bool = True, 
+                http_status: int = None, error_msg: str = None):
+        """Record an API call with duration and store in database - DEBUG VERSION"""
         current_time = time.time()
+        duration_ms = int(duration * 1000)  # Convert to milliseconds
         
-        try:
-            with self.lock:
-                api_stats = self.stats[api_name]
-                
-                # Update totals
-                api_stats.total_calls += 1
-                api_stats.total_duration += duration
-                
-                # Add to time windows
-                call_record = (current_time, duration)
-                api_stats.calls_5m.append(call_record)
-                api_stats.calls_30m.append(call_record)
-                api_stats.calls_1h.append(call_record)
-                
-                # Clean old records
-                self._clean_old_records(api_stats, current_time)
-                
-                # Debug logging (remove in production)
-                if api_stats.total_calls <= 5:  # Only log first few calls
-                    print(f"DEBUG: Recorded call to {api_name}: {duration:.3f}s (total: {api_stats.total_calls})")
-                    
-        except Exception as e:
-            print(f"ERROR recording API call for {api_name}: {e}")
+        # DEBUG: Log every call
+        print(f"🔍 DEBUG API: Recording {api_name} call - duration: {duration:.3f}s, success: {success}, cycle: {self.current_cycle_id}")
+        
+        with self.lock:
+            # Update in-memory stats (existing logic)
+            api_stats = self.stats[api_name]
+            api_stats.total_calls += 1
+            api_stats.total_duration += duration
+            
+            call_record = (current_time, duration)
+            api_stats.calls_5m.append(call_record)
+            api_stats.calls_30m.append(call_record)
+            api_stats.calls_1h.append(call_record)
+            
+            self._clean_old_records(api_stats, current_time)
+        
+        # Store in database (non-blocking)
+        if self.db_service:
+            try:
+                result = self._store_api_call_to_db(
+                    api_name, int(current_time), duration_ms, 
+                    success, http_status, error_msg
+                )
+                print(f"🔍 DEBUG API: DB storage result for {api_name}: {result}")
+            except Exception as e:
+                # Don't fail the API call if DB storage fails
+                print(f"❌ DEBUG API: Failed to store API metric to DB: {e}")
+                if hasattr(self.db_service, 'logger'):
+                    self.db_service.logger.error(f"Failed to store API metric: {e}")
 
     def get_api_summary(self) -> str:
         """Get a quick API summary for live monitoring"""
@@ -2991,24 +3153,26 @@ class TokenSyncService:
         self.logger.info(f"🔍 API tracker status: {hasattr(self, 'api_tracker')}")
         cycle_id = self.start_sync_cycle()
         total_tokens_processed = 0
+        
         try:
             # 1. Sync new tokens from transactions
             new_tokens_updated = self.sync_new_tokens()
             self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
             self.print_api_statistics()
+            
             # 2. Update existing token prices
             prices_updated = self.update_existing_prices()
-            self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+            self.logger.info("=== STATS API APRÈS PRIX ===")
             self.print_api_statistics()
             self.print_api_database_stats()
+            
             total_tokens_processed = new_tokens_updated + prices_updated
             self.logger.info(f"Sync cycle completed: {new_tokens_updated} new, {prices_updated} price updates...")
+            
             # 3. Run historization cycle (every few cycles)
             if not hasattr(self, 'cycle_count'):
                 self.cycle_count = 0
             
-            self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
-            self.print_api_statistics()
             self.cycle_count += 1
             creation_timestamps_updated = 0
             historized_count = 0
@@ -3017,26 +3181,26 @@ class TokenSyncService:
             # Every 3 cycles - run historization
             if self.cycle_count % 3 == 0:
                 historized_count = self.run_historization_cycle()
-                self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+                self.logger.info("=== STATS API APRÈS HISTORISATION ===")
                 self.print_api_statistics()
 
             # Every 5 cycles - update missing creation timestamps
             if self.cycle_count % 5 == 0:
                 creation_timestamps_updated = self.update_missing_creation_timestamps()
-                self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+                self.logger.info("=== STATS API APRÈS TIMESTAMPS ===")
                 self.print_api_statistics()
             
             # Every 6 cycles - check for dead tokens
             if self.cycle_count % 6 == 0:
                 dead_tokens_marked = self.run_dead_token_check()
-                self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+                self.logger.info("=== STATS API APRÈS DEAD TOKENS ===")
                 self.print_api_statistics()
 
             # Every 10 cycles - update Pump.fun tokens
             if self.cycle_count % 10 == 0:
                 pumpfun_updated = self.update_pumpfun_tokens()
                 self.logger.info(f"Pump.fun tokens updated: {pumpfun_updated}")
-                self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+                self.logger.info("=== STATS API APRÈS PUMPFUN ===")
                 self.print_api_statistics()
 
             # 4. Print statistics
@@ -3046,11 +3210,8 @@ class TokenSyncService:
             
         except Exception as e:
             self.logger.error(f"Error in sync cycle: {e}")
-
-        except Exception as e:
-            self.logger.error(f"Error in sync cycle: {e}")
         finally:
-            # ✅ AJOUT - Terminer le cycle
+            # ✅ CORRECTION - Terminer le cycle dans le finally
             self.end_sync_cycle(total_tokens_processed)
 
     def start(self):

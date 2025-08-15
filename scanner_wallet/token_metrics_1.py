@@ -2,6 +2,7 @@
 """
 Système de métriques pour le monitoring des tokens avec graphiques temps réel
 Fournit des statistiques détaillées sur l'activité du système avec visualisation
+NOUVEAU: Monitoring temps réel des API calls
 """
 
 import sqlite3
@@ -11,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import argparse
-from collections import deque
+from collections import deque, defaultdict
 import threading
 
 # Imports pour les graphiques
@@ -38,11 +39,30 @@ CONFIG = {
     'graph_config': {
         'max_points': 50,      # Nombre max de points sur le graphique
         'update_interval': 30,  # Intervalle de mise à jour en secondes
-        'figure_size': (15, 10), # Taille de la fenêtre
-        'subplot_rows': 2,      # Nombre de lignes de sous-graphiques
+        'figure_size': (20, 12), # Taille de la fenêtre (augmentée pour plus de graphiques)
+        'subplot_rows': 3,      # Nombre de lignes de sous-graphiques (augmenté)
         'subplot_cols': 3,      # Nombre de colonnes de sous-graphiques
     }
 }
+
+@dataclass
+class ApiMetrics:
+    """Métriques spécifiques aux API calls"""
+    window: str
+    total_calls: int = 0
+    successful_calls: int = 0
+    failed_calls: int = 0
+    avg_response_time: float = 0.0
+    success_rate: float = 0.0
+    calls_per_minute: float = 0.0
+    api_breakdown: Dict[str, int] = None  # Calls par API
+    slowest_apis: List[Tuple[str, float]] = None  # APIs les plus lentes
+
+    def __post_init__(self):
+        if self.api_breakdown is None:
+            self.api_breakdown = {}
+        if self.slowest_apis is None:
+            self.slowest_apis = []
 
 @dataclass
 class TimeWindowMetrics:
@@ -81,9 +101,10 @@ class MetricsSnapshot:
     timestamp: datetime
     metrics_5m: TimeWindowMetrics
     system_health: SystemHealth
+    api_metrics_5m: ApiMetrics  # NOUVEAU: Métriques API
 
 class RealTimeGraphs:
-    """Gestionnaire des graphiques temps réel"""
+    """Gestionnaire des graphiques temps réel avec support API"""
     
     def __init__(self, max_points: int = 50):
         if not MATPLOTLIB_AVAILABLE:
@@ -100,7 +121,7 @@ class RealTimeGraphs:
             CONFIG['graph_config']['subplot_cols'],
             figsize=CONFIG['graph_config']['figure_size']
         )
-        self.fig.suptitle('📊 Token System Metrics - Real Time Dashboard', fontsize=16, color='white')
+        self.fig.suptitle('📊 Token System + API Metrics - Real Time Dashboard', fontsize=16, color='white')
         
         # Aplatir les axes pour faciliter l'accès
         self.axes = self.axes.flatten()
@@ -130,21 +151,37 @@ class RealTimeGraphs:
         self.axes[2].set_ylabel('Nombre')
         self.axes[2].grid(True, alpha=0.3)
         
-        # Graphique 4: Snapshots d'historique
-        self.axes[3].set_title('📊 Snapshots créés (5m)', color='purple')
-        self.axes[3].set_ylabel('Nombre')
+        # Graphique 4: API Calls Volume
+        self.axes[3].set_title('🌐 API Calls Volume (5m)', color='lightblue')
+        self.axes[3].set_ylabel('Calls/min')
         self.axes[3].grid(True, alpha=0.3)
         
-        # Graphique 5: Santé du système
-        self.axes[4].set_title('🏥 Santé Système (%)', color='yellow')
-        self.axes[4].set_ylabel('Pourcentage')
+        # Graphique 5: API Success Rate
+        self.axes[4].set_title('✅ API Success Rate (%)', color='lightgreen')
+        self.axes[4].set_ylabel('Success Rate (%)')
         self.axes[4].set_ylim(0, 100)
         self.axes[4].grid(True, alpha=0.3)
         
-        # Graphique 6: Volume et wallets
-        self.axes[5].set_title('👥💰 Wallets & Volume', color='magenta')
-        self.axes[5].set_ylabel('Nombre/USD')
+        # Graphique 6: API Response Times
+        self.axes[5].set_title('⏱️ API Response Times (ms)', color='yellow')
+        self.axes[5].set_ylabel('Avg Response Time (ms)')
         self.axes[5].grid(True, alpha=0.3)
+        
+        # Graphique 7: Snapshots d'historique
+        self.axes[6].set_title('📊 Snapshots créés (5m)', color='purple')
+        self.axes[6].set_ylabel('Nombre')
+        self.axes[6].grid(True, alpha=0.3)
+        
+        # Graphique 8: Santé du système
+        self.axes[7].set_title('🏥 Santé Système (%)', color='magenta')
+        self.axes[7].set_ylabel('Pourcentage')
+        self.axes[7].set_ylim(0, 100)
+        self.axes[7].grid(True, alpha=0.3)
+        
+        # Graphique 9: Volume et wallets
+        self.axes[8].set_title('👥💰 Wallets & Volume', color='gold')
+        self.axes[8].set_ylabel('Nombre/USD')
+        self.axes[8].grid(True, alpha=0.3)
         
         # Configuration des axes X pour tous
         for ax in self.axes:
@@ -163,7 +200,7 @@ class RealTimeGraphs:
         # Extraire les données pour les graphiques
         timestamps = [point.timestamp for point in self.data_history]
         
-        # Données pour chaque graphique
+        # Données système existantes
         new_tokens = [point.metrics_5m.new_tokens for point in self.data_history]
         transactions = [point.metrics_5m.new_transactions for point in self.data_history]
         updates = [point.metrics_5m.token_updates for point in self.data_history]
@@ -172,6 +209,11 @@ class RealTimeGraphs:
         freshness = [point.system_health.freshness_rate for point in self.data_history]
         wallets = [point.metrics_5m.unique_wallets for point in self.data_history]
         volume = [point.metrics_5m.total_volume_usd for point in self.data_history]
+        
+        # NOUVEAU: Données API
+        api_calls_per_min = [point.api_metrics_5m.calls_per_minute for point in self.data_history]
+        api_success_rate = [point.api_metrics_5m.success_rate for point in self.data_history]
+        api_response_time = [point.api_metrics_5m.avg_response_time for point in self.data_history]
         
         # Nettoyer et redessiner chaque graphique
         for ax in self.axes:
@@ -192,41 +234,55 @@ class RealTimeGraphs:
         self.axes[2].plot(timestamps, updates, 'orange', linewidth=2, marker='^', markersize=3)
         self.axes[2].fill_between(timestamps, updates, alpha=0.3, color='orange')
         
-        # Graphique 4: Snapshots
-        self.axes[3].plot(timestamps, snapshots, 'purple', linewidth=2, marker='d', markersize=3)
-        self.axes[3].fill_between(timestamps, snapshots, alpha=0.3, color='purple')
+        # Graphique 4: API Calls per minute
+        self.axes[3].plot(timestamps, api_calls_per_min, 'lightblue', linewidth=2, marker='o', markersize=3)
+        self.axes[3].fill_between(timestamps, api_calls_per_min, alpha=0.3, color='lightblue')
         
-        # Graphique 5: Santé du système (2 lignes)
-        self.axes[4].plot(timestamps, completeness, 'yellow', linewidth=2, marker='o', markersize=3, label='Complétude')
-        self.axes[4].plot(timestamps, freshness, 'lime', linewidth=2, marker='s', markersize=3, label='Fraîcheur')
-        self.axes[4].legend(loc='upper right')
+        # Graphique 5: API Success Rate
+        self.axes[4].plot(timestamps, api_success_rate, 'lightgreen', linewidth=2, marker='s', markersize=3)
+        self.axes[4].fill_between(timestamps, api_success_rate, alpha=0.3, color='lightgreen')
         self.axes[4].set_ylim(0, 100)
         
-        # Graphique 6: Wallets et Volume (double axe Y)
-        ax6_twin = self.axes[5].twinx()
-        line1 = self.axes[5].plot(timestamps, wallets, 'magenta', linewidth=2, marker='o', markersize=3, label='Wallets')
-        line2 = ax6_twin.plot(timestamps, volume, 'gold', linewidth=2, marker='s', markersize=3, label='Volume ($)')
+        # Graphique 6: API Response Times
+        self.axes[5].plot(timestamps, api_response_time, 'yellow', linewidth=2, marker='^', markersize=3)
+        self.axes[5].fill_between(timestamps, api_response_time, alpha=0.3, color='yellow')
         
-        self.axes[5].set_ylabel('Wallets', color='magenta')
-        ax6_twin.set_ylabel('Volume (USD)', color='gold')
+        # Graphique 7: Snapshots
+        self.axes[6].plot(timestamps, snapshots, 'purple', linewidth=2, marker='d', markersize=3)
+        self.axes[6].fill_between(timestamps, snapshots, alpha=0.3, color='purple')
+        
+        # Graphique 8: Santé du système (2 lignes)
+        self.axes[7].plot(timestamps, completeness, 'magenta', linewidth=2, marker='o', markersize=3, label='Complétude')
+        self.axes[7].plot(timestamps, freshness, 'lime', linewidth=2, marker='s', markersize=3, label='Fraîcheur')
+        self.axes[7].legend(loc='upper right')
+        self.axes[7].set_ylim(0, 100)
+        
+        # Graphique 9: Wallets et Volume (double axe Y)
+        ax9_twin = self.axes[8].twinx()
+        line1 = self.axes[8].plot(timestamps, wallets, 'gold', linewidth=2, marker='o', markersize=3, label='Wallets')
+        line2 = ax9_twin.plot(timestamps, volume, 'orange', linewidth=2, marker='s', markersize=3, label='Volume ($)')
+        
+        self.axes[8].set_ylabel('Wallets', color='gold')
+        ax9_twin.set_ylabel('Volume (USD)', color='orange')
         
         # Légende combinée
         lines = line1 + line2
         labels = [l.get_label() for l in lines]
-        self.axes[5].legend(lines, labels, loc='upper left')
+        self.axes[8].legend(lines, labels, loc='upper left')
         
         # Ajuster les limites des axes X pour tous
         for ax in self.axes:
             if timestamps:
                 ax.set_xlim(timestamps[0], timestamps[-1])
         
-        # Mettre à jour le titre avec la dernière valeur
+        # Mettre à jour le titre avec les dernières valeurs
         if self.data_history:
             last_point = self.data_history[-1]
-            title = f'📊 Token System Metrics - {last_point.timestamp.strftime("%H:%M:%S")} - '
+            title = f'📊 System + API Metrics - {last_point.timestamp.strftime("%H:%M:%S")} - '
             title += f'🆕 {last_point.metrics_5m.new_tokens} tokens | '
             title += f'📈 {last_point.metrics_5m.new_transactions} tx | '
-            title += f'🏥 {last_point.system_health.data_completeness_rate:.1f}%'
+            title += f'🌐 {last_point.api_metrics_5m.calls_per_minute:.1f} API/min | '
+            title += f'✅ {last_point.api_metrics_5m.success_rate:.1f}% success'
             self.fig.suptitle(title, fontsize=14, color='white')
         
         plt.draw()
@@ -259,7 +315,7 @@ class RealTimeGraphs:
         print(f"📸 Graphique sauvegardé: {filename}")
 
 class TokenMetricsCollector:
-    """Collecteur de métriques pour le système de tokens avec support graphiques"""
+    """Collecteur de métriques pour le système de tokens avec support graphiques et API"""
     
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -272,6 +328,70 @@ class TokenMetricsCollector:
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         return conn
+    
+    def get_api_metrics(self, window_seconds: int, window_name: str) -> ApiMetrics:
+        """NOUVEAU: Obtenir les métriques des API calls"""
+        cutoff_time = self.current_timestamp - window_seconds
+        
+        metrics = ApiMetrics(window=window_name)
+        
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # 1. Stats globales des API calls
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_calls,
+                        SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as successful_calls,
+                        SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as failed_calls,
+                        AVG(duration_ms) as avg_duration
+                    FROM api_metrics 
+                    WHERE call_timestamp > ?
+                """, (cutoff_time,))
+                
+                result = cursor.fetchone()
+                if result:
+                    metrics.total_calls = result[0] or 0
+                    metrics.successful_calls = result[1] or 0
+                    metrics.failed_calls = result[2] or 0
+                    metrics.avg_response_time = result[3] or 0.0
+                    
+                    # Calculer le taux de succès
+                    if metrics.total_calls > 0:
+                        metrics.success_rate = (metrics.successful_calls / metrics.total_calls) * 100
+                    
+                    # Calculer calls per minute
+                    metrics.calls_per_minute = (metrics.total_calls / window_seconds) * 60
+                
+                # 2. Breakdown par API
+                cursor.execute("""
+                    SELECT api_name, COUNT(*) as call_count
+                    FROM api_metrics 
+                    WHERE call_timestamp > ?
+                    GROUP BY api_name
+                    ORDER BY call_count DESC
+                """, (cutoff_time,))
+                
+                metrics.api_breakdown = dict(cursor.fetchall())
+                
+                # 3. APIs les plus lentes
+                cursor.execute("""
+                    SELECT api_name, AVG(duration_ms) as avg_duration
+                    FROM api_metrics 
+                    WHERE call_timestamp > ? AND success = 1
+                    GROUP BY api_name
+                    HAVING COUNT(*) >= 3  -- Au moins 3 appels
+                    ORDER BY avg_duration DESC
+                    LIMIT 5
+                """, (cutoff_time,))
+                
+                metrics.slowest_apis = [(row[0], row[1]) for row in cursor.fetchall()]
+                
+        except Exception as e:
+            print(f"Erreur lors de la collecte des métriques API pour {window_name}: {e}")
+        
+        return metrics
     
     def get_time_window_metrics(self, window_seconds: int, window_name: str) -> TimeWindowMetrics:
         """Obtenir les métriques pour une fenêtre de temps"""
@@ -438,12 +558,32 @@ class TokenMetricsCollector:
         
         metrics_5m = self.get_time_window_metrics(300, '5m')
         system_health = self.get_system_health()
+        api_metrics_5m = self.get_api_metrics(300, '5m')  # NOUVEAU
         
         return MetricsSnapshot(
             timestamp=datetime.now(),
             metrics_5m=metrics_5m,
-            system_health=system_health
+            system_health=system_health,
+            api_metrics_5m=api_metrics_5m  # NOUVEAU
         )
+
+    def print_api_metrics_summary(self, api_metrics: ApiMetrics):
+        """NOUVEAU: Afficher un résumé des métriques API"""
+        print(f"\n🌐 === API METRICS ({api_metrics.window}) ===")
+        print(f"📞 Total calls: {api_metrics.total_calls}")
+        print(f"✅ Success rate: {api_metrics.success_rate:.1f}% ({api_metrics.successful_calls}/{api_metrics.total_calls})")
+        print(f"⏱️  Avg response: {api_metrics.avg_response_time:.0f}ms")
+        print(f"📈 Rate: {api_metrics.calls_per_minute:.1f} calls/min")
+        
+        if api_metrics.api_breakdown:
+            print(f"\n📊 Top APIs:")
+            for api_name, count in list(api_metrics.api_breakdown.items())[:5]:
+                print(f"   {api_name}: {count} calls")
+        
+        if api_metrics.slowest_apis:
+            print(f"\n🐌 Slowest APIs:")
+            for api_name, avg_time in api_metrics.slowest_apis[:3]:
+                print(f"   {api_name}: {avg_time:.0f}ms avg")
 
     def run_continuous_with_graphs(self, refresh_interval: int = 30, save_snapshots: bool = False):
         """Monitoring continu avec graphiques temps réel"""
@@ -471,7 +611,7 @@ class TokenMetricsCollector:
                     # Ajouter aux graphiques
                     self.graphs.add_data_point(snapshot)
                     
-                    # Log console
+                    # Log console enrichi avec métriques API
                     print(f"\n🔄 Itération {iteration} - {snapshot.timestamp.strftime('%H:%M:%S')}")
                     print(f"🆕 Tokens: {snapshot.metrics_5m.new_tokens} | "
                           f"📈 TX: {snapshot.metrics_5m.new_transactions} | "
@@ -479,6 +619,14 @@ class TokenMetricsCollector:
                           f"📊 Snapshots: {snapshot.metrics_5m.history_snapshots}")
                     print(f"🏥 Santé: {snapshot.system_health.data_completeness_rate:.1f}% complétude | "
                           f"{snapshot.system_health.freshness_rate:.1f}% fraîcheur")
+                    print(f"🌐 API: {snapshot.api_metrics_5m.total_calls} calls | "
+                          f"✅ {snapshot.api_metrics_5m.success_rate:.1f}% success | "
+                          f"⏱️  {snapshot.api_metrics_5m.avg_response_time:.0f}ms avg | "
+                          f"📈 {snapshot.api_metrics_5m.calls_per_minute:.1f}/min")
+                    
+                    # Afficher détails API si demandé en mode verbose
+                    if iteration % 5 == 0:  # Tous les 5 cycles
+                        self.print_api_metrics_summary(snapshot.api_metrics_5m)
                     
                     # Sauvegarder snapshot si demandé
                     if save_snapshots and iteration % 10 == 0:  # Tous les 10 cycles
@@ -511,24 +659,233 @@ class TokenMetricsCollector:
             if self.graphs:
                 self.graphs.stop_animation()
 
+    def run_continuous_console(self, refresh_interval: int = 30):
+        """Mode surveillance console avec métriques API"""
+        print("🔄 Mode surveillance console démarré")
+        print(f"⏱️  Intervalle de rafraîchissement: {refresh_interval}s")
+        print("Press Ctrl+C to stop\n")
+        
+        iteration = 0
+        try:
+            while True:
+                iteration += 1
+                
+                # Obtenir snapshot
+                snapshot = self.get_current_snapshot()
+                
+                # Affichage console
+                print(f"\n{'='*80}")
+                print(f"🔄 ITERATION {iteration} - {snapshot.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"{'='*80}")
+                
+                # Métriques système
+                print(f"\n📊 SYSTÈME (5min):")
+                print(f"   🆕 Nouveaux tokens: {snapshot.metrics_5m.new_tokens}")
+                print(f"   📈 Nouvelles transactions: {snapshot.metrics_5m.new_transactions}")
+                print(f"   🔄 Token updates: {snapshot.metrics_5m.token_updates}")
+                print(f"   📊 Snapshots créés: {snapshot.metrics_5m.history_snapshots}")
+                print(f"   👥 Wallets uniques: {snapshot.metrics_5m.unique_wallets}")
+                print(f"   💰 Volume total: ${snapshot.metrics_5m.total_volume_usd:,.2f}")
+                
+                # Santé du système
+                print(f"\n🏥 SANTÉ SYSTÈME:")
+                print(f"   📋 Total tokens: {snapshot.system_health.total_tokens}")
+                print(f"   ✅ Données complètes: {snapshot.system_health.tokens_with_complete_data} "
+                      f"({snapshot.system_health.data_completeness_rate:.1f}%)")
+                print(f"   🔄 Fraîcheur: {snapshot.system_health.freshness_rate:.1f}%")
+                print(f"   💀 Tokens morts: {snapshot.system_health.tokens_dead}")
+                print(f"   🚫 Flaggés no-data: {snapshot.system_health.tokens_flagged_no_data}")
+                
+                # Métriques API
+                self.print_api_metrics_summary(snapshot.api_metrics_5m)
+                
+                print(f"\n⏳ Attente {refresh_interval}s...")
+                time.sleep(refresh_interval)
+                
+        except KeyboardInterrupt:
+            print("\n👋 Monitoring console arrêté")
+
+    def generate_api_report(self, window: str = '1h') -> Dict:
+        """NOUVEAU: Générer un rapport détaillé des API"""
+        window_seconds = CONFIG['time_windows'].get(window, 3600)
+        api_metrics = self.get_api_metrics(window_seconds, window)
+        
+        # Obtenir des statistiques détaillées
+        cutoff_time = self.current_timestamp - window_seconds
+        
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Statistiques par heure
+                cursor.execute("""
+                    SELECT 
+                        strftime('%H', datetime(call_timestamp, 'unixepoch')) as hour,
+                        COUNT(*) as calls,
+                        AVG(duration_ms) as avg_duration,
+                        SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as success_rate
+                    FROM api_metrics 
+                    WHERE call_timestamp > ?
+                    GROUP BY hour
+                    ORDER BY hour
+                """, (cutoff_time,))
+                
+                hourly_stats = [dict(row) for row in cursor.fetchall()]
+                
+                # Top erreurs
+                cursor.execute("""
+                    SELECT 
+                        api_name, 
+                        error_message, 
+                        COUNT(*) as error_count
+                    FROM api_metrics 
+                    WHERE call_timestamp > ? AND success = 0 AND error_message IS NOT NULL
+                    GROUP BY api_name, error_message
+                    ORDER BY error_count DESC
+                    LIMIT 10
+                """, (cutoff_time,))
+                
+                top_errors = [dict(row) for row in cursor.fetchall()]
+                
+                # Distribution des temps de réponse
+                cursor.execute("""
+                    SELECT 
+                        api_name,
+                        MIN(duration_ms) as min_duration,
+                        AVG(duration_ms) as avg_duration,
+                        MAX(duration_ms) as max_duration,
+                        COUNT(*) as call_count
+                    FROM api_metrics 
+                    WHERE call_timestamp > ? AND success = 1
+                    GROUP BY api_name
+                    ORDER BY avg_duration DESC
+                """, (cutoff_time,))
+                
+                response_times = [dict(row) for row in cursor.fetchall()]
+                
+        except Exception as e:
+            print(f"Erreur lors de la génération du rapport API: {e}")
+            hourly_stats = []
+            top_errors = []
+            response_times = []
+        
+        return {
+            'window': window,
+            'summary': {
+                'total_calls': api_metrics.total_calls,
+                'success_rate': api_metrics.success_rate,
+                'avg_response_time': api_metrics.avg_response_time,
+                'calls_per_minute': api_metrics.calls_per_minute
+            },
+            'api_breakdown': api_metrics.api_breakdown,
+            'slowest_apis': api_metrics.slowest_apis,
+            'hourly_stats': hourly_stats,
+            'top_errors': top_errors,
+            'response_times': response_times
+        }
+
     def generate_report(self, format_type: str = 'text') -> str:
-        """Générer un rapport complet (méthodes existantes conservées)"""
-        # Code existant conservé...
-        pass
+        """Générer un rapport complet incluant les métriques API"""
+        snapshot = self.get_current_snapshot()
+        
+        if format_type == 'json':
+            # Rapport JSON enrichi avec API
+            report_data = {
+                'timestamp': snapshot.timestamp.isoformat(),
+                'system_metrics': {
+                    'new_tokens_5m': snapshot.metrics_5m.new_tokens,
+                    'new_transactions_5m': snapshot.metrics_5m.new_transactions,
+                    'token_updates_5m': snapshot.metrics_5m.token_updates,
+                    'history_snapshots_5m': snapshot.metrics_5m.history_snapshots,
+                    'unique_wallets_5m': snapshot.metrics_5m.unique_wallets,
+                    'total_volume_5m': snapshot.metrics_5m.total_volume_usd
+                },
+                'system_health': {
+                    'total_tokens': snapshot.system_health.total_tokens,
+                    'data_completeness_rate': snapshot.system_health.data_completeness_rate,
+                    'freshness_rate': snapshot.system_health.freshness_rate,
+                    'tokens_dead': snapshot.system_health.tokens_dead,
+                    'tokens_flagged_no_data': snapshot.system_health.tokens_flagged_no_data
+                },
+                'api_metrics': {
+                    'total_calls_5m': snapshot.api_metrics_5m.total_calls,
+                    'success_rate': snapshot.api_metrics_5m.success_rate,
+                    'avg_response_time': snapshot.api_metrics_5m.avg_response_time,
+                    'calls_per_minute': snapshot.api_metrics_5m.calls_per_minute,
+                    'api_breakdown': snapshot.api_metrics_5m.api_breakdown,
+                    'slowest_apis': snapshot.api_metrics_5m.slowest_apis
+                },
+                'detailed_api_report': self.generate_api_report('1h')
+            }
+            return json.dumps(report_data, indent=2, ensure_ascii=False)
+        
+        else:
+            # Rapport texte enrichi
+            report = []
+            report.append("📊 TOKEN SYSTEM METRICS REPORT")
+            report.append("=" * 50)
+            report.append(f"📅 Generated: {snapshot.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+            report.append("")
+            
+            # Métriques système
+            report.append("🔥 SYSTEM ACTIVITY (Last 5 minutes)")
+            report.append("-" * 40)
+            report.append(f"🆕 New tokens: {snapshot.metrics_5m.new_tokens}")
+            report.append(f"📈 New transactions: {snapshot.metrics_5m.new_transactions}")
+            report.append(f"🔄 Token updates: {snapshot.metrics_5m.token_updates}")
+            report.append(f"📊 History snapshots: {snapshot.metrics_5m.history_snapshots}")
+            report.append(f"👥 Unique wallets: {snapshot.metrics_5m.unique_wallets}")
+            report.append(f"💰 Total volume: ${snapshot.metrics_5m.total_volume_usd:,.2f}")
+            report.append("")
+            
+            # Santé système
+            report.append("🏥 SYSTEM HEALTH")
+            report.append("-" * 40)
+            report.append(f"📋 Total tokens: {snapshot.system_health.total_tokens:,}")
+            report.append(f"✅ Complete data: {snapshot.system_health.tokens_with_complete_data:,} "
+                         f"({snapshot.system_health.data_completeness_rate:.1f}%)")
+            report.append(f"🔄 Freshness: {snapshot.system_health.freshness_rate:.1f}%")
+            report.append(f"💀 Dead tokens: {snapshot.system_health.tokens_dead:,}")
+            report.append(f"🚫 No-data flagged: {snapshot.system_health.tokens_flagged_no_data:,}")
+            report.append("")
+            
+            # Métriques API
+            report.append("🌐 API PERFORMANCE (Last 5 minutes)")
+            report.append("-" * 40)
+            report.append(f"📞 Total calls: {snapshot.api_metrics_5m.total_calls}")
+            report.append(f"✅ Success rate: {snapshot.api_metrics_5m.success_rate:.1f}%")
+            report.append(f"⏱️  Avg response: {snapshot.api_metrics_5m.avg_response_time:.0f}ms")
+            report.append(f"📈 Rate: {snapshot.api_metrics_5m.calls_per_minute:.1f} calls/min")
+            report.append("")
+            
+            if snapshot.api_metrics_5m.api_breakdown:
+                report.append("📊 Top APIs:")
+                for api_name, count in list(snapshot.api_metrics_5m.api_breakdown.items())[:5]:
+                    report.append(f"   • {api_name}: {count} calls")
+                report.append("")
+            
+            if snapshot.api_metrics_5m.slowest_apis:
+                report.append("🐌 Slowest APIs:")
+                for api_name, avg_time in snapshot.api_metrics_5m.slowest_apis[:3]:
+                    report.append(f"   • {api_name}: {avg_time:.0f}ms avg")
+                report.append("")
+            
+            return "\n".join(report)
 
 def main():
-    """Point d'entrée principal avec support graphiques"""
+    """Point d'entrée principal avec support graphiques et API"""
     parser = argparse.ArgumentParser(
-        description='Générateur de métriques pour le système de tokens avec graphiques',
+        description='Générateur de métriques pour le système de tokens avec graphiques et monitoring API',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples d'utilisation:
   python token_metrics.py                           # Rapport unique
   python token_metrics.py --format json             # Format JSON
-  python token_metrics.py --watch                   # Surveillance continue
+  python token_metrics.py --watch                   # Surveillance continue console
   python token_metrics.py --graph                   # Graphiques temps réel
   python token_metrics.py --graph --interval 60     # Graphiques toutes les 60s
   python token_metrics.py --graph --save-snapshots  # Avec sauvegarde d'images
+  python token_metrics.py --api-report              # Rapport détaillé API
         """
     )
     
@@ -552,6 +909,12 @@ Exemples d'utilisation:
                        help='Sauvegarder des images des graphiques périodiquement')
     parser.add_argument('--max-points', type=int, default=50,
                        help='Nombre maximum de points sur les graphiques (défaut: 50)')
+    
+    # NOUVEAU: Arguments pour API
+    parser.add_argument('--api-report', action='store_true',
+                       help='Générer un rapport détaillé des API calls')
+    parser.add_argument('--api-window', choices=['5m', '1h', '6h', '24h'], default='1h',
+                       help='Fenêtre de temps pour le rapport API (défaut: 1h)')
     
     args = parser.parse_args()
     
@@ -584,9 +947,59 @@ Exemples d'utilisation:
     try:
         collector = TokenMetricsCollector(CONFIG['db_path'])
         
-        if args.graph:
+        if args.api_report:
+            # Rapport API détaillé
+            print(f"📊 Génération du rapport API ({args.api_window})...")
+            api_report = collector.generate_api_report(args.api_window)
+            
+            if args.format == 'json':
+                output = json.dumps(api_report, indent=2, ensure_ascii=False)
+            else:
+                # Format texte pour rapport API
+                lines = []
+                lines.append("🌐 API PERFORMANCE DETAILED REPORT")
+                lines.append("=" * 50)
+                lines.append(f"📅 Window: {api_report['window']}")
+                lines.append(f"📞 Total calls: {api_report['summary']['total_calls']}")
+                lines.append(f"✅ Success rate: {api_report['summary']['success_rate']:.1f}%")
+                lines.append(f"⏱️  Avg response: {api_report['summary']['avg_response_time']:.0f}ms")
+                lines.append(f"📈 Rate: {api_report['summary']['calls_per_minute']:.1f} calls/min")
+                lines.append("")
+                
+                if api_report['api_breakdown']:
+                    lines.append("📊 API BREAKDOWN:")
+                    for api_name, count in api_report['api_breakdown'].items():
+                        lines.append(f"   • {api_name}: {count} calls")
+                    lines.append("")
+                
+                if api_report['response_times']:
+                    lines.append("⏱️  RESPONSE TIMES:")
+                    for api_data in api_report['response_times']:
+                        lines.append(f"   • {api_data['api_name']}: "
+                                   f"{api_data['avg_duration']:.0f}ms avg "
+                                   f"({api_data['min_duration']}-{api_data['max_duration']}ms) "
+                                   f"[{api_data['call_count']} calls]")
+                    lines.append("")
+                
+                if api_report['top_errors']:
+                    lines.append("❌ TOP ERRORS:")
+                    for error_data in api_report['top_errors']:
+                        lines.append(f"   • {error_data['api_name']}: "
+                                   f"{error_data['error_message']} "
+                                   f"({error_data['error_count']} times)")
+                
+                output = "\n".join(lines)
+            
+            if args.output:
+                with open(args.output, 'w', encoding='utf-8') as f:
+                    f.write(output)
+                print(f"📄 Rapport sauvegardé dans {args.output}")
+            else:
+                print(output)
+        
+        elif args.graph:
             # Mode graphiques temps réel
-            print(f"📊 Démarrage des graphiques temps réel...")
+            print(f"📊 Démarrage des graphiques temps réel avec monitoring API...")
             print(f"📈 Base de données: {CONFIG['db_path']}")
             print(f"⏱️  Intervalle: {args.interval}s")
             print(f"📊 Points max: {args.max_points}")
@@ -598,14 +1011,19 @@ Exemples d'utilisation:
                 save_snapshots=args.save_snapshots
             )
         elif args.watch:
-            # Mode console existant
-            # Utiliser les méthodes existantes...
-            pass
+            # Mode console
+            collector.run_continuous_console(refresh_interval=args.interval)
         else:
             # Génération unique
             print("🔄 Génération du rapport...")
-            # Utiliser generate_report existant...
-            pass
+            report = collector.generate_report(args.format)
+            
+            if args.output:
+                with open(args.output, 'w', encoding='utf-8') as f:
+                    f.write(report)
+                print(f"📄 Rapport sauvegardé dans {args.output}")
+            else:
+                print(report)
         
         return 0
         
