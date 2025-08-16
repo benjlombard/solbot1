@@ -52,6 +52,7 @@ class SystemHealth:
     tokens_stale: int = 0
     tokens_dead: int = 0
     tokens_flagged_no_data: int = 0
+    tokens_rugged: int = 0
     # Nouvelles métriques
     tokens_recently_updated: int = 0  # updated_at > now-5min
     tokens_outdated: int = 0          # updated_at < now-5min (excluant no_data et UNK)
@@ -364,6 +365,13 @@ class TokenMetricsCollector:
                 """)
                 health.tokens_no_data_available = cursor.fetchone()[0]
                 
+                # Tokens ruggés  ✅ AJOUT
+                cursor.execute("""
+                    SELECT COUNT(*) FROM tokens 
+                    WHERE is_rugged = 1
+                """)
+                health.tokens_rugged = cursor.fetchone()[0]
+
                 # Calcul des taux
                 if health.total_tokens > 0:
                     health.data_completeness_rate = (health.tokens_with_complete_data / health.total_tokens) * 100
@@ -511,6 +519,7 @@ class TokenMetricsCollector:
 ├─ ⏰ Obsolètes (>5m): {health.tokens_outdated}
 ├─ ❓ Symboles inconnus (UNK%): {health.tokens_unknown_symbol}
 └─ 🚫 Sans données disponibles: {health.tokens_no_data_available}
+└─ 🚨 Tokens ruggés: {health.tokens_rugged}  # ✅ AJOUT
             """
         except Exception as e:
             return f"❌ Erreur métriques: {e}"
@@ -578,7 +587,7 @@ class TokenMetricsCollector:
         report.append(f"🕐 Données obsolètes (>24h): {system_health.tokens_stale:,}")
         report.append(f"💀 Tokens morts: {system_health.tokens_dead:,}")
         report.append(f"🚫 Flaggés sans données: {system_health.tokens_flagged_no_data:,}")
-        
+        report.append(f"🚨 Tokens ruggés: {system_health.tokens_rugged:,}")  # ✅ AJOUT
         # === NOUVELLES MÉTRIQUES ===
         report.append("")
         report.append("🔄 STATUT DE MISE À JOUR (5 MINUTES)")

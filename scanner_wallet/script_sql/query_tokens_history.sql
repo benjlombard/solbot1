@@ -21,8 +21,8 @@ SELECT
 FROM tokens_history 
 WHERE snapshot_timestamp = (SELECT MAX(snapshot_timestamp) FROM tokens_history)
     AND momentum_score > 70
-    AND risk_score < 30
-    AND rug_risk_score < 20
+    --AND risk_score < 30
+    --AND rug_risk_score < 20
     AND price_change_24h > 10
     AND volume_24h > 10000
     AND liquidity_mc_ratio > 0.1
@@ -52,7 +52,7 @@ WHERE snapshot_timestamp = (SELECT MAX(snapshot_timestamp) FROM tokens_history)
     AND holder_count > 50
     AND holder_count_delta > 0  -- Nouveaux holders
     AND liquidity_usd > market_cap * 0.05  -- Au moins 5% de liquidité
-    AND viability_score > 60
+    --AND viability_score > 60
     AND is_rugged = 0
 ORDER BY price_change_24h DESC, viability_score DESC
 LIMIT 15;

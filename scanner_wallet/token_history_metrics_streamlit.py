@@ -400,7 +400,7 @@ def main():
     # Chemin vers la base de données
     db_path = st.sidebar.text_input(
         "Chemin vers la base SQLite", 
-        value="tokens_history.db",
+        value="solana_wallet_monitor.db",
         help="Chemin vers votre fichier de base de données SQLite"
     )
     
@@ -427,16 +427,63 @@ def main():
     with tab1:
         st.header("🔍 Analyse Détaillée d'un Token")
         
-        # Sélection du token
-        token_list = get_token_list(df)
-        if token_list:
-            selected_token_info = st.selectbox(
-                "Sélectionnez un token",
-                token_list,
-                format_func=lambda x: x[0]
+        # Options de sélection du token
+        col_search1, col_search2 = st.columns([2, 1])
+        
+        with col_search1:
+            search_method = st.radio(
+                "Méthode de recherche",
+                ["📝 Saisir l'adresse", "📋 Liste déroulante"],
+                horizontal=True
             )
+        
+        with col_search2:
+            if st.button("🔄 Actualiser la liste"):
+                st.rerun()
+        
+        token_address = None
+        
+        if search_method == "📝 Saisir l'adresse":
+            # Saisie directe de l'adresse
+            token_address = st.text_input(
+                "Adresse du token",
+                placeholder="Ex: AZBRbNNgmMQScrZZD3w5y2gooue6um9P3RwKneJHGL1",
+                help="Collez l'adresse complète du token à analyser"
+            ).strip()
             
-            token_address = selected_token_info[1]
+            # Vérification que le token existe
+            if token_address:
+                if token_address not in df['token_address'].values:
+                    st.error(f"❌ Token non trouvé: {token_address}")
+                    # Suggestions de tokens similaires
+                    similar_tokens = df[df['token_address'].str.contains(token_address[:8], case=False, na=False)]['token_address'].unique()[:3]
+                    if len(similar_tokens) > 0:
+                        st.info("💡 Tokens similaires trouvés:")
+                        for similar in similar_tokens:
+                            token_info = df[df['token_address'] == similar].iloc[0]
+                            symbol = token_info['symbol'] if pd.notna(token_info['symbol']) else 'N/A'
+                            st.write(f"• `{similar}` ({symbol})")
+                    token_address = None
+                else:
+                    # Afficher les infos du token trouvé
+                    token_info = df[df['token_address'] == token_address].iloc[0]
+                    symbol = token_info['symbol'] if pd.notna(token_info['symbol']) else 'N/A'
+                    name = token_info['name'] if pd.notna(token_info['name']) else 'Unknown'
+                    st.success(f"✅ Token trouvé: **{symbol}** - {name}")
+        
+        else:
+            # Liste déroulante (ancienne méthode)
+            token_list = get_token_list(df)
+            if token_list:
+                selected_token_info = st.selectbox(
+                    "Sélectionnez un token",
+                    token_list,
+                    format_func=lambda x: x[0]
+                )
+                token_address = selected_token_info[1]
+        
+        # Analyse du token si une adresse valide est sélectionnée
+        if token_address:
             df_token = df[df['token_address'] == token_address].sort_values('datetime', ascending=False)
             
             if not df_token.empty:
@@ -465,8 +512,11 @@ def main():
                 # Données brutes
                 with st.expander("📋 Données Historiques"):
                     st.dataframe(df_token.drop(['id', 'previous_snapshot_id'], axis=1), use_container_width=True)
-        else:
+        
+        elif search_method == "📋 Liste déroulante":
             st.warning("Aucun token trouvé dans les données")
+        else:
+            st.info("👆 Saisissez une adresse de token pour commencer l'analyse")
     
     with tab2:
         create_opportunity_dashboard(df)

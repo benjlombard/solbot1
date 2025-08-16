@@ -195,6 +195,7 @@ class TokenAnalyzer:
                 ROUND(ts.avg_detection_delay, 0) as avg_detection_delay_sec
             FROM token_stats ts
             LEFT JOIN tokens tk ON ts.token_mint = tk.address
+            WHERE COALESCE(tk.is_rugged, 0) = 0
         )
         SELECT 
             *
