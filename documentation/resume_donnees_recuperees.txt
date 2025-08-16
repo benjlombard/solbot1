@@ -1,0 +1,134 @@
+Résumé des appels API et données renseignées pour les nouveaux tokens
+🔍 PHASE 1 : DÉTECTION (pour chaque token)
+Appel 1 : DexScreener Detection
+URL: https://api.dexscreener.com/latest/dex/tokens/{token_address}
+Objectif: Détecter si le token est listé sur DEX
+Données utilisées pour la détection :
+
+pairs → existence de paires de trading
+fdv (market cap) → critère de seuil (>1000$)
+volume.h24 → activité de trading
+
+❌ Aucune donnée sauvegardée - seulement pour classification
+
+🔸 PHASE 2A : TOKENS DEX (batch)
+Appel 2 : DexScreener Batch
+URL: https://api.dexscreener.com/latest/dex/tokens/{addr1,addr2,addr3...}
+Objectif: Récupérer toutes les données des tokens DEX en une fois
+✅ Données sauvegardées dans tokens :
+sql-- Identité de base
+symbol = baseToken.symbol
+name = baseToken.name
+decimals = 9 (par défaut)
+
+-- Prix et marchés
+price_usd = priceUsd
+market_cap = fdv
+fdv = fdv
+liquidity_usd = liquidity.usd
+liquidity_sol = liquidity.base
+liquidity_mc_ratio = calculé (liquidity_usd / market_cap)
+
+-- Volumes
+volume_5m = volume.m5
+volume_1h = volume.h1
+volume_6h = volume.h6
+volume_24h = volume.h24
+volume_mc_ratio = calculé (volume_24h / market_cap)
+
+-- Variations de prix
+price_change_5m = priceChange.m5
+price_change_1h = priceChange.h1
+price_change_6h = priceChange.h6
+price_change_24h = priceChange.h24
+
+-- Timestamp de création
+timestamp_token_created = pairCreatedAt (converti)
+
+-- Métadonnées
+metadata_source = "dexscreener_batch"
+last_price_update = timestamp_actuel
+Appel 3 : Rugcheck (pour tokens DEX)
+URL: https://api.rugcheck.xyz/v1/tokens/{token_address}/report
+Objectif: Enrichir avec données de sécurité
+✅ Données ajoutées/mises à jour :
+sql-- Scores de risque
+rug_risk_score = score_normalised
+rug_raw_score = score
+is_rugged = rugged
+
+-- Autorités
+mint_authority_revoked = (mintAuthority == null)
+freeze_authority_revoked = (freezeAuthority == null)
+
+-- Analyse des holders
+holder_count = totalHolders
+top_holder_percentage = topHolders[0].pct
+top_10_holders_percentage = somme(topHolders[0:9].pct)
+insider_holders_count = count(topHolders.insider == true)
+insider_networks_detected = graphInsidersDetected
+
+-- Liquidité et providers
+lp_providers_count = totalLPProviders
+has_low_liquidity = (risks contient "Low Liquidity")
+liquidity_usd = totalMarketLiquidity (si meilleur que DexScreener)
+
+-- Launchpad
+launchpad_name = launchpad.name
+is_pump_fun = (launchpad.platform == "pump_fun")
+
+-- Compteurs de risques
+risk_count = len(risks)
+
+-- Timestamps
+last_rugcheck_update = timestamp_actuel
+
+🚀 PHASE 2B : TOKENS PUMP.FUN (individuel)
+Appel 4 : Pump.fun v3
+URL: https://frontend-api-v3.pump.fun/coins/{token_address}
+Objectif: Récupérer données spécifiques Pump.fun
+✅ Données sauvegardées :
+sql-- Identité
+symbol = symbol
+name = name
+decimals = decimals (défaut: 6)
+logo_uri = image_uri
+
+-- Prix calculé
+price_usd = calculé depuis virtual_sol_reserves/virtual_token_reserves
+market_cap = usd_market_cap
+
+-- Spécifique Pump.fun
+bonding_curve_progress = bonding_curve_progress
+creator_address = creator
+timestamp_token_created = created_timestamp
+holder_count = holder_count
+volume_24h = volume_24h
+
+-- Statut
+is_verified = complete
+is_pump_fun = true
+metadata_source = "pump_prebond" ou "pump_graduated"
+Appel 5 : Rugcheck (pour tokens Pump.fun)
+Mêmes données que pour tokens DEX (voir Appel 3)
+
+📊 RÉSUMÉ GLOBAL
+Pour 7 tokens (6 DEX + 1 Pump.fun) :
+Appels API :
+
+7 détections DexScreener (phase 1)
+1 batch DexScreener pour 6 tokens (phase 2a)
+6 appels Rugcheck pour tokens DEX
+1 appel Pump.fun v3 (phase 2b)
+1 appel Rugcheck pour token Pump.fun
+Total : ~16 appels (vs 19 actuellement)
+
+Données les plus importantes renseignées :
+
+Prix en temps réel (price_usd)
+Market cap (market_cap, fdv)
+Volumes (5m, 1h, 6h, 24h)
+Liquidité (liquidity_usd)
+Scores de risque (rug_risk_score, viability_score)
+Holders (holder_count, top_holder_percentage)
+Métadonnées (symbol, name, creator_address)

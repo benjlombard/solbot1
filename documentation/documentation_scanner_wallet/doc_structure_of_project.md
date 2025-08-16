@@ -39,6 +39,15 @@
 - **middleware/** : Middleware de l'application
   - **auth.py** : Authentification (développement futur)
   - **cors.py** : Configuration CORS
+- **templates/** : templates html
+  - **dashboard.html** : Analytics avancées
+  - **base.html** : Gestion du batching
+  - **token_detail.html** : Administration système
+  - **wallet_detail.html** : Administration système
+- **static/** : css + javascript + image
+  - **css/** : Analytics avancées
+  - **js/** : Gestion du batching
+  - **images/** : Administration système
 - **app.py** : Application Flask principale
 
 ### 📊 Models (Modèles de Données)

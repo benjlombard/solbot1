@@ -1,0 +1,21 @@
+# Nettoyage
+pip cache purge
+
+# Installation des dépendances de base d'abord
+python -m pip install --upgrade setuptools wheel
+
+# Installation des packages core sans compilation
+python -m pip install fastapi uvicorn httpx aiohttp pydantic
+
+# Installation des packages de données (les plus récents qui supportent Python 3.13)
+python -m pip install pandas numpy scipy scikit-learn
+
+# 4. Installation cryptography (version récente compatible)
+python -m pip install "cryptography>=43.0.0"
+
+# 5. Installation du reste sans les packages problématiques
+python -m pip install python-dotenv pyyaml structlog prometheus-client python-dateutil pytz
+python -m pip install asyncpg sqlalchemy[asyncio] alembic redis aioredis
+python -m pip install ujson passlib[bcrypt] slowapi
+python -m pip install tenacity schedule click psutil
+python -m pip install base58 construct pynacl websockets
