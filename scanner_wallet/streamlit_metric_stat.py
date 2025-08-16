@@ -998,7 +998,7 @@ def main():
             min_buyers = st.slider(
                 "Min. Buyer Wallets",
                 min_value=1,
-                max_value=max_buyers,
+                max_value=10,
                 value=1
             )
 

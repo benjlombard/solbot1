@@ -52,6 +52,11 @@ class SystemHealth:
     tokens_stale: int = 0
     tokens_dead: int = 0
     tokens_flagged_no_data: int = 0
+    # Nouvelles métriques
+    tokens_recently_updated: int = 0  # updated_at > now-5min
+    tokens_outdated: int = 0          # updated_at < now-5min (excluant no_data et UNK)
+    tokens_unknown_symbol: int = 0    # symbol LIKE 'UNK%'
+    tokens_no_data_available: int = 0 # no_data_available = 1
     data_completeness_rate: float = 0.0
     freshness_rate: float = 0.0
 
@@ -113,14 +118,14 @@ class TokenMetricsCollector:
                 cursor.execute("""
                     SELECT COUNT(*) FROM tokens 
                     WHERE death_timestamp > ? AND is_dead = 1
-                """, (cutoff_timestamp,))
+                """, (cutoff_time,))
                 metrics.dead_tokens_marked = cursor.fetchone()[0]
                 
                 # 6. Mises à jour Rugcheck
                 cursor.execute("""
                     SELECT COUNT(*) FROM tokens 
                     WHERE last_rugcheck_update > ?
-                """, (cutoff_timestamp,))
+                """, (cutoff_time,))
                 metrics.rugcheck_updates = cursor.fetchone()[0]
                 
                 # 7. Métriques de transactions détaillées
@@ -190,6 +195,8 @@ class TokenMetricsCollector:
                     print(f"📊 Snapshots créés (5m): {time_metrics.history_snapshots}")
                     print(f"👥 Wallets actifs (5m): {time_metrics.unique_wallets}")
                     print(f"🏥 Santé système: {system_health.data_completeness_rate:.1f}% complétude | {system_health.freshness_rate:.1f}% fraîcheur")
+                    print(f"🔄 Récemment mis à jour (5m): {system_health.tokens_recently_updated}")
+                    print(f"⏰ Obsolètes (>5m): {system_health.tokens_outdated}")
                     
                     if save_history and history_file:
                         with open(history_file, 'a', encoding='utf-8') as f:
@@ -322,6 +329,41 @@ class TokenMetricsCollector:
                 cursor.execute("SELECT COUNT(*) FROM tokens WHERE no_data_available = 1")
                 health.tokens_flagged_no_data = cursor.fetchone()[0]
                 
+                # === NOUVELLES MÉTRIQUES ===
+                
+                # Tokens récemment mis à jour (updated_at > now - 5 minutes)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM tokens 
+                    WHERE updated_at > datetime('now', '-5 minutes')
+                    AND no_data_available != 1 
+                    AND (symbol NOT LIKE 'UNK%' OR symbol IS NULL)
+                """)
+                health.tokens_recently_updated = cursor.fetchone()[0]
+                
+                # Tokens obsolètes (updated_at < now - 5 minutes)
+                # Excluant no_data_available = 1 et symbol LIKE 'UNK%'
+                cursor.execute("""
+                    SELECT COUNT(*) FROM tokens 
+                    WHERE updated_at < datetime('now', '-5 minutes')
+                    AND no_data_available != 1 
+                    AND (symbol NOT LIKE 'UNK%' OR symbol IS NULL)
+                """)
+                health.tokens_outdated = cursor.fetchone()[0]
+                
+                # Tokens avec symbole inconnu (UNK%)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM tokens 
+                    WHERE symbol LIKE 'UNK%'
+                """)
+                health.tokens_unknown_symbol = cursor.fetchone()[0]
+                
+                # Tokens sans données disponibles
+                cursor.execute("""
+                    SELECT COUNT(*) FROM tokens 
+                    WHERE no_data_available = 1
+                """)
+                health.tokens_no_data_available = cursor.fetchone()[0]
+                
                 # Calcul des taux
                 if health.total_tokens > 0:
                     health.data_completeness_rate = (health.tokens_with_complete_data / health.total_tokens) * 100
@@ -347,7 +389,13 @@ class TokenMetricsCollector:
                         t.token_mint,
                         tk.symbol,
                         tk.name,
-                        -- ... autres champs
+                        tk.market_cap,
+                        tk.price_usd,
+                        COUNT(*) as transaction_count,
+                        COUNT(DISTINCT t.wallet_address) as unique_wallets,
+                        SUM(CASE WHEN t.transaction_type = 'TransactionType.BUY' THEN t.amount ELSE 0 END) as buy_volume,
+                        SUM(CASE WHEN t.transaction_type = 'TransactionType.SELL' THEN t.amount ELSE 0 END) as sell_volume,
+                        MAX(t.created_at) as last_activity
                     FROM transactions t
                     LEFT JOIN tokens tk ON t.token_mint = tk.address
                     WHERE (t.created_at > datetime(?, 'unixepoch')
@@ -452,13 +500,17 @@ class TokenMetricsCollector:
             health = self.get_system_health()
             
             return f"""
-                🔄 LIVE METRICS
-                ├─ 🆕 Nouveaux tokens (5m): {metrics_5m.new_tokens}
-                ├─ 📈 Transactions (5m): {metrics_5m.new_transactions}
-                ├─ 🔄 Updates (5m): {metrics_5m.token_updates}
-                ├─ 📊 Snapshots (5m): {metrics_5m.history_snapshots}
-                ├─ 👥 Wallets actifs (5m): {metrics_5m.unique_wallets}
-                └─ 🏥 Santé: {health.data_completeness_rate:.1f}% | Fraîcheur: {health.freshness_rate:.1f}%
+🔄 LIVE METRICS
+├─ 🆕 Nouveaux tokens (5m): {metrics_5m.new_tokens}
+├─ 📈 Transactions (5m): {metrics_5m.new_transactions}
+├─ 🔄 Updates (5m): {metrics_5m.token_updates}
+├─ 📊 Snapshots (5m): {metrics_5m.history_snapshots}
+├─ 👥 Wallets actifs (5m): {metrics_5m.unique_wallets}
+├─ 🏥 Santé: {health.data_completeness_rate:.1f}% | Fraîcheur: {health.freshness_rate:.1f}%
+├─ ✅ Récemment mis à jour (<5m): {health.tokens_recently_updated}
+├─ ⏰ Obsolètes (>5m): {health.tokens_outdated}
+├─ ❓ Symboles inconnus (UNK%): {health.tokens_unknown_symbol}
+└─ 🚫 Sans données disponibles: {health.tokens_no_data_available}
             """
         except Exception as e:
             return f"❌ Erreur métriques: {e}"
@@ -526,6 +578,22 @@ class TokenMetricsCollector:
         report.append(f"🕐 Données obsolètes (>24h): {system_health.tokens_stale:,}")
         report.append(f"💀 Tokens morts: {system_health.tokens_dead:,}")
         report.append(f"🚫 Flaggés sans données: {system_health.tokens_flagged_no_data:,}")
+        
+        # === NOUVELLES MÉTRIQUES ===
+        report.append("")
+        report.append("🔄 STATUT DE MISE À JOUR (5 MINUTES)")
+        report.append("-" * 40)
+        report.append(f"✅ Récemment mis à jour (<5m): {system_health.tokens_recently_updated:,}")
+        report.append(f"⏰ Obsolètes (>5m): {system_health.tokens_outdated:,}")
+        report.append(f"❓ Symboles inconnus (UNK%): {system_health.tokens_unknown_symbol:,}")
+        report.append(f"🚫 Sans données disponibles: {system_health.tokens_no_data_available:,}")
+        
+        # Calcul du pourcentage de tokens à jour
+        total_valid_tokens = system_health.tokens_recently_updated + system_health.tokens_outdated
+        if total_valid_tokens > 0:
+            freshness_5m_rate = (system_health.tokens_recently_updated / total_valid_tokens) * 100
+            report.append(f"📊 Taux de fraîcheur (5m): {freshness_5m_rate:.1f}%")
+        
         report.append("")
         
         # Performance
@@ -698,4 +766,3 @@ Exemples d'utilisation:
 if __name__ == "__main__":
     exit_code = main()
     exit(exit_code)
-

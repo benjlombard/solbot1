@@ -29,10 +29,9 @@ import aiohttp
 CONFIG = {
     'db_path': 'solana_wallet_monitor.db',
     'api_rate_limit': 1.5,  # seconds between API calls
-    'batch_size':500,       # tokens to process per batch
-    'update_interval': 45,  # seconds between sync cycles
-    'price_update_interval': 30,  # 1 minute for price updates
-    'price_update_limit': 300, #number of tokens max for update per cycle
+    'batch_size':30,       # tokens to process per batch
+    'update_interval': 80,  # seconds between sync cycles
+    'price_update_interval': 80,  # 1 minute for price updates
     'dashboard_update_interval': 120, # 2.5 minutes pour dashboard tokens
     'max_retries': 5,
     'pumpfun_rate_limit': 1.2,  # Rate limit spécifique Pump.fun
@@ -45,7 +44,7 @@ CONFIG = {
     'db_timeout': 60.0,
     'db_retry_delay': 0.2,  # Nouveau paramètre
     'db_max_retries': 5,    # Nouveau paramètre
-    'max_concurrent_batches': 1,      # Nombre max de lots traités en parallèle
+    'max_concurrent_batches': 3,      # Nombre max de lots traités en parallèle
     'batch_pause_seconds': 2.0,       # Pause entre lots pour éviter surcharge
     'batch_retry_failed': True,       # Réessayer les tokens échoués dans un batch
     'batch_log_detailed': False,      # Log détaillé pour debug
@@ -77,238 +76,6 @@ class ApiCallStats:
             self.calls_30m = deque()
         if self.calls_1h is None:
             self.calls_1h = deque()
-
-
-@dataclass
-class TokenTypeResult:
-    token_type: str  # "dex_listed", "pump_prebond", "pump_graduated", "unknown"
-    confidence: float  # 0.0 à 1.0
-    source_data: Dict = None
-    needs_pump_enrichment: bool = False
-    needs_dex_enrichment: bool = False
-
-    def __post_init__(self):
-        if self.source_data is None:
-            self.source_data = {}
-    
-
-class CycleLogger:
-    """Logger spécialisé pour les cycles de synchronisation"""
-    
-    def __init__(self, logger):
-        self.logger = logger
-        self.cycle_count = 0
-        self.cumulative_stats = {
-            'total_cycles': 0,
-            'total_duration': 0.0,
-            'total_new_tokens': 0,
-            'total_updated_tokens': 0,
-            'total_historized_tokens': 0,
-            'total_api_calls': {},
-            'start_time': None
-        }
-        self.current_cycle = None
-    
-    def start_cycle(self, cycle_id: int):
-        """Démarre un nouveau cycle"""
-        self.cycle_count += 1
-        self.current_cycle = {
-            'id': cycle_id,
-            'number': self.cycle_count,
-            'start_time': datetime.now(),
-            'end_time': None,
-            'duration': 0.0,
-            'new_tokens': 0,
-            'updated_tokens': 0,
-            'historized_tokens': 0,
-            'creation_timestamps': 0,
-            'dead_tokens_marked': 0,
-            'pumpfun_updated': 0,
-            'api_calls': {},
-            'errors': []
-        }
-        
-        if self.cumulative_stats['start_time'] is None:
-            self.cumulative_stats['start_time'] = self.current_cycle['start_time']
-        
-        # Log de début de cycle (concis)
-        self.logger.info(f"🔄 CYCLE {self.cycle_count} STARTED - ID: {cycle_id}")
-    
-    def end_cycle(self):
-        """Termine le cycle courant et affiche les statistiques"""
-        if not self.current_cycle:
-            return
-        
-        self.current_cycle['end_time'] = datetime.now()
-        self.current_cycle['duration'] = (
-            self.current_cycle['end_time'] - self.current_cycle['start_time']
-        ).total_seconds()
-        
-        # Mise à jour des stats cumulées
-        self._update_cumulative_stats()
-        
-        # Affichage des logs
-        self._log_cycle_summary()
-        self._log_cumulative_summary()
-        
-        self.current_cycle = None
-    
-    def record_operation(self, operation: str, count: int):
-        """Enregistre une opération du cycle"""
-        if not self.current_cycle:
-            return
-        
-        if operation == 'new_tokens':
-            self.current_cycle['new_tokens'] += count
-        elif operation == 'updated_tokens':
-            self.current_cycle['updated_tokens'] += count
-        elif operation == 'historized_tokens':
-            self.current_cycle['historized_tokens'] += count
-        elif operation == 'creation_timestamps':
-            self.current_cycle['creation_timestamps'] += count
-        elif operation == 'dead_tokens_marked':
-            self.current_cycle['dead_tokens_marked'] += count
-        elif operation == 'pumpfun_updated':
-            self.current_cycle['pumpfun_updated'] += count
-    
-    def record_api_call(self, api_name: str, count: int = 1):
-        """Enregistre des appels API"""
-        if not self.current_cycle:
-            return
-        
-        if api_name not in self.current_cycle['api_calls']:
-            self.current_cycle['api_calls'][api_name] = 0
-        self.current_cycle['api_calls'][api_name] += count
-    
-    def record_error(self, error_msg: str):
-        """Enregistre une erreur"""
-        if not self.current_cycle:
-            return
-        self.current_cycle['errors'].append(error_msg)
-    
-    def _update_cumulative_stats(self):
-        """Met à jour les statistiques cumulées"""
-        cycle = self.current_cycle
-        cumul = self.cumulative_stats
-        
-        cumul['total_cycles'] += 1
-        cumul['total_duration'] += cycle['duration']
-        cumul['total_new_tokens'] += cycle['new_tokens']
-        cumul['total_updated_tokens'] += cycle['updated_tokens']
-        cumul['total_historized_tokens'] += cycle['historized_tokens']
-        
-        # Mise à jour des appels API cumulés
-        for api_name, count in cycle['api_calls'].items():
-            if api_name not in cumul['total_api_calls']:
-                cumul['total_api_calls'][api_name] = 0
-            cumul['total_api_calls'][api_name] += count
-    
-    def _log_cycle_summary(self):
-        """Affiche le résumé du cycle"""
-        cycle = self.current_cycle
-        
-        self.logger.info("=" * 80)
-        self.logger.info(f"📊 CYCLE {cycle['number']} SUMMARY - ID: {cycle['id']}")
-        self.logger.info(f"⏰ Start: {cycle['start_time'].strftime('%H:%M:%S')}")
-        self.logger.info(f"⏰ End: {cycle['end_time'].strftime('%H:%M:%S')}")
-        self.logger.info(f"⏱️ Duration: {cycle['duration']:.1f}s")
-        self.logger.info("-" * 40)
-        
-        # Opérations
-        self.logger.info("🔢 OPERATIONS:")
-        self.logger.info(f"  ➕ New tokens inserted: {cycle['new_tokens']}")
-        self.logger.info(f"  🔄 Tokens updated: {cycle['updated_tokens']}")
-        self.logger.info(f"  📈 Tokens historized: {cycle['historized_tokens']}")
-        
-        if cycle['creation_timestamps'] > 0:
-            self.logger.info(f"  ⏰ Creation timestamps: {cycle['creation_timestamps']}")
-        if cycle['dead_tokens_marked'] > 0:
-            self.logger.info(f"  💀 Dead tokens marked: {cycle['dead_tokens_marked']}")
-        if cycle['pumpfun_updated'] > 0:
-            self.logger.info(f"  🚀 Pump.fun updated: {cycle['pumpfun_updated']}")
-        
-        # API Calls
-        if cycle['api_calls']:
-            self.logger.info("🌐 API CALLS:")
-            total_api_calls = sum(cycle['api_calls'].values())
-            self.logger.info(f"  📡 Total: {total_api_calls} calls")
-            
-            # Grouper par type d'API
-            dex_calls = sum(v for k, v in cycle['api_calls'].items() if 'dexscreener' in k.lower())
-            pump_calls = sum(v for k, v in cycle['api_calls'].items() if 'pumpfun' in k.lower())
-            rug_calls = cycle['api_calls'].get('rugcheck', 0)
-            solana_calls = sum(v for k, v in cycle['api_calls'].items() if 'solanatracker' in k.lower())
-            other_calls = total_api_calls - dex_calls - pump_calls - rug_calls - solana_calls
-            
-            if dex_calls > 0:
-                self.logger.info(f"  🔸 DexScreener: {dex_calls} calls")
-            if pump_calls > 0:
-                self.logger.info(f"  🚀 Pump.fun: {pump_calls} calls")
-            if rug_calls > 0:
-                self.logger.info(f"  🔒 Rugcheck: {rug_calls} calls")
-            if solana_calls > 0:
-                self.logger.info(f"  ⚡ SolanaTracker: {solana_calls} calls")
-            if other_calls > 0:
-                self.logger.info(f"  🔹 Other: {other_calls} calls")
-        
-        # Erreurs
-        if cycle['errors']:
-            self.logger.warning(f"⚠️ ERRORS: {len(cycle['errors'])} errors occurred")
-            for error in cycle['errors'][:3]:  # Max 3 erreurs affichées
-                self.logger.warning(f"  ❌ {error}")
-            if len(cycle['errors']) > 3:
-                self.logger.warning(f"  ... and {len(cycle['errors']) - 3} more errors")
-    
-    def _log_cumulative_summary(self):
-        """Affiche le résumé cumulé"""
-        cumul = self.cumulative_stats
-        
-        if cumul['total_cycles'] == 0:
-            return
-        
-        avg_duration = cumul['total_duration'] / cumul['total_cycles']
-        runtime = (datetime.now() - cumul['start_time']).total_seconds()
-        
-        self.logger.info("-" * 40)
-        self.logger.info("📈 CUMULATIVE TOTALS:")
-        self.logger.info(f"  🔄 Total cycles: {cumul['total_cycles']}")
-        self.logger.info(f"  ⏱️ Average cycle time: {avg_duration:.1f}s")
-        self.logger.info(f"  🕐 Total runtime: {runtime/3600:.1f}h")
-        self.logger.info(f"  ➕ Total new tokens: {cumul['total_new_tokens']}")
-        self.logger.info(f"  🔄 Total updated tokens: {cumul['total_updated_tokens']}")
-        self.logger.info(f"  📈 Total historized: {cumul['total_historized_tokens']}")
-        
-        if cumul['total_api_calls']:
-            total_api = sum(cumul['total_api_calls'].values())
-            avg_api_per_cycle = total_api / cumul['total_cycles']
-            self.logger.info(f"  📡 Total API calls: {total_api} (avg {avg_api_per_cycle:.1f}/cycle)")
-            
-            # Top 3 APIs les plus utilisées
-            top_apis = sorted(cumul['total_api_calls'].items(), key=lambda x: x[1], reverse=True)[:3]
-            for api_name, count in top_apis:
-                self.logger.info(f"    🔸 {api_name}: {count} calls")
-        
-        self.logger.info("=" * 80)
-    
-    def get_cycle_stats_for_db(self) -> Dict:
-        """Retourne les stats du cycle pour la base de données"""
-        if not self.current_cycle:
-            return {}
-        
-        return {
-            'cycle_id': self.current_cycle['id'],
-            'cycle_number': self.current_cycle['number'],
-            'start_time': self.current_cycle['start_time'],
-            'end_time': self.current_cycle['end_time'],
-            'duration': self.current_cycle['duration'],
-            'new_tokens': self.current_cycle['new_tokens'],
-            'updated_tokens': self.current_cycle['updated_tokens'],
-            'historized_tokens': self.current_cycle['historized_tokens'],
-            'total_api_calls': sum(self.current_cycle['api_calls'].values()),
-            'api_calls_detail': json.dumps(self.current_cycle['api_calls']),
-            'errors_count': len(self.current_cycle['errors'])
-        }
-
 
 class ApiStatsTracker:
     """Track detailed API statistics per endpoint"""
@@ -353,13 +120,11 @@ class ApiStatsTracker:
                 # Don't fail the API call if DB storage fails
                 print(f"Warning: Failed to store API metric to DB: {e}")
     
-    
-    
     def _store_api_call_to_db(self, api_name: str, timestamp: int, duration_ms: int,
                          success: bool, http_status: int, error_msg: str):
         """Store API call metrics to database - DEBUG VERSION"""
         try:
-            #print(f"🔍 DEBUG DB: Storing {api_name} - cycle: {self.current_cycle_id}, duration: {duration_ms}ms")
+            print(f"🔍 DEBUG DB: Storing {api_name} - cycle: {self.current_cycle_id}, duration: {duration_ms}ms")
             
             with self.db_service.get_db_connection() as conn:
                 cursor = conn.cursor()
@@ -377,12 +142,12 @@ class ApiStatsTracker:
                 # DEBUG: Verify insertion
                 cursor.execute("SELECT last_insert_rowid()")
                 row_id = cursor.fetchone()[0]
-                ##print(f"🔍 DEBUG DB: Inserted API metric with ID {row_id}")
+                print(f"🔍 DEBUG DB: Inserted API metric with ID {row_id}")
                 
                 return True
                 
         except Exception as e:
-            #print(f"❌ DEBUG DB: Failed to store API metric: {e}")
+            print(f"❌ DEBUG DB: Failed to store API metric: {e}")
             # Log but don't raise - DB storage is not critical for API functionality
             if hasattr(self.db_service, 'logger'):
                 self.db_service.logger.debug(f"Failed to store API metric: {e}")
@@ -767,10 +532,9 @@ class TokenSyncService:
         self.running = False
         self.logger = self._setup_logger()
         self.analyzer = TokenAnalyzer()
-        self.cycle_logger = CycleLogger(self.logger)
         try:
             self.api_tracker = ApiStatsTracker(db_service=self)  # ← Modification
-            self.logger.debug("✅ API tracker initialized successfully")
+            self.logger.info("✅ API tracker initialized successfully")
         except Exception as e:
             self.logger.error(f"❌ Failed to initialize API tracker: {e}")
             raise
@@ -798,245 +562,30 @@ class TokenSyncService:
 
         
     
-        self.logger.debug(f"🔧 API tracker verification: {type(self.api_tracker)}")
-
-    def log_debug_response(self, tokens_requested: List[str], api_response: dict, batch_info: str = ""):
-        """Logger la réponse API quand des tokens vont échouer"""
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"debug_api_response_{timestamp}.json"
-        
-        debug_data = {
-            "timestamp": datetime.now().isoformat(),
-            "batch_info": batch_info,
-            "tokens_requested": tokens_requested,
-            "tokens_requested_count": len(tokens_requested),
-            "api_response": api_response,
-            "pairs_in_response": len(api_response.get('pairs', [])) if isinstance(api_response, dict) else 0
-        }
-        
-        try:
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(debug_data, f, indent=2, ensure_ascii=False)
-            
-            self.logger.info(f"🔍 DEBUG: API response saved to {filename}")
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error saving debug file: {e}")
+        self.logger.info(f"🔧 API tracker verification: {type(self.api_tracker)}")
 
     def test_api_tracking(self):
         """Test method to verify API tracking is working"""
-        self.logger.debug("🧪 Testing API tracking...")
+        self.logger.info("🧪 Testing API tracking...")
         
         # Record a test call
-        self._record_api_call('test_api', api_duration)
+        self.api_tracker.record_call('test_api', 1.5)
+        
         # Get stats
         stats = self.api_tracker.get_stats()
-        self.logger.debug(f"Test stats: {stats}")
+        self.logger.info(f"Test stats: {stats}")
         
         if 'test_api' in stats:
-            self.logger.debug("✅ API tracking is working correctly")
+            self.logger.info("✅ API tracking is working correctly")
         else:
             self.logger.error("❌ API tracking is not working")
         
         return 'test_api' in stats
 
-    def detect_token_type(self, token_address: str) -> TokenTypeResult:
-        """Version améliorée avec fallback intelligent"""
-        
-        self.logger.debug(f"🔍 [DETECT] === DÉBUT DÉTECTION {token_address[:8]}... ===")
-        
-        # 1. TEST DEXSCREENER avec timeout plus court
-        try:
-            self.logger.debug(f"🔍 [DETECT] 1/2 Test DexScreener...")
-            
-            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-            start_time = time.time()
-            response = self.session.get(url, timeout=3)  # ✅ Timeout plus court pour test rapide
-            api_duration = time.time() - start_time
-            self._record_api_call('dexscreener_type_detection', api_duration)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data and data.get('pairs'):
-                    best_pair = max(data['pairs'], key=lambda p: float(p.get('volume', {}).get('h24', 0) or 0))
-                    market_cap = float(best_pair.get('fdv', 0) or 0)
-                    
-                    self.logger.debug(f"✅ [DETECT] DexScreener: MC=${market_cap:,.0f}")
-                    
-                    if market_cap > 1000:  # ✅ Seuil plus bas pour capturer plus de tokens
-                        return TokenTypeResult(
-                            token_type="dex_listed",
-                            confidence=0.9,
-                            source_data={'market_cap': market_cap, 'pair_data': best_pair},
-                            needs_dex_enrichment=True,
-                            needs_pump_enrichment=False
-                        )
-                        
-            self.logger.debug(f"❌ [DETECT] DexScreener: pas de données significatives")
-            
-        except Exception as e:
-            self.logger.debug(f"❌ [DETECT] DexScreener échoué: {str(e)[:50]}...")
-        
-        # 2. TEST PUMP.FUN avec v3 en priorité
-        try:
-            self.logger.debug(f"🔍 [DETECT] 2/2 Test Pump.fun (v3 priority)...")
-            
-            pump_data = self.get_pumpfun_data(token_address)
-            if pump_data:
-                bonding_progress = pump_data.bonding_curve_progress
-                market_cap = pump_data.market_cap
-                
-                self.logger.debug(f"✅ [DETECT] Pump.fun: Bonding={bonding_progress}%, MC=${market_cap:,.0f}")
-                
-                if bonding_progress < 100:
-                    return TokenTypeResult(
-                        token_type="pump_prebond", 
-                        confidence=0.95,
-                        source_data=pump_data.__dict__,
-                        needs_pump_enrichment=True,
-                        needs_dex_enrichment=False
-                    )
-                else:
-                    return TokenTypeResult(
-                        token_type="pump_graduated",
-                        confidence=0.85, 
-                        source_data=pump_data.__dict__,
-                        needs_pump_enrichment=True,
-                        needs_dex_enrichment=True
-                    )
-                    
-            self.logger.debug(f"❌ [DETECT] Pump.fun: token non trouvé (530 errors)")
-            
-        except Exception as e:
-            self.logger.debug(f"❌ [DETECT] Pump.fun échoué: {str(e)[:50]}...")
-        
-        # 3. FALLBACK INTELLIGENT
-        self.logger.warning(f"❓ [DETECT] === TOKEN UNKNOWN {token_address[:8]}... (APIs indisponibles) ===")
-        
-        # ✅ Confidence plus basse si APIs en erreur
-        return TokenTypeResult(
-            token_type="unknown",
-            confidence=0.1,  # Très faible car APIs indisponibles
-            needs_pump_enrichment=False,  # ✅ Éviter les appels inutiles si 530
-            needs_dex_enrichment=True     # DexScreener plus stable
-        )
-
-    def enrich_token_by_type(self, token_address: str, token_type_result: TokenTypeResult) -> TokenData:
-        """
-        Enrichit un token selon son type détecté
-        """
-        
-        if token_type_result.token_type == "dex_listed":
-            return self.enrich_dex_listed_token(token_address)
-            
-        elif token_type_result.token_type == "pump_prebond":
-            return self.enrich_pump_prebond_token(token_address, token_type_result.source_data)
-            
-        elif token_type_result.token_type == "pump_graduated":
-            return self.enrich_pump_graduated_token(token_address, token_type_result.source_data)
-            
-        else:  # unknown
-            return self.enrich_unknown_token(token_address)
-
-    def enrich_dex_listed_token(self, token_address: str) -> Optional[TokenData]:
-        """Stratégie pour tokens établis sur DEX - CORRIGÉE"""
-        self.logger.debug(f"📊 [DEX] Enrichissement DEX pour {token_address[:8]}...")
-
-        try:
-            # ✅ CORRECTION: Ne pas utiliser process_tokens_in_batches_async ici
-            # Cette méthode fait déjà l'upsert, on ne peut pas retourner TokenData
-            
-            # Utiliser l'API DexScreener directement
-            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-            start_time = time.time()
-            response = self.session.get(url, timeout=CONFIG['request_timeout'])
-            api_duration = time.time() - start_time
-            self._record_api_call('dexscreener_individual', api_duration)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data and data.get('pairs'):
-                    # Prendre la meilleure paire
-                    best_pair = max(data['pairs'], key=lambda p: float(p.get('volume', {}).get('h24', 0) or 0))
-                    
-                    # Créer TokenData
-                    token_data = TokenData(
-                        address=token_address,
-                        symbol=best_pair.get('baseToken', {}).get('symbol'),
-                        name=best_pair.get('baseToken', {}).get('name'),
-                        price_usd=float(best_pair.get('priceUsd', 0) or 0),
-                        market_cap=float(best_pair.get('fdv', 0) or 0),
-                        volume_24h=float(best_pair.get('volume', {}).get('h24', 0) or 0),
-                        liquidity_usd=float(best_pair.get('liquidity', {}).get('usd', 0) or 0),
-                        fdv=float(best_pair.get('fdv', 0) or 0),
-                        metadata_source="dexscreener_individual"
-                    )
-                    
-                    self.logger.debug(f"✅ [DEX] TokenData créé via DexScreener")
-                    return token_data
-                else:
-                    self.logger.warning(f"❌ [DEX] Aucune paire trouvée")
-                    return None
-            else:
-                self.logger.warning(f"❌ [DEX] HTTP {response.status_code}")
-                return None
-                
-        except Exception as e:
-            self.logger.error(f"❌ [DEX] Erreur: {e}")
-            return None
-
-    def enrich_pump_prebond_token(self, token_address: str, pump_data: Dict) -> Optional[TokenData]:
-        """Stratégie pour tokens Pump.fun en bonding - CORRIGÉE"""
-        self.logger.debug(f"🚀 [PUMP-PRE] Enrichissement prebond pour {token_address[:8]}...")
-        
-        try:
-            # ✅ CORRECTION: Vérifier que pump_data contient des données
-            if not pump_data or not isinstance(pump_data, dict):
-                self.logger.warning(f"❌ [PUMP-PRE] Données Pump.fun invalides")
-                return None
-            
-            # Créer TokenData depuis les données Pump.fun
-            token_data = TokenData(
-                address=token_address,
-                symbol=pump_data.get('symbol', f"UNK_{token_address[:6]}"),
-                name=pump_data.get('name', f"Unknown Token {token_address[:8]}"),
-                decimals=pump_data.get('decimals', 6),
-                price_usd=float(pump_data.get('price_usd', 0) or 0),
-                market_cap=float(pump_data.get('market_cap', 0) or 0),
-                volume_24h=float(pump_data.get('volume_24h', 0) or 0),
-                bonding_curve_progress=float(pump_data.get('bonding_curve_progress', 0) or 0),
-                holder_count=int(pump_data.get('holder_count', 0) or 0),
-                creator_address=pump_data.get('creator_address'),
-                timestamp_token_created=int(pump_data.get('timestamp_token_created', 0) or 0),
-                metadata_source="pump_prebond"
-            )
-            
-            self.logger.debug(f"✅ [PUMP-PRE] TokenData créé - Bonding: {token_data.bonding_curve_progress}%")
-            return token_data
-            
-        except Exception as e:
-            self.logger.error(f"❌ [PUMP-PRE] Erreur création TokenData: {e}")
-            return None
-
-    def enrich_pump_graduated_token(self, token_address: str, pump_data: Dict) -> TokenData:
-        """Stratégie pour tokens Pump.fun gradués"""
-        # Essayer DexScreener en priorité, fallback sur Pump.fun
-        try:
-            dex_data = self.get_comprehensive_dexscreener_data(token_address)
-            if dex_data.market_cap > pump_data.get('market_cap', 0):
-                # DexScreener a des données plus récentes
-                return dex_data
-        except:
-            pass
-        
-        # Fallback sur données Pump.fun + enrichissement
-        return self.enrich_pump_prebond_token(token_address, pump_data)
-
     def _setup_logger(self) -> logging.Logger:
         """Setup logging configuration"""
         logger = logging.getLogger('TokenSync')
-        logger.setLevel(logging.INFO)
+        logger.setLevel(logging.DEBUG)
         
         # Console handler with UTF-8 encoding
         handler = logging.StreamHandler()
@@ -1054,12 +603,6 @@ class TokenSyncService:
         
         return logger
     
-    def _record_api_call(self, api_name: str, duration: float, success: bool = True, http_status: int = None):
-        """Helper method to record API calls in both trackers"""
-        self.api_tracker.record_call(api_name, duration, success, http_status)
-        self.cycle_logger.record_api_call(api_name, 1)
-        self.stats['api_calls'] += 1
-
     def get_db_connection(self, retries: int = 5, delay: float = 0.1) -> sqlite3.Connection:
         """Get database connection with enhanced error handling and retry logic"""
         for attempt in range(retries):
@@ -1124,7 +667,7 @@ class TokenSyncService:
                 # Optimize database
                 cursor.execute("PRAGMA optimize")
                 
-                self.logger.debug("✅ Database health check passed")
+                self.logger.info("✅ Database health check passed")
                 return True
                 
             finally:
@@ -1463,7 +1006,7 @@ class TokenSyncService:
                         marked_count += 1
                         self.stats['tokens_marked_dead'] += 1
                         
-                        self.logger.debug(f"💀 Marked token {token_address} ({token_data.symbol}) as dead: {death_reason}")
+                        self.logger.info(f"💀 Marked token {token_address} ({token_data.symbol}) as dead: {death_reason}")
                 
                 conn.commit()
                 
@@ -1476,9 +1019,9 @@ class TokenSyncService:
         """Get token data from Pump.fun API (unchanged from original)"""
         # URLs Pump.fun (comme dans le script qui fonctionne)
         pump_fun_urls = [
-            f"https://frontend-api-v3.pump.fun/coins/{token_address}",
             f"https://frontend-api.pump.fun/coins/{token_address}",
             f"https://frontend-api-v2.pump.fun/coins/{token_address}",
+            f"https://frontend-api-v3.pump.fun/coins/{token_address}",
         ]
         
         for i, url in enumerate(pump_fun_urls):
@@ -1486,7 +1029,8 @@ class TokenSyncService:
                 start_time = time.time()
                 response = self.session.get(url, timeout=CONFIG['request_timeout'])
                 api_duration = time.time() - start_time
-                self._record_api_call(f'pumpfun_v{i+1}', api_duration)
+                self.api_tracker.record_call(f'pumpfun_v{i+1}', api_duration)
+                self.stats['api_calls'] += 1
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -1537,7 +1081,7 @@ class TokenSyncService:
                         if 'created_timestamp' in data:
                             token_data.timestamp_token_created = int(data['created_timestamp'] / 1000) if data['created_timestamp'] > 1e12 else int(data['created_timestamp'])
                         
-                        self.logger.debug(f"✅ Found Pump.fun data for {token_address[:8]}... (MC: ${token_data.market_cap:,.0f}) via URL {i+1}")
+                        self.logger.info(f"✅ Found Pump.fun data for {token_address[:8]}... (MC: ${token_data.market_cap:,.0f}) via URL {i+1}")
                         return token_data
                     else:
                         self.logger.debug(f"Mint mismatch in URL {i+1}: {mint} != {token_address}")
@@ -1571,7 +1115,8 @@ class TokenSyncService:
             start_time = time.time()
             response = self.session.get(url, timeout=CONFIG['request_timeout'])
             api_duration = time.time() - start_time
-            self._record_api_call('rugcheck', api_duration)
+            self.api_tracker.record_call('rugcheck', api_duration)
+            self.stats['api_calls'] += 1
             
             if response.status_code == 200:
                 data = response.json()
@@ -1746,10 +1291,8 @@ class TokenSyncService:
         try:
             # Test pairs endpoint first
             url_pair = f"https://api.dexscreener.com/latest/dex/pairs/solana/{address}"
-            start_time = time.time()
             response = self.session.get(url_pair, timeout=CONFIG['request_timeout'])
-            api_duration = time.time() - start_time
-            self._record_api_call('dexscreener_pairs_check', api_duration)
+            self.stats['api_calls'] += 1
             
             if response.status_code == 200:
                 data = response.json()
@@ -1758,10 +1301,8 @@ class TokenSyncService:
             
             # Test tokens endpoint
             url_token = f"https://api.dexscreener.com/latest/dex/tokens/{address}"
-            start_time = time.time()
             response = self.session.get(url_token, timeout=CONFIG['request_timeout'])
-            api_duration = time.time() - start_time
-            self._record_api_call('dexscreener_tokens_check', api_duration)
+            self.stats['api_calls'] += 1
             
             if response.status_code == 200:
                 data = response.json()
@@ -1778,10 +1319,8 @@ class TokenSyncService:
         """Extract token address from pair address"""
         try:
             url = f"https://api.dexscreener.com/latest/dex/pairs/solana/{pair_address}"
-            start_time = time.time()
             response = self.session.get(url, timeout=CONFIG['request_timeout'])
-            api_duration = time.time() - start_time
-            self._record_api_call('dexscreener_extract_token', api_duration)
+            self.stats['api_calls'] += 1
             
             if response.status_code == 200:
                 data = response.json()
@@ -1814,11 +1353,9 @@ class TokenSyncService:
         """
         try:
             url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-            start_time = time.time()
             response = self.session.get(url, timeout=CONFIG['request_timeout'])
-            api_duration = time.time() - start_time
-            self._record_api_call('dexscreener_creation_timestamp', api_duration)
-
+            self.stats['api_calls'] += 1
+            
             if response.status_code == 200:
                 data = response.json()
                 
@@ -1852,11 +1389,9 @@ class TokenSyncService:
         """
         try:
             url = f"https://api.solanatracker.io/tokens/{token_address}"
-            start_time = time.time()
             response = self.session.get(url, timeout=CONFIG['request_timeout'])
-            api_duration = time.time() - start_time
-            self._record_api_call('solanatracker_creation_timestamp', api_duration)
-
+            self.stats['api_calls'] += 1
+            
             if response.status_code == 200:
                 data = response.json()
                 
@@ -1887,7 +1422,7 @@ class TokenSyncService:
         # Try DexScreener first (more reliable)
         timestamp = self.get_token_creation_from_dexscreener(token_address)
         if timestamp:
-            self.logger.debug(f"✅ Found creation timestamp on DexScreener: {datetime.fromtimestamp(timestamp)}")
+            self.logger.info(f"✅ Found creation timestamp on DexScreener: {datetime.fromtimestamp(timestamp)}")
             return timestamp
         
         # Pause to avoid rate limiting
@@ -1896,7 +1431,7 @@ class TokenSyncService:
         # Try Solana Tracker
         timestamp = self.get_token_creation_from_solanatracker(token_address)
         if timestamp:
-            self.logger.debug(f"✅ Found creation timestamp on SolanaTracker: {datetime.fromtimestamp(timestamp)}")
+            self.logger.info(f"✅ Found creation timestamp on SolanaTracker: {datetime.fromtimestamp(timestamp)}")
             return timestamp
         
         self.logger.debug(f"❌ Creation timestamp not found for {token_address[:8]}...")
@@ -1926,9 +1461,9 @@ class TokenSyncService:
                     current_cycle_stats = cursor.fetchall()
                     
                     if current_cycle_stats:
-                        self.logger.debug("=== 📊 API DATABASE STATS (Current Cycle) ===")
+                        self.logger.info("=== 📊 API DATABASE STATS (Current Cycle) ===")
                         for row in current_cycle_stats:
-                            self.logger.debug(f"🔗 {row['api_name'].upper()}: {row['calls']} calls, "
+                            self.logger.info(f"🔗 {row['api_name'].upper()}: {row['calls']} calls, "
                                         f"avg {row['avg_duration']:.0f}ms, "
                                         f"✅{row['success_count']} ❌{row['error_count']}")
                 
@@ -1950,9 +1485,9 @@ class TokenSyncService:
                 stats_24h = cursor.fetchall()
                 
                 if stats_24h:
-                    self.logger.debug("=== 📈 API PERFORMANCE (Last 24h) ===")
+                    self.logger.info("=== 📈 API PERFORMANCE (Last 24h) ===")
                     for row in stats_24h:
-                        self.logger.debug(f"📊 {row['api_name']}: {row['total_calls']} calls, "
+                        self.logger.info(f"📊 {row['api_name']}: {row['total_calls']} calls, "
                                     f"avg {row['avg_duration']:.0f}ms "
                                     f"({row['min_duration']}-{row['max_duration']}ms), "
                                     f"success {row['success_rate']:.1f}%")
@@ -2000,12 +1535,10 @@ class TokenSyncService:
         cycle_id = int(time.time() * 1000)  # Timestamp en millisecondes comme ID
         
         # DEBUG: Log the exact values
-        #print(f"🔍 DEBUG CYCLE: Generated cycle_id = {cycle_id} (type: {type(cycle_id)})")
+        print(f"🔍 DEBUG CYCLE: Generated cycle_id = {cycle_id} (type: {type(cycle_id)})")
         
         self.current_sync_cycle_id = cycle_id
         self.api_tracker.set_current_cycle(cycle_id)
-
-        self.cycle_logger.start_cycle(cycle_id)
         
         try:
             with self.get_db_connection() as conn:
@@ -2013,7 +1546,7 @@ class TokenSyncService:
                 
                 # DEBUG: Log the exact query and parameters
                 start_time = int(time.time())
-                #print(f"🔍 DEBUG CYCLE: Inserting with sync_cycle_id={cycle_id}, cycle_start_time={start_time}")
+                print(f"🔍 DEBUG CYCLE: Inserting with sync_cycle_id={cycle_id}, cycle_start_time={start_time}")
                 
                 cursor.execute("""
                     INSERT INTO api_cycle_stats (sync_cycle_id, cycle_start_time)
@@ -2023,37 +1556,37 @@ class TokenSyncService:
                 # DEBUG: Verify the insertion immediately
                 cursor.execute("SELECT last_insert_rowid()")
                 row_id = cursor.fetchone()[0]
-                #print(f"🔍 DEBUG CYCLE: Inserted row ID: {row_id}")
+                print(f"🔍 DEBUG CYCLE: Inserted row ID: {row_id}")
                 
                 # DEBUG: Verify what was actually inserted
                 cursor.execute("SELECT sync_cycle_id, cycle_start_time FROM api_cycle_stats WHERE id = ?", (row_id,))
                 inserted_record = cursor.fetchone()
-                #print(f"🔍 DEBUG CYCLE: Inserted record: sync_cycle_id={inserted_record[0]}, cycle_start_time={inserted_record[1]}")
+                print(f"🔍 DEBUG CYCLE: Inserted record: sync_cycle_id={inserted_record[0]}, cycle_start_time={inserted_record[1]}")
                 
                 conn.commit()
                 
-                self.logger.debug(f"🚀 Started sync cycle {cycle_id}")
+                self.logger.info(f"🚀 Started sync cycle {cycle_id}")
                 
                 # Vérifier que l'insertion a fonctionné avec le bon ID
                 cursor.execute("SELECT sync_cycle_id FROM api_cycle_stats WHERE sync_cycle_id = ?", (cycle_id,))
                 verification = cursor.fetchone()
                 if verification:
                     self.logger.debug(f"✅ Cycle {cycle_id} successfully created in database")
-                    #print(f"🔍 DEBUG CYCLE: Verification successful - found cycle {verification[0]}")
+                    print(f"🔍 DEBUG CYCLE: Verification successful - found cycle {verification[0]}")
                 else:
                     self.logger.error(f"❌ Failed to create cycle {cycle_id} in database")
-                    #print(f"🔍 DEBUG CYCLE: Verification FAILED - cycle {cycle_id} not found")
+                    print(f"🔍 DEBUG CYCLE: Verification FAILED - cycle {cycle_id} not found")
                     
                     # DEBUG: Show what's actually in the table
                     cursor.execute("SELECT id, sync_cycle_id, cycle_start_time FROM api_cycle_stats ORDER BY id DESC LIMIT 3")
                     recent_cycles = cursor.fetchall()
-                    #print(f"🔍 DEBUG CYCLE: Recent cycles in DB: {[dict(zip(['id', 'sync_cycle_id', 'cycle_start_time'], row)) for row in recent_cycles]}")
+                    print(f"🔍 DEBUG CYCLE: Recent cycles in DB: {[dict(zip(['id', 'sync_cycle_id', 'cycle_start_time'], row)) for row in recent_cycles]}")
                     
         except Exception as e:
             self.logger.error(f"❌ Failed to record cycle start: {e}")
-            #print(f"🔍 DEBUG CYCLE: Exception during insertion: {e}")
+            print(f"🔍 DEBUG CYCLE: Exception during insertion: {e}")
             import traceback
-            #print(f"🔍 DEBUG CYCLE: Full traceback: {traceback.format_exc()}")
+            print(f"🔍 DEBUG CYCLE: Full traceback: {traceback.format_exc()}")
         
         return cycle_id
 
@@ -2063,8 +1596,8 @@ class TokenSyncService:
             self.logger.warning("No current sync cycle ID to end")
             return
         
-        self.logger.debug(f"🔍 DEBUG: Starting end_sync_cycle for cycle {self.current_sync_cycle_id}")
-        self.logger.debug(f"🔍 DEBUG: Tokens processed parameter: {tokens_processed}")
+        self.logger.info(f"🔍 DEBUG: Starting end_sync_cycle for cycle {self.current_sync_cycle_id}")
+        self.logger.info(f"🔍 DEBUG: Tokens processed parameter: {tokens_processed}")
         
         try:
             with self.get_db_connection() as conn:
@@ -2077,7 +1610,7 @@ class TokenSyncService:
                     ORDER BY id DESC LIMIT 3
                 """)
                 recent_cycles = cursor.fetchall()
-                self.logger.debug(f"🔍 DEBUG: Recent cycles: {[dict(zip(['id', 'sync_cycle_id', 'cycle_start_time'], row)) for row in recent_cycles]}")
+                self.logger.info(f"🔍 DEBUG: Recent cycles: {[dict(zip(['id', 'sync_cycle_id', 'cycle_start_time'], row)) for row in recent_cycles]}")
                 
                 # 2. Chercher notre cycle - d'abord par sync_cycle_id exact
                 cursor.execute("""
@@ -2086,7 +1619,7 @@ class TokenSyncService:
                 exact_match = cursor.fetchone()
                 
                 if exact_match:
-                    self.logger.debug(f"🔍 DEBUG: Found exact match for cycle {self.current_sync_cycle_id}: id={exact_match[0]}")
+                    self.logger.info(f"🔍 DEBUG: Found exact match for cycle {self.current_sync_cycle_id}: id={exact_match[0]}")
                     target_cycle_db_id = exact_match[0]
                     update_condition = "id = ?"
                     update_param = target_cycle_db_id
@@ -2102,7 +1635,7 @@ class TokenSyncService:
                     null_cycle = cursor.fetchone()
                     
                     if null_cycle:
-                        self.logger.debug(f"🔍 DEBUG: Found NULL cycle to update: id={null_cycle[0]}, start_time={null_cycle[2]}")
+                        self.logger.info(f"🔍 DEBUG: Found NULL cycle to update: id={null_cycle[0]}, start_time={null_cycle[2]}")
                         target_cycle_db_id = null_cycle[0]
                         update_condition = "id = ?"
                         update_param = target_cycle_db_id
@@ -2111,7 +1644,7 @@ class TokenSyncService:
                         cursor.execute("""
                             UPDATE api_cycle_stats SET sync_cycle_id = ? WHERE id = ?
                         """, (self.current_sync_cycle_id, target_cycle_db_id))
-                        self.logger.debug(f"🔍 DEBUG: Updated sync_cycle_id for record {target_cycle_db_id}")
+                        self.logger.info(f"🔍 DEBUG: Updated sync_cycle_id for record {target_cycle_db_id}")
                     else:
                         self.logger.error(f"🔍 DEBUG: No suitable cycle record found to update!")
                         return
@@ -2122,7 +1655,7 @@ class TokenSyncService:
                 """, (self.current_sync_cycle_id,))
                 count_result = cursor.fetchone()
                 record_count = count_result['count'] if count_result else 0
-                self.logger.debug(f"🔍 DEBUG: Found {record_count} api_metrics records for cycle {self.current_sync_cycle_id}")
+                self.logger.info(f"🔍 DEBUG: Found {record_count} api_metrics records for cycle {self.current_sync_cycle_id}")
                 
                 if record_count == 0:
                     self.logger.warning(f"🔍 DEBUG: No API metrics found for cycle {self.current_sync_cycle_id}")
@@ -2133,7 +1666,7 @@ class TokenSyncService:
                         WHERE call_timestamp BETWEEN ? AND ?
                     """, (cycle_timestamp - 300, cycle_timestamp + 3600))  # ±5min avant, +1h après
                     approx_count = cursor.fetchone()[0]
-                    self.logger.debug(f"🔍 DEBUG: Found {approx_count} API metrics in time range")
+                    self.logger.info(f"🔍 DEBUG: Found {approx_count} API metrics in time range")
                 
                 # 5. Calculer les statistiques
                 cursor.execute("""
@@ -2148,7 +1681,7 @@ class TokenSyncService:
                 """, (self.current_sync_cycle_id,))
                 
                 stats = cursor.fetchone()
-                self.logger.debug(f"🔍 DEBUG: Calculated stats: {dict(stats) if stats else 'None'}")
+                self.logger.info(f"🔍 DEBUG: Calculated stats: {dict(stats) if stats else 'None'}")
                 
                 if stats:
                     total_calls = stats['total_calls'] or 0
@@ -2157,7 +1690,7 @@ class TokenSyncService:
                     failed_calls = stats['failed_calls'] or 0
                     unique_apis = stats['unique_apis'] or 0
                     
-                    self.logger.debug(f"🔍 DEBUG: Final values - calls:{total_calls}, duration:{total_duration}, success:{successful_calls}")
+                    self.logger.info(f"🔍 DEBUG: Final values - calls:{total_calls}, duration:{total_duration}, success:{successful_calls}")
                     
                     # 6. Mettre à jour les statistiques du cycle
                     cursor.execute(f"""
@@ -2182,7 +1715,7 @@ class TokenSyncService:
                     ))
                     
                     update_count = cursor.rowcount
-                    self.logger.debug(f"🔍 DEBUG: UPDATE affected {update_count} rows")
+                    self.logger.info(f"🔍 DEBUG: UPDATE affected {update_count} rows")
                     
                     conn.commit()
                     
@@ -2191,10 +1724,10 @@ class TokenSyncService:
                         SELECT * FROM api_cycle_stats WHERE id = ?
                     """, (target_cycle_db_id,))
                     final_record = cursor.fetchone()
-                    self.logger.debug(f"🔍 DEBUG: Final record: {dict(final_record) if final_record else 'NOT FOUND'}")
+                    self.logger.info(f"🔍 DEBUG: Final record: {dict(final_record) if final_record else 'NOT FOUND'}")
                     
                     if update_count > 0:
-                        self.logger.debug(f"✅ Successfully updated cycle stats for {self.current_sync_cycle_id}")
+                        self.logger.info(f"✅ Successfully updated cycle stats for {self.current_sync_cycle_id}")
                     else:
                         self.logger.error(f"❌ Failed to update cycle stats")
                 else:
@@ -2205,7 +1738,6 @@ class TokenSyncService:
             import traceback
             self.logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         
-        self.cycle_logger.end_cycle()
         # Reset current cycle
         self.current_sync_cycle_id = None
 
@@ -2237,7 +1769,7 @@ class TokenSyncService:
                 results = cursor.fetchall()
                 
                 token_addresses = {row[0] for row in results}
-                self.logger.debug(f"Found {len(token_addresses)} new tokens to process (excluding flagged tokens)")
+                self.logger.info(f"Found {len(token_addresses)} new tokens to process (excluding flagged tokens)")
                 
                 return token_addresses
                 
@@ -2270,7 +1802,7 @@ class TokenSyncService:
                 cursor.execute(query, (cutoff_time, CONFIG['max_failed_attempts'], CONFIG['batch_size']))
                 results = cursor.fetchall()
                 
-                self.logger.debug(f"Found {len(results)} general tokens needing price updates.")
+                self.logger.info(f"Found {len(results)} general tokens needing price updates.")
                 return [row[0] for row in results]
                 
         except Exception as e:
@@ -2388,7 +1920,7 @@ class TokenSyncService:
                 ))
                 
                 conn.commit()
-                self.logger.debug(f"📝 Created stub entry for {token_address[:8]}...")
+                self.logger.info(f"📝 Created stub entry for {token_address[:8]}...")
                 return True
                 
         except Exception as e:
@@ -2410,9 +1942,9 @@ class TokenSyncService:
                 current_timestamp = int(time.time())
 
                 if original_symbol != token_data.symbol:
-                    self.logger.debug(f"Symbol cleaned for {token_data.address[:8]}... - '{original_symbol}' -> '{token_data.symbol}'")
+                    self.logger.info(f"Symbol cleaned for {token_data.address[:8]}... - '{original_symbol}' -> '{token_data.symbol}'")
                 if original_name != token_data.name:
-                    self.logger.debug(f"Name cleaned for {token_data.address[:8]}... - '{original_name}' -> '{token_data.name}'")
+                    self.logger.info(f"Name cleaned for {token_data.address[:8]}... - '{original_name}' -> '{token_data.name}'")
                 
                 # 1. Check if token exists avec retry
                 token_exists = False
@@ -2436,9 +1968,6 @@ class TokenSyncService:
                         if existing_row and (existing_row['price_usd'] > 0 or existing_row['market_cap'] > 0):
                             # Appeler historize_token_data qui a maintenant sa propre logique de retry
                             self.historize_token_data(token_data.address, token_data)
-                            if self.historize_token_data(token_data.address, token_data):
-                                # ✅ AJOUT: Logger l'historisation automatique
-                                self.cycle_logger.record_operation('historized_tokens', 1)
                         else:
                             self.logger.debug(f"Skipping historization for {token_data.address[:8]}... - no significant data yet")
                     finally:
@@ -2469,7 +1998,7 @@ class TokenSyncService:
                             if rugcheck_data.get('holder_count', 0) > token_data.holder_count:
                                 old_count = token_data.holder_count
                                 token_data.holder_count = rugcheck_data['holder_count']
-                                self.logger.debug(f"📊 Updated holder_count for {token_data.address[:8]}... from {old_count} to {token_data.holder_count}")
+                                self.logger.info(f"📊 Updated holder_count for {token_data.address[:8]}... from {old_count} to {token_data.holder_count}")
 
                                 # Ajouter les attributs manquants à token_data pour l'historisation
                                 token_data.top_holder_percentage = rugcheck_data.get('top_holder_percentage', 0.0)
@@ -2489,7 +2018,7 @@ class TokenSyncService:
                                 
                                 self.logger.debug(f"🔒 Enriched token_data with rugcheck: TH={token_data.top_holder_percentage:.2f}%, T10H={token_data.top_10_holders_percentage:.2f}%")
                                 
-                                self.logger.debug(f"🔒 Got rugcheck data for {token_data.address[:8]}... (score: {rugcheck_data.get('rug_risk_score', 50)})")
+                                self.logger.info(f"🔒 Got rugcheck data for {token_data.address[:8]}... (score: {rugcheck_data.get('rug_risk_score', 50)})")
 
                     # Calculate advanced metrics
                     liquidity_mc_ratio = 0.0
@@ -2691,7 +2220,6 @@ class TokenSyncService:
                 # 4. Historiser le nouveau token après insertion (si nouveau)
                 if not token_exists and (token_data.price_usd > 0 or token_data.market_cap > 0):
                     self.historize_token_data(token_data.address, token_data)
-                    self.cycle_logger.record_operation('historized_tokens', 1)
                 elif not token_exists:
                     self.logger.debug(f"Skipping initial historization for {token_data.address[:8]}... - no significant data")
                 
@@ -2790,7 +2318,7 @@ class TokenSyncService:
                 results = cursor.fetchall()
                 
                 token_addresses = [row[0] for row in results if row[0]]
-                self.logger.debug(f"Found {len(token_addresses)} dashboard priority tokens")
+                self.logger.info(f"Found {len(token_addresses)} dashboard priority tokens")
                 
                 return token_addresses
                 
@@ -2841,7 +2369,7 @@ class TokenSyncService:
                 results = cursor.fetchall()
                 
                 priority_tokens = [row[0] for row in results]
-                self.logger.debug(f"Found {len(priority_tokens)} dashboard tokens needing updates (from a pool of {len(dashboard_tokens)}).")
+                self.logger.info(f"Found {len(priority_tokens)} dashboard tokens needing updates (from a pool of {len(dashboard_tokens)}).")
 
                 
                 return priority_tokens
@@ -2893,7 +2421,7 @@ class TokenSyncService:
                     conn.commit()
                     
                     if cursor.rowcount > 0:
-                        self.logger.debug(f"✅ Updated creation timestamp for {token_address[:8]}...")
+                        self.logger.info(f"✅ Updated creation timestamp for {token_address[:8]}...")
                         return True
                     else:
                         self.logger.warning(f"⚠️ Token not found in database: {token_address[:8]}...")
@@ -2908,12 +2436,12 @@ class TokenSyncService:
     
     def update_missing_creation_timestamps(self) -> int:
         """Update creation timestamps for tokens that are missing them"""
-        self.logger.debug("Starting creation timestamp updates for existing tokens...")
+        self.logger.info("Starting creation timestamp updates for existing tokens...")
         
         tokens_to_update = self.get_tokens_missing_creation_timestamp()
         
         if not tokens_to_update:
-            self.logger.debug("No tokens need creation timestamp updates")
+            self.logger.info("No tokens need creation timestamp updates")
             return 0
         
         successful_updates = 0
@@ -2930,7 +2458,7 @@ class TokenSyncService:
                 self.logger.error(f"Error updating creation timestamp for {token_address}: {e}")
                 continue
         
-        self.logger.debug(f"Creation timestamp update completed: {successful_updates}/{len(tokens_to_update)} successful")
+        self.logger.info(f"Creation timestamp update completed: {successful_updates}/{len(tokens_to_update)} successful")
         
         return successful_updates
 
@@ -2962,19 +2490,19 @@ class TokenSyncService:
 
     def update_pumpfun_tokens(self) -> int:
         """Update Pump.fun tokens with missing data"""
-        self.logger.debug("Starting Pump.fun data updates for tokens with missing market data...")
+        self.logger.info("Starting Pump.fun data updates for tokens with missing market data...")
         
         tokens_to_update = self.get_tokens_needing_pumpfun_update()
         
         if not tokens_to_update:
-            self.logger.debug("No tokens need Pump.fun updates")
+            self.logger.info("No tokens need Pump.fun updates")
             return 0
         
         successful_updates = 0
         
         for token_address in tokens_to_update:
             try:
-                self.logger.debug(f"Fetching Pump.fun data for: {token_address[:8]}...")
+                self.logger.info(f"Fetching Pump.fun data for: {token_address[:8]}...")
                 
                 # Get data from Pump.fun
                 pumpfun_data = self.get_pumpfun_data(token_address)
@@ -2983,7 +2511,7 @@ class TokenSyncService:
                     # Update only the missing fields in database
                     if self.update_token_with_pumpfun_data(token_address, pumpfun_data):
                         successful_updates += 1
-                        self.logger.debug(f"✅ Updated Pump.fun data for: {token_address[:8]}...")
+                        self.logger.info(f"✅ Updated Pump.fun data for: {token_address[:8]}...")
                     else:
                         self.logger.warning(f"❌ Failed to save Pump.fun data for: {token_address[:8]}...")
                 else:
@@ -3002,7 +2530,7 @@ class TokenSyncService:
                 
                 continue
         
-        self.logger.debug(f"Pump.fun update completed: {successful_updates}/{len(tokens_to_update)} successful")
+        self.logger.info(f"Pump.fun update completed: {successful_updates}/{len(tokens_to_update)} successful")
         
         return successful_updates
 
@@ -3060,12 +2588,12 @@ class TokenSyncService:
 
     def run_historization_cycle(self) -> int:
         """Run historization for tokens that need it"""
-        self.logger.debug("Starting historization cycle...")
+        self.logger.info("Starting historization cycle...")
         
         tokens_to_historize = self.get_tokens_needing_historization()
         
         if not tokens_to_historize:
-            self.logger.debug("No tokens need historization")
+            self.logger.info("No tokens need historization")
             return 0
         
         historized_count = 0
@@ -3079,715 +2607,260 @@ class TokenSyncService:
                 self.logger.error(f"Error historizing token {token_address}: {e}")
                 continue
         
-        self.logger.debug(f"Historization cycle completed: {historized_count}/{len(tokens_to_historize)} successful")
-        self.cycle_logger.record_operation('historized_tokens', historized_count)
-
+        self.logger.info(f"Historization cycle completed: {historized_count}/{len(tokens_to_historize)} successful")
+        
         return historized_count
 
     def run_dead_token_check(self) -> int:
         """Run dead token detection cycle"""
-        self.logger.debug("Starting dead token check cycle...")
+        self.logger.info("Starting dead token check cycle...")
         
         marked_count = self.check_and_mark_dead_tokens()
         
-        self.logger.debug(f"Dead token check completed: {marked_count} tokens marked as dead")
+        self.logger.info(f"Dead token check completed: {marked_count} tokens marked as dead")
         
         return marked_count
 
-    async def fetch_dexscreener_batch_data(self, session: aiohttp.ClientSession, token_addresses: List[str]) -> Dict[str, Dict]:
-        """
-        Fetches token data from DexScreener using the multi-token endpoint.
-        AMÉLIORÉ: Meilleure correspondance et gestion des tokens manqués
-        """
-        if not token_addresses:
-            return {}
-
-        all_pairs_data = {}
-        batch_size = 30  # Limite DexScreener
-        
-        for i in range(0, len(token_addresses), batch_size):
-            batch = token_addresses[i:i + batch_size]
-            addresses_str = ','.join(batch)
-            url = f"https://api.dexscreener.com/latest/dex/tokens/{addresses_str}"
-            
-            self.logger.info(f"🔍 [BATCH] Requesting {len(batch)} tokens: {[addr[:8] for addr in batch]}")
-
+    async def _fetch_one_token_data_async(self, session: aiohttp.ClientSession, token_address: str, semaphore: asyncio.Semaphore) -> Optional[TokenData]:
+        """Coroutine to fetch and parse data for a single token address."""
+        url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+        # self.logger.debug(f"Fetching URL: {url}") # Uncomment for deep debug
+        async with semaphore:
             try:
                 start_time = time.time()
                 async with session.get(url, timeout=CONFIG['request_timeout']) as response:
                     api_duration = time.time() - start_time
-                    self._record_api_call('dexscreener_tokens_batch_async', api_duration)
+                    
+                    self.api_tracker.record_call(
+                        'dexscreener_tokens_async', 
+                        api_duration, 
+                        success=(response.status == 200),
+                        http_status=response.status
+                    )
+                    self.stats['api_calls'] += 1
 
                     if response.status == 200:
                         data = await response.json()
-                        #self.log_debug_response(batch, data, f"batch_{i//30 + 1}")
-                        
-                        if data and data.get('pairs'):
-                            self.logger.info(f"🔍 [BATCH] API returned {len(data['pairs'])} pairs")
+                        if data and 'pairs' in data and data['pairs']:
+                            valid_pairs = [p for p in data['pairs'] if p.get('fdv') and float(p.get('fdv', 0)) > 0]
+                            if not valid_pairs:
+                                return None
                             
-                            # ✅ AMÉLIORATION 1: Créer un index de tous les tokens possibles
-                            batch_set = set(batch)
+                            best_pair = max(valid_pairs, key=lambda x: float(x.get('liquidity', {}).get('usd', 0) or 0))
                             
-                            # ✅ AMÉLIORATION 2: Analyser TOUTES les pairs retournées
-                            found_tokens = set()
-                            token_pairs_map = {}  # token -> list of pairs
-                            
-                            for pair in data['pairs']:
-                                # Vérifier baseToken
-                                base_token_addr = pair.get('baseToken', {}).get('address')
-                                if base_token_addr and base_token_addr in batch_set:
-                                    if base_token_addr not in token_pairs_map:
-                                        token_pairs_map[base_token_addr] = []
-                                    token_pairs_map[base_token_addr].append(pair)
-                                    found_tokens.add(base_token_addr)
-                                
-                                # Vérifier quoteToken (cas rare mais possible)
-                                quote_token_addr = pair.get('quoteToken', {}).get('address')
-                                if quote_token_addr and quote_token_addr in batch_set:
-                                    if quote_token_addr not in token_pairs_map:
-                                        token_pairs_map[quote_token_addr] = []
-                                    token_pairs_map[quote_token_addr].append(pair)
-                                    found_tokens.add(quote_token_addr)
-                            
-                            # ✅ AMÉLIORATION 3: Sélectionner la meilleure pair pour chaque token trouvé
-                            for token_addr, pairs in token_pairs_map.items():
-                                # Prendre la pair avec le plus gros volume 24h
-                                best_pair = max(pairs, key=lambda p: float(p.get('volume', {}).get('h24', 0) or 0))
-                                all_pairs_data[token_addr] = best_pair
-                                
-                                volume_24h = float(best_pair.get('volume', {}).get('h24', 0) or 0)
-                                self.logger.debug(f"✅ [BATCH] Found {token_addr[:8]}... with {len(pairs)} pairs, selected best (vol24h: ${volume_24h:,.0f})")
+                            creation_timestamp = 0
+                            if 'pairCreatedAt' in best_pair:
+                                creation_time = best_pair['pairCreatedAt']
+                                if creation_time and creation_time > 1e12:
+                                    creation_timestamp = int(creation_time // 1000)
+                                elif creation_time:
+                                    creation_timestamp = int(creation_time)
 
-                            # ✅ AMÉLIORATION 4: Debug détaillé pour tokens manqués
-                            missing_tokens = batch_set - found_tokens
-                            
-                            if missing_tokens:
-                                missing_short = [addr[:8] for addr in missing_tokens]
-                                self.logger.warning(f"❌ [BATCH] Missing from API response: {missing_short}")
-                                
-                                # ✅ AMÉLIORATION 5: Analyse approfondie des tokens manqués
-                                self._analyze_missing_tokens(missing_tokens, data.get('pairs', []))
-                            
-                            self.logger.info(f"📊 [BATCH] Found: {len(found_tokens)}/{len(batch)} tokens")
-
-                        else:
-                            self.logger.debug(f"No pairs found in batch response for tokens: {[t[:8] for t in batch]}")
-                    else:
-                        self.logger.warning(f"DexScreener batch API returned status {response.status} for tokens: {[t[:8] for t in batch]}")
-
+                            token_data = TokenData(
+                                address=token_address,
+                                symbol=best_pair.get('baseToken', {}).get('symbol'),
+                                name=best_pair.get('baseToken', {}).get('name'),
+                                price_usd=float(best_pair.get('priceUsd', 0) or 0),
+                                timestamp_token_created=creation_timestamp,
+                                market_cap=float(best_pair.get('fdv', 0) or 0),
+                                volume_5m=float(best_pair.get('volume', {}).get('m5', 0) or 0),
+                                volume_1h=float(best_pair.get('volume', {}).get('h1', 0) or 0),
+                                volume_6h=float(best_pair.get('volume', {}).get('h6', 0) or 0),
+                                volume_24h=float(best_pair.get('volume', {}).get('h24', 0) or 0),
+                                price_change_5m=float(best_pair.get('priceChange', {}).get('m5', 0) or 0),
+                                price_change_1h=float(best_pair.get('priceChange', {}).get('h1', 0) or 0),
+                                price_change_6h=float(best_pair.get('priceChange', {}).get('h6', 0) or 0),
+                                price_change_24h=float(best_pair.get('priceChange', {}).get('h24', 0) or 0),
+                                liquidity_usd=float(best_pair.get('liquidity', {}).get('usd', 0) or 0),
+                                liquidity_sol=float(best_pair.get('liquidity', {}).get('base', 0) or 0),
+                                fdv=float(best_pair.get('fdv', 0) or 0),
+                                metadata_source="dexscreener_async",
+                                original_address=token_address
+                            )
+                            return token_data
+                    return None
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Async fetch timed out for {token_address[:8]}...")
+                return None
             except Exception as e:
-                self.logger.error(f"Error fetching DexScreener batch data for {[t[:8] for t in batch]}: {e}")
-                
-            # Pause entre batches
-            await asyncio.sleep(1)
-
-        return all_pairs_data
-
-    def _analyze_missing_tokens(self, missing_tokens: Set[str], all_pairs: List[Dict]):
-        """
-        Analyse pourquoi certains tokens sont manqués
-        """
-        self.logger.info(f"🔍 [ANALYSIS] Analyzing {len(missing_tokens)} missing tokens...")
-        
-        for missing_addr in list(missing_tokens)[:3]:  # Limiter à 3 pour éviter spam
-            self.logger.info(f"🔍 [ANALYSIS] Analyzing missing token: {missing_addr[:8]}...")
-            
-            # 1. Chercher si le token apparaît quelque part dans la réponse
-            found_somewhere = False
-            for pair in all_pairs:
-                pair_str = str(pair).lower()
-                if missing_addr.lower() in pair_str:
-                    found_somewhere = True
-                    base_addr = pair.get('baseToken', {}).get('address', '')
-                    quote_addr = pair.get('quoteToken', {}).get('address', '')
-                    
-                    self.logger.info(f"🔍 [ANALYSIS] {missing_addr[:8]}... found in pair data:")
-                    self.logger.info(f"   Base: {base_addr[:8] if base_addr else 'N/A'}...")
-                    self.logger.info(f"   Quote: {quote_addr[:8] if quote_addr else 'N/A'}...")
-                    self.logger.info(f"   Exact match base: {base_addr == missing_addr}")
-                    self.logger.info(f"   Exact match quote: {quote_addr == missing_addr}")
-                    break
-            
-            if not found_somewhere:
-                self.logger.info(f"🔍 [ANALYSIS] {missing_addr[:8]}... completely absent from API response")
-                
-                # 2. Vérifier la validité de l'adresse
-                if len(missing_addr) != 44:
-                    self.logger.info(f"   ⚠️ Invalid address length: {len(missing_addr)} (should be 44)")
-                
-                # 3. Vérifier les caractères
-                invalid_chars = [c for c in missing_addr if not c.isalnum()]
-                if invalid_chars:
-                    self.logger.info(f"   ⚠️ Invalid characters found: {invalid_chars}")
-
-    def get_batch_statistics(self) -> Dict:
-        """
-        Retourne des statistiques sur l'efficacité du batch processing
-        """
-        try:
-            # Cette méthode peut être appelée pour monitorer les performances
-            stats = {
-                'total_batch_requests': getattr(self, '_batch_requests', 0),
-                'total_tokens_requested': getattr(self, '_tokens_requested', 0),
-                'total_tokens_found': getattr(self, '_tokens_found', 0),
-                'success_rate': 0.0
-            }
-            
-            if stats['total_tokens_requested'] > 0:
-                stats['success_rate'] = (stats['total_tokens_found'] / stats['total_tokens_requested']) * 100
-            
-            return stats
-        except Exception as e:
-            self.logger.error(f"Error calculating batch statistics: {e}")
-            return {}
-
-    # ✅ AMÉLIORATION 6: Méthode pour diagnostiquer les problèmes de batch
-    def diagnose_batch_issues(self, token_addresses: List[str]) -> Dict[str, str]:
-        """
-        Diagnostique les problèmes potentiels avec une liste de tokens
-        """
-        issues = {}
-        
-        for addr in token_addresses:
-            problems = []
-            
-            # Vérifier la longueur
-            if len(addr) != 44:
-                problems.append(f"invalid_length_{len(addr)}")
-            
-            # Vérifier les caractères
-            if not addr.replace('1', '').replace('2', '').replace('3', '').replace('4', '').replace('5', '').replace('6', '').replace('7', '').replace('8', '').replace('9', '').replace('0', '').isalpha():
-                invalid_chars = [c for c in addr if not c.isalnum()]
-                if invalid_chars:
-                    problems.append(f"invalid_chars_{invalid_chars}")
-            
-            # Vérifier si c'est une adresse connue problématique
-            if addr.startswith('So1111'):  # SOL wrapper
-                problems.append("quote_token")
-            
-            if problems:
-                issues[addr] = ",".join(problems)
-        
-        return issues
-
-    def _parse_dexscreener_batch_response(self, pairs_data: Dict[str, Dict]) -> Dict[str, TokenData]:
-        """
-        Parses the batch response from DexScreener into TokenData objects.
-        AMÉLIORÉ: Gère aussi les données individuelles
-        """
-        self.logger.info(f"🔍 [PARSE] Starting parse of {len(pairs_data)} pairs")
-
-        token_data_map = {}
-        for token_address, pair_data in pairs_data.items():
-            try:
-                self.logger.info(f"🔍 [PARSE] Processing {token_address[:8]}...")
-
-                if not (pair_data and pair_data.get('baseToken')):
-                    self.logger.debug(f"❌ [PARSE] Invalid pair data for {token_address[:8]}...")
-                    continue
-                
-                # Détecter si c'est notre token dans baseToken ou quoteToken
-                base_token_addr = pair_data.get('baseToken', {}).get('address')
-                quote_token_addr = pair_data.get('quoteToken', {}).get('address')
-                
-                # Déterminer quel token nous intéresse
-                if base_token_addr == token_address:
-                    target_token = pair_data.get('baseToken', {})
-                elif quote_token_addr == token_address:
-                    target_token = pair_data.get('quoteToken', {})
-                    # Inverser les données si notre token est en quote
-                    # (cas rare mais possible)
-                    self.logger.debug(f"⚠️ [PARSE] Token {token_address[:8]}... found as quoteToken")
-                else:
-                    # Cas normal: notre token est le baseToken
-                    target_token = pair_data.get('baseToken', {})
-                
-                creation_timestamp = 0
-                if 'pairCreatedAt' in pair_data:
-                    creation_time = pair_data['pairCreatedAt']
-                    if creation_time and creation_time > 1e12:
-                        creation_timestamp = int(creation_time // 1000)
-                    elif creation_time:
-                        creation_timestamp = int(creation_time)
-
-                token_data = TokenData(
-                    address=token_address,
-                    symbol=target_token.get('symbol'),
-                    name=target_token.get('name'),
-                    price_usd=float(pair_data.get('priceUsd', 0) or 0),
-                    timestamp_token_created=creation_timestamp,
-                    market_cap=float(pair_data.get('fdv', 0) or 0),
-                    volume_5m=float(pair_data.get('volume', {}).get('m5', 0) or 0),
-                    volume_1h=float(pair_data.get('volume', {}).get('h1', 0) or 0),
-                    volume_6h=float(pair_data.get('volume', {}).get('h6', 0) or 0),
-                    volume_24h=float(pair_data.get('volume', {}).get('h24', 0) or 0),
-                    price_change_5m=float(pair_data.get('priceChange', {}).get('m5', 0) or 0),
-                    price_change_1h=float(pair_data.get('priceChange', {}).get('h1', 0) or 0),
-                    price_change_6h=float(pair_data.get('priceChange', {}).get('h6', 0) or 0),
-                    price_change_24h=float(pair_data.get('priceChange', {}).get('h24', 0) or 0),
-                    liquidity_usd=float(pair_data.get('liquidity', {}).get('usd', 0) or 0),
-                    liquidity_sol=float(pair_data.get('liquidity', {}).get('base', 0) or 0),
-                    fdv=float(pair_data.get('fdv', 0) or 0),
-                    metadata_source="dexscreener_batch_enhanced",
-                    original_address=token_address
-                )
-                token_data_map[token_address] = token_data
-                self.logger.info(f"✅ [PARSE] Successfully parsed {token_address[:8]}...")
-
-            except Exception as e:
-                self.logger.error(f"Error parsing pair data for token {token_address}: {e}")
-        
-        self.logger.info(f"📊 [PARSE] Final result: {len(token_data_map)} tokens parsed successfully")
-
-        return token_data_map
+                self.logger.error(f"Async fetch failed for {token_address[:8]}...: {e}")
+                return None
 
     async def process_tokens_in_batches_async(self, tokens: List[str]) -> int:
-        """
-        Processes a list of tokens asynchronously using the batch API endpoint.
-        AMÉLIORÉ: Fallback individuel pour tokens manqués dans le batch
-        """
+        """Processes a list of tokens asynchronously."""
         if not tokens:
             return 0
         
         start_time = time.time()
         successful_upserts = 0
+        failed_tokens = []
         
-        # 1. Tentative de traitement en batch
+        # Limit concurrency to avoid getting rate-limited
+        semaphore = asyncio.Semaphore(5) 
+        
         async with aiohttp.ClientSession() as session:
-            all_pairs_data = await self.fetch_dexscreener_batch_data(session, tokens)
+            tasks = [self._fetch_one_token_data_async(session, token, semaphore) for token in tokens]
+            results = await asyncio.gather(*tasks)
+
+        # Process results
+        for i, token_data in enumerate(results):
+            token_address = tokens[i]
+            if token_data:
+                # This is a blocking call. We will make it non-blocking in the next step.
+                if self.upsert_token(token_data):
+                   successful_upserts += 1
+                else:
+                    failed_tokens.append(token_address)
+            else:
+                # If fetch failed, create a stub to avoid re-processing immediately
+                self.create_token_stub(token_address)
+                failed_tokens.append(token_address)
         
-        # 2. Parse les données batch obtenues
-        token_data_map = self._parse_dexscreener_batch_response(all_pairs_data)
+        self.stats['successful_updates'] += successful_upserts
+        self.stats['failed_updates'] += len(failed_tokens)
+        self.stats['processed_tokens'] += len(tokens)
+
+        total_duration = time.time() - start_time
+        self.logger.info(f"🏁 Async batch completed: {successful_upserts}/{len(tokens)} successful in {total_duration:.2f}s")
         
-        # 3. Identifier les tokens manqués
-        found_tokens = set(token_data_map.keys())
-        missing_tokens = set(tokens) - found_tokens
+        return successful_upserts
+    
+    async def _fetch_one_token_data_async(self, session: aiohttp.ClientSession, token_address: str, semaphore: asyncio.Semaphore) -> Optional[TokenData]:
+        """Coroutine to fetch and parse data for a single token address."""
+        url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+        # self.logger.debug(f"Fetching URL: {url}") # Uncomment for deep debug
+        async with semaphore:
+            try:
+                start_time = time.time()
+                async with session.get(url, timeout=CONFIG['request_timeout']) as response:
+                    api_duration = time.time() - start_time
+                    
+                    self.api_tracker.record_call(
+                        'dexscreener_tokens_async', 
+                        api_duration, 
+                        success=(response.status == 200),
+                        http_status=response.status
+                    )
+                    self.stats['api_calls'] += 1
+
+                    if response.status == 200:
+                        data = await response.json()
+                        if data and 'pairs' in data and data['pairs']:
+                            valid_pairs = [p for p in data['pairs'] if p.get('fdv') and float(p.get('fdv', 0)) > 0]
+                            if not valid_pairs:
+                                return None
+                            
+                            best_pair = max(valid_pairs, key=lambda x: float(x.get('liquidity', {}).get('usd', 0) or 0))
+                            
+                            creation_timestamp = 0
+                            if 'pairCreatedAt' in best_pair:
+                                creation_time = best_pair['pairCreatedAt']
+                                if creation_time and creation_time > 1e12:
+                                    creation_timestamp = int(creation_time // 1000)
+                                elif creation_time:
+                                    creation_timestamp = int(creation_time)
+
+                            token_data = TokenData(
+                                address=token_address,
+                                symbol=best_pair.get('baseToken', {}).get('symbol'),
+                                name=best_pair.get('baseToken', {}).get('name'),
+                                price_usd=float(best_pair.get('priceUsd', 0) or 0),
+                                timestamp_token_created=creation_timestamp,
+                                market_cap=float(best_pair.get('fdv', 0) or 0),
+                                volume_5m=float(best_pair.get('volume', {}).get('m5', 0) or 0),
+                                volume_1h=float(best_pair.get('volume', {}).get('h1', 0) or 0),
+                                volume_6h=float(best_pair.get('volume', {}).get('h6', 0) or 0),
+                                volume_24h=float(best_pair.get('volume', {}).get('h24', 0) or 0),
+                                price_change_5m=float(best_pair.get('priceChange', {}).get('m5', 0) or 0),
+                                price_change_1h=float(best_pair.get('priceChange', {}).get('h1', 0) or 0),
+                                price_change_6h=float(best_pair.get('priceChange', {}).get('h6', 0) or 0),
+                                price_change_24h=float(best_pair.get('priceChange', {}).get('h24', 0) or 0),
+                                liquidity_usd=float(best_pair.get('liquidity', {}).get('usd', 0) or 0),
+                                liquidity_sol=float(best_pair.get('liquidity', {}).get('base', 0) or 0),
+                                fdv=float(best_pair.get('fdv', 0) or 0),
+                                metadata_source="dexscreener_async",
+                                original_address=token_address
+                            )
+                            return token_data
+                    return None
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Async fetch timed out for {token_address[:8]}...")
+                return None
+            except Exception as e:
+                self.logger.error(f"Async fetch failed for {token_address[:8]}...: {e}")
+                return None
+
+    async def process_tokens_in_batches_async(self, tokens: List[str]) -> int:
+        """Processes a list of tokens asynchronously."""
+        if not tokens:
+            return 0
         
-        # ✅ NOUVEAU: Fallback individuel pour tokens manqués
-        if missing_tokens:
-            self.logger.warning(f"🔍 [FALLBACK] Traitement individuel de {len(missing_tokens)} tokens manqués: {[t[:8] for t in missing_tokens]}")
-            
-            async with aiohttp.ClientSession() as session:
-                # Traiter les tokens manqués individuellement
-                for token_addr in missing_tokens:
-                    try:
-                        individual_token_data = await self.fetch_individual_token_data(session, token_addr)
-                        if individual_token_data:
-                            token_data_map[token_addr] = individual_token_data
-                            self.logger.debug(f"✅ [FALLBACK] Token récupéré individuellement: {token_addr[:8]}...")
-                        else:
-                            self.logger.debug(f"❌ [FALLBACK] Token introuvable même individuellement: {token_addr[:8]}...")
-                        
-                        # Pause entre requêtes individuelles
-                        await asyncio.sleep(0.5)
-                        
-                    except Exception as e:
-                        self.logger.error(f"❌ [FALLBACK] Erreur traitement individuel {token_addr[:8]}...: {e}")
+        start_time = time.time()
+        successful_upserts = 0
+        failed_tokens = []
         
-        # 4. Créer les tâches de base de données pour TOUS les tokens
+        # Limit concurrency to avoid getting rate-limited
+        semaphore = asyncio.Semaphore(5) 
+        
+        async with aiohttp.ClientSession() as session:
+            tasks = [self._fetch_one_token_data_async(session, token, semaphore) for token in tokens]
+            results = await asyncio.gather(*tasks)
+
+        # Process results by running DB operations in a thread pool to avoid blocking
         db_tasks = []
-        for token_address in tokens:
-            token_data = token_data_map.get(token_address)
-            
+        for i, token_data in enumerate(results):
+            token_address = tokens[i]
             if token_data:
                 db_tasks.append(asyncio.to_thread(self.upsert_token, token_data))
             else:
-                # Créer un stub si aucune donnée trouvée
+                # If fetch failed, create a stub to avoid re-processing immediately
                 db_tasks.append(asyncio.to_thread(self.create_token_stub, token_address))
-        
-        # 5. Exécuter les opérations de base de données
+
+        # Run all database operations concurrently
         db_results = await asyncio.gather(*db_tasks, return_exceptions=True)
 
-        # 6. Compter les résultats
+        successful_upserts = 0
         failed_count = 0
         for i, result in enumerate(db_results):
-            token_addr = tokens[i]
-            
             if isinstance(result, Exception):
-                self.logger.error(f"DB operation failed for token {token_addr}: {result}")
+                self.logger.error(f"DB operation failed for token {tokens[i]}: {result}")
                 failed_count += 1
-            elif result:
-                if token_addr in token_data_map:
+            elif result: # If the operation returned True
+                # We only count an upsert as successful if it came from a successful fetch
+                if results[i] is not None:
                     successful_upserts += 1
             else:
                 failed_count += 1
 
-        # 7. Statistiques
         self.stats['successful_updates'] += successful_upserts
         self.stats['failed_updates'] += failed_count
         self.stats['processed_tokens'] += len(tokens)
 
         total_duration = time.time() - start_time
-        batch_success = len(found_tokens)
-        fallback_success = len([t for t in missing_tokens if t in token_data_map])
-        
-        self.logger.debug(f"🏁 Batch processing completed: {successful_upserts}/{len(tokens)} successful in {total_duration:.2f}s")
-        self.logger.debug(f"📊 Details: batch={batch_success}, fallback={fallback_success}, stubs={len(tokens)-successful_upserts}")
+        self.logger.info(f"🏁 Async batch completed: {successful_upserts}/{len(tokens)} successful in {total_duration:.2f}s")
         
         return successful_upserts
 
-    async def fetch_individual_token_data(self, session: aiohttp.ClientSession, token_address: str) -> Optional[TokenData]:
-        """
-        Récupère les données d'un token individuellement via l'API DexScreener
-        CORRIGÉ: Retourne un objet TokenData au lieu d'un Dict
-        """
-        try:
-            url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-            
-            start_time = time.time()
-            async with session.get(url, timeout=CONFIG['request_timeout']) as response:
-                api_duration = time.time() - start_time
-                self._record_api_call('dexscreener_individual_fallback', api_duration)
-                
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    if data and data.get('pairs'):
-                        # Prendre la meilleure paire (même logique que le batch)
-                        best_pair = max(data['pairs'], key=lambda p: float(p.get('volume', {}).get('h24', 0) or 0))
-                        
-                        # ✅ CORRECTION: Convertir en TokenData
-                        token_data = self._convert_pair_to_token_data(token_address, best_pair)
-                        
-                        self.logger.debug(f"🔍 [INDIVIDUAL] Token trouvé: {token_address[:8]}... (vol24h: ${float(best_pair.get('volume', {}).get('h24', 0) or 0):,.0f})")
-                        return token_data
-                    else:
-                        self.logger.debug(f"🔍 [INDIVIDUAL] Aucune paire pour: {token_address[:8]}...")
-                        return None
-                else:
-                    self.logger.debug(f"🔍 [INDIVIDUAL] HTTP {response.status} pour: {token_address[:8]}...")
-                    return None
-                    
-        except Exception as e:
-            self.logger.error(f"🔍 [INDIVIDUAL] Erreur pour {token_address[:8]}...: {e}")
-            return None
-
-    def _convert_pair_to_token_data(self, token_address: str, pair_data: Dict) -> TokenData:
-        """
-        Convertit les données d'une paire DexScreener en objet TokenData
-        """
-        try:
-            # Déterminer quel token nous intéresse
-            base_token_addr = pair_data.get('baseToken', {}).get('address')
-            quote_token_addr = pair_data.get('quoteToken', {}).get('address')
-            
-            if base_token_addr == token_address:
-                target_token = pair_data.get('baseToken', {})
-            elif quote_token_addr == token_address:
-                target_token = pair_data.get('quoteToken', {})
-                self.logger.debug(f"⚠️ [CONVERT] Token {token_address[:8]}... found as quoteToken")
-            else:
-                # Cas par défaut: prendre baseToken
-                target_token = pair_data.get('baseToken', {})
-            
-            # Gérer le timestamp de création
-            creation_timestamp = 0
-            if 'pairCreatedAt' in pair_data:
-                creation_time = pair_data['pairCreatedAt']
-                if creation_time and creation_time > 1e12:
-                    creation_timestamp = int(creation_time // 1000)
-                elif creation_time:
-                    creation_timestamp = int(creation_time)
-
-            # Créer l'objet TokenData
-            token_data = TokenData(
-                address=token_address,
-                symbol=target_token.get('symbol'),
-                name=target_token.get('name'),
-                price_usd=float(pair_data.get('priceUsd', 0) or 0),
-                timestamp_token_created=creation_timestamp,
-                market_cap=float(pair_data.get('fdv', 0) or 0),
-                volume_5m=float(pair_data.get('volume', {}).get('m5', 0) or 0),
-                volume_1h=float(pair_data.get('volume', {}).get('h1', 0) or 0),
-                volume_6h=float(pair_data.get('volume', {}).get('h6', 0) or 0),
-                volume_24h=float(pair_data.get('volume', {}).get('h24', 0) or 0),
-                price_change_5m=float(pair_data.get('priceChange', {}).get('m5', 0) or 0),
-                price_change_1h=float(pair_data.get('priceChange', {}).get('h1', 0) or 0),
-                price_change_6h=float(pair_data.get('priceChange', {}).get('h6', 0) or 0),
-                price_change_24h=float(pair_data.get('priceChange', {}).get('h24', 0) or 0),
-                liquidity_usd=float(pair_data.get('liquidity', {}).get('usd', 0) or 0),
-                liquidity_sol=float(pair_data.get('liquidity', {}).get('base', 0) or 0),
-                fdv=float(pair_data.get('fdv', 0) or 0),
-                metadata_source="dexscreener_individual_fallback",
-                original_address=token_address
-            )
-            
-            return token_data
-            
-        except Exception as e:
-            self.logger.error(f"❌ [CONVERT] Erreur conversion pair->TokenData pour {token_address[:8]}...: {e}")
-            # Retourner un TokenData minimal en cas d'erreur
-            return TokenData(
-                address=token_address,
-                symbol=f"UNK_{token_address[:6]}",
-                name=f"Unknown Token {token_address[:8]}",
-                metadata_source="dexscreener_fallback_error"
-            )
-
-    def sync_new_tokens_intelligent(self) -> int:
-        """Version optimisée avec groupement par type pour éviter les appels API redondants"""
-        
-        self.logger.debug("🤖 [INTELLIGENT] Début sync intelligent optimisé...")
-        
-        new_tokens = list(self.get_new_tokens_from_transactions())
-        if not new_tokens:
-            self.logger.debug("🤖 [INTELLIGENT] Aucun nouveau token")
-            return 0
-        
-        self.logger.info(f"🤖 [INTELLIGENT] Traitement de {len(new_tokens)} nouveaux tokens")
-        
-        # Variables de suivi
-        successful_updates = 0
-        pump_530_errors = 0
-        max_530_errors = 5
-        
-        # ✅ PHASE 1: DÉTECTION ET GROUPEMENT PAR TYPE
-        self.logger.debug("🔍 [PHASE 1] Détection et groupement des tokens...")
-        
-        dex_tokens = []
-        pump_tokens = []
-        unknown_tokens = []
-        
-        # Statistiques de détection
-        detection_stats = {
-            'dex_listed': 0,
-            'pump_prebond': 0, 
-            'pump_graduated': 0,
-            'unknown': 0,
-            'skipped_530': 0
-        }
-        
-        for i, token_address in enumerate(new_tokens, 1):
-            try:
-                self.logger.debug(f"🔍 [DETECT] {i}/{len(new_tokens)}: {token_address[:8]}...")
-                
-                # Skip Pump.fun si trop d'erreurs 530
-                skip_pump_apis = pump_530_errors >= max_530_errors
-                if skip_pump_apis:
-                    self.logger.warning(f"⚠️ [DETECT] Mode DexScreener uniquement pour {token_address[:8]}...")
-                    dex_tokens.append(token_address)  # Forcer en mode DEX
-                    detection_stats['skipped_530'] += 1
-                    continue
-                
-                # Détecter le type
-                token_type_result = self.detect_token_type(token_address)
-                detection_stats[token_type_result.token_type] += 1
-                
-                self.logger.info(f"🎯 [DETECT] {token_address[:8]}... → {token_type_result.token_type} (conf: {token_type_result.confidence:.2f})")
-                
-                # Grouper par type
-                if token_type_result.token_type == "dex_listed":
-                    dex_tokens.append(token_address)
-                    
-                elif token_type_result.token_type in ["pump_prebond", "pump_graduated"]:
-                    pump_tokens.append((token_address, token_type_result))
-                    
-                else:  # unknown
-                    unknown_tokens.append((token_address, token_type_result))
-                    
-                    # Compter les erreurs 530 pour tokens unknown
-                    if token_type_result.confidence <= 0.2:
-                        pump_530_errors += 1
-                        self.logger.debug(f"🔍 [DETECT] Erreurs 530 consécutives: {pump_530_errors}/{max_530_errors}")
-                    else:
-                        pump_530_errors = 0
-                
-                # Petite pause tous les 5 tokens
-                if i % 5 == 0:
-                    time.sleep(0.2)
-                    
-            except Exception as e:
-                self.logger.error(f"❌ [DETECT] Erreur détection {token_address[:8]}...: {e}")
-                # En cas d'erreur, ajouter aux unknown pour traitement fallback
-                unknown_tokens.append((token_address, None))
-        
-        # ✅ PHASE 2: TRAITEMENT GROUPÉ PAR TYPE
-        self.logger.info(f"📊 [PHASE 2] Groupement: DEX={len(dex_tokens)}, Pump={len(pump_tokens)}, Unknown={len(unknown_tokens)}")
-        
-        # 2.1 Traitement en lot des tokens DEX
-        if dex_tokens:
-            self.logger.info(f"🔸 [DEX-BATCH] Traitement de {len(dex_tokens)} tokens DEX en lot...")
-            try:
-                batch_result = asyncio.run(self.process_tokens_in_batches_async(dex_tokens))
-                successful_updates += batch_result
-                self.logger.info(f"✅ [DEX-BATCH] {batch_result}/{len(dex_tokens)} tokens DEX traités avec succès")
-            except Exception as e:
-                self.logger.error(f"❌ [DEX-BATCH] Erreur traitement lot DEX: {e}")
-                # Fallback: créer des stubs pour tous les tokens DEX échoués
-                for token_address in dex_tokens:
-                    try:
-                        self.create_token_stub(token_address)
-                    except Exception as stub_e:
-                        self.logger.error(f"❌ [DEX-BATCH] Stub échoué pour {token_address[:8]}...: {stub_e}")
-        
-        # 2.2 Traitement individuel des tokens Pump.fun
-        if pump_tokens:
-            self.logger.info(f"🚀 [PUMP-INDIVIDUAL] Traitement de {len(pump_tokens)} tokens Pump.fun individuellement...")
-            for token_address, token_type_result in pump_tokens:
-                try:
-                    self.logger.debug(f"🚀 [PUMP] Traitement {token_address[:8]}... ({token_type_result.token_type})")
-                    
-                    token_data = self.enrich_token_by_type(token_address, token_type_result)
-                    
-                    if token_data is not None:
-                        # Ajouter métadonnées de détection
-                        try:
-                            token_data.detection_method = token_type_result.token_type
-                            token_data.detection_confidence = token_type_result.confidence
-                        except AttributeError:
-                            pass
-                        
-                        # Sauvegarder
-                        if self.upsert_token(token_data):
-                            successful_updates += 1
-                            self.logger.debug(f"✅ [PUMP] Token sauvegardé: {token_address[:8]}...")
-                        else:
-                            self.logger.warning(f"❌ [PUMP] Échec sauvegarde: {token_address[:8]}...")
-                    else:
-                        self.logger.warning(f"❌ [PUMP] Aucune donnée: {token_address[:8]}...")
-                        
-                    # Pause entre tokens Pump.fun
-                    time.sleep(0.3)
-                    
-                except Exception as e:
-                    self.logger.error(f"❌ [PUMP] Erreur {token_address[:8]}...: {e}")
-                    self.create_token_stub(token_address)
-        
-        # 2.3 Traitement des tokens unknown (fallback)
-        if unknown_tokens:
-            self.logger.info(f"❓ [UNKNOWN] Traitement de {len(unknown_tokens)} tokens unknown...")
-            for token_address, token_type_result in unknown_tokens:
-                try:
-                    if token_type_result is None:
-                        # Erreur de détection, créer directement un stub
-                        self.create_token_stub(token_address)
-                    else:
-                        # Tenter l'enrichissement unknown
-                        token_data = self.enrich_token_by_type(token_address, token_type_result)
-                        if token_data is not None and self.upsert_token(token_data):
-                            successful_updates += 1
-                            self.logger.debug(f"✅ [UNKNOWN] Token récupéré: {token_address[:8]}...")
-                    
-                    time.sleep(0.2)
-                    
-                except Exception as e:
-                    self.logger.error(f"❌ [UNKNOWN] Erreur {token_address[:8]}...: {e}")
-                    self.create_token_stub(token_address)
-        
-        # ✅ PHASE 3: STATISTIQUES FINALES
-        total_processed = len(new_tokens)
-        success_rate = (successful_updates / total_processed * 100) if total_processed > 0 else 0
-        
-        self.logger.info(f"🏁 [INTELLIGENT] Terminé: {successful_updates}/{total_processed} réussis ({success_rate:.1f}%)")
-        self.logger.info(f"📊 [INTELLIGENT] Détection: DEX={detection_stats['dex_listed']}, Pump-Pre={detection_stats['pump_prebond']}, Pump-Grad={detection_stats['pump_graduated']}, Unknown={detection_stats['unknown']}, Skipped-530={detection_stats['skipped_530']}")
-        
-        # Estimation d'optimisation
-        estimated_old_calls = len(new_tokens) * 2  # Détection + enrichissement individuel
-        estimated_new_calls = len(new_tokens) + max(1, len(dex_tokens) // 30)  # Détection + batch
-        calls_saved = estimated_old_calls - estimated_new_calls
-        
-        if calls_saved > 0:
-            self.logger.info(f"⚡ [OPTIMIZATION] ~{calls_saved} appels API économisés grâce au groupement")
-        
-        # Alerte APIs instables
-        if pump_530_errors >= max_530_errors:
-            self.logger.warning(f"🚨 [INTELLIGENT] APIs Pump.fun instables: {pump_530_errors} erreurs 530 consécutives")
-        
-        # Enregistrer pour les stats globales
-        self.cycle_logger.record_operation('new_tokens', successful_updates)
-        
-        return successful_updates
-
+    
     def sync_new_tokens(self) -> int:
         """Optimized version with async batch processing."""
-        self.logger.debug("🚀 Starting ASYNC token synchronization...")
+        self.logger.info("🚀 Starting ASYNC token synchronization...")
         
         all_new_tokens = list(self.get_new_tokens_from_transactions())
         
         if not all_new_tokens:
-            self.logger.debug("No new tokens to process")
+            self.logger.info("No new tokens to process")
             return 0
         
         # We can process them all in one async run, priority doesn't matter for fetching
         # as much when it's all concurrent.
-        self.logger.debug(f"📊 Processing {len(all_new_tokens)} new tokens asynchronously")
+        self.logger.info(f"📊 Processing {len(all_new_tokens)} new tokens asynchronously")
         
-        result = asyncio.run(self.process_tokens_in_batches_async(all_new_tokens))
-
-        self.cycle_logger.record_operation('new_tokens', result)
-        
-        return result
+        return asyncio.run(self.process_tokens_in_batches_async(all_new_tokens))
 
     def update_existing_prices(self) -> int:
-        """Version simplifiée : mise à jour des tokens selon intervalle et limite configurés"""
-        
-        self.logger.debug("🔄 Starting simple price updates...")
-        
-        # Récupérer les tokens à mettre à jour
-        tokens_to_update = self.get_tokens_needing_price_update_simple()
-        
-        if not tokens_to_update:
-            self.logger.debug("No tokens need price updates.")
-            return 0
-        
-        self.logger.info(f"📊 Updating {len(tokens_to_update)} tokens (limit: {CONFIG['price_update_limit']})")
-        
-        # Traitement en lot via la méthode batch existante
-        try:
-            result = asyncio.run(self.process_tokens_in_batches_async(tokens_to_update))
-            self.logger.info(f"✅ Price update completed: {result}/{len(tokens_to_update)} successful")
-            
-            self.cycle_logger.record_operation('updated_tokens', result)
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error in price update: {e}")
-            return 0
-
-    def get_tokens_needing_price_update_simple(self) -> List[str]:
-        """Récupère les tokens nécessitant une mise à jour selon la config simple"""
-        try:
-            with self.get_db_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Calculer le timestamp de cutoff
-                cutoff_timestamp = int(time.time()) - CONFIG['price_update_interval']
-                
-                query = """
-                SELECT address 
-                FROM tokens 
-                WHERE (last_price_update < ? OR last_price_update IS NULL)
-                AND is_dead = 0
-                AND (no_data_available = 0 OR no_data_available IS NULL)
-                AND (failed_attempts < ? OR failed_attempts IS NULL)
-                ORDER BY 
-                    CASE WHEN last_price_update IS NULL THEN 0 ELSE last_price_update END ASC,
-                    market_cap DESC NULLS LAST
-                LIMIT ?
-                """
-                
-                cursor.execute(query, (
-                    cutoff_timestamp, 
-                    CONFIG['max_failed_attempts'], 
-                    CONFIG['price_update_limit']
-                ))
-                
-                results = cursor.fetchall()
-                token_addresses = [row[0] for row in results]
-                
-                if token_addresses:
-                    self.logger.debug(f"Found {len(token_addresses)} tokens needing update (cutoff: {datetime.fromtimestamp(cutoff_timestamp).strftime('%H:%M:%S')})")
-                
-                return token_addresses
-                
-        except Exception as e:
-            self.logger.error(f"Error getting tokens for simple price update: {e}")
-            return []
-
-    #not used anymore for the moment
-    def update_existing_prices_old(self) -> int:
         """Optimized version to update existing token prices asynchronously."""
-        self.logger.debug("🔄 Starting ASYNC price updates...")
+        self.logger.info("🔄 Starting ASYNC price updates...")
         
         # 1. Get dashboard tokens needing updates first
         dashboard_tokens = self.get_dashboard_tokens_needing_update()
@@ -3799,18 +2872,17 @@ class TokenSyncService:
         tokens_to_update = list(dict.fromkeys(dashboard_tokens + other_tokens))
         
         if not tokens_to_update:
-            self.logger.debug("No tokens need price updates.")
+            self.logger.info("No tokens need price updates.")
             return 0
         
-        self.logger.debug(f"Found {len(tokens_to_update)} total tokens for price update (Dashboard: {len(dashboard_tokens)})")
+        self.logger.info(f"Found {len(tokens_to_update)} total tokens for price update (Dashboard: {len(dashboard_tokens)})")
         
         # Process all tokens in one async batch
-        result = asyncio.run(self.process_tokens_in_batches_async(tokens_to_update))
+        return asyncio.run(self.process_tokens_in_batches_async(tokens_to_update))
 
-        self.cycle_logger.record_operation('updated_tokens', result)
-        
-        return result
-        
+    
+   
+
     def get_flagged_tokens_stats(self) -> Dict:
         """Get statistics about flagged tokens"""
         try:
@@ -3860,26 +2932,26 @@ class TokenSyncService:
         flagged_stats = self.get_flagged_tokens_stats()
         
         
-        self.logger.debug("=== TOKEN SYNC STATISTICS ===")
-        self.logger.debug(f"Runtime: {runtime_str}")
-        self.logger.debug(f"Processed tokens: {self.stats['processed_tokens']}")
-        self.logger.debug(f"Successful updates: {self.stats['successful_updates']}")
-        self.logger.debug(f"Failed updates: {self.stats['failed_updates']}")
-        self.logger.debug(f"API calls made: {self.stats['api_calls']}")
-        self.logger.debug(f"Tokens historized: {self.stats['tokens_historized']}")
-        self.logger.debug(f"Tokens marked dead: {self.stats['tokens_marked_dead']}")
+        self.logger.info("=== TOKEN SYNC STATISTICS ===")
+        self.logger.info(f"Runtime: {runtime_str}")
+        self.logger.info(f"Processed tokens: {self.stats['processed_tokens']}")
+        self.logger.info(f"Successful updates: {self.stats['successful_updates']}")
+        self.logger.info(f"Failed updates: {self.stats['failed_updates']}")
+        self.logger.info(f"API calls made: {self.stats['api_calls']}")
+        self.logger.info(f"Tokens historized: {self.stats['tokens_historized']}")
+        self.logger.info(f"Tokens marked dead: {self.stats['tokens_marked_dead']}")
         
         # Stats de flagging
         if flagged_stats:
-            self.logger.debug("=== FLAGGED TOKENS STATS ===")
-            self.logger.debug(f"Tokens marked as no-data: {flagged_stats.get('no_data_flagged', 0)}")
-            self.logger.debug(f"Tokens with partial failures: {flagged_stats.get('partial_failures', 0)}")
-            self.logger.debug(f"Tokens eligible for retry: {flagged_stats.get('retry_eligible', 0)}")
-            self.logger.debug(f"Dead tokens: {flagged_stats.get('dead_tokens', 0)}")
+            self.logger.info("=== FLAGGED TOKENS STATS ===")
+            self.logger.info(f"Tokens marked as no-data: {flagged_stats.get('no_data_flagged', 0)}")
+            self.logger.info(f"Tokens with partial failures: {flagged_stats.get('partial_failures', 0)}")
+            self.logger.info(f"Tokens eligible for retry: {flagged_stats.get('retry_eligible', 0)}")
+            self.logger.info(f"Dead tokens: {flagged_stats.get('dead_tokens', 0)}")
 
         if self.stats['processed_tokens'] > 0:
             success_rate = (self.stats['successful_updates'] / self.stats['processed_tokens']) * 100
-            self.logger.debug(f"Success rate: {success_rate:.1f}%")
+            self.logger.info(f"Success rate: {success_rate:.1f}%")
 
         self.print_api_statistics()
     
@@ -3890,21 +2962,21 @@ class TokenSyncService:
             api_stats = self.api_tracker.get_stats()
             
             if not api_stats:
-                self.logger.debug("=== 📡 API STATISTICS ===")
-                self.logger.debug("No API statistics available")
+                self.logger.info("=== 📡 API STATISTICS ===")
+                self.logger.info("No API statistics available")
                 return
             
-            self.logger.debug("=== 📡 API STATISTICS ===")
+            self.logger.info("=== 📡 API STATISTICS ===")
             
             # Sort by total calls for better readability
             sorted_apis = sorted(api_stats.items(), key=lambda x: x[1].get('total_calls', 0), reverse=True)
             
             for api_name, stats in sorted_apis:
                 if stats.get('total_calls', 0) > 0:  # Only show APIs that have been called
-                    self.logger.debug(f"🔗 {api_name.upper()}")
-                    self.logger.debug(f"   Total: {stats.get('total_calls', 0)} calls | {stats.get('total_duration_seconds', 0)}s | avg {stats.get('avg_duration_seconds', 0)}s")
-                    self.logger.debug(f"   Recent: 5m={stats.get('calls_5m', 0)} | 30m={stats.get('calls_30m', 0)} | 1h={stats.get('calls_1h', 0)}")
-                    self.logger.debug(f"   Rate/min: 5m={stats.get('rate_per_minute_5m', 0)} | 30m={stats.get('rate_per_minute_30m', 0)} | 1h={stats.get('rate_per_minute_1h', 0)}")
+                    self.logger.info(f"🔗 {api_name.upper()}")
+                    self.logger.info(f"   Total: {stats.get('total_calls', 0)} calls | {stats.get('total_duration_seconds', 0)}s | avg {stats.get('avg_duration_seconds', 0)}s")
+                    self.logger.info(f"   Recent: 5m={stats.get('calls_5m', 0)} | 30m={stats.get('calls_30m', 0)} | 1h={stats.get('calls_1h', 0)}")
+                    self.logger.info(f"   Rate/min: 5m={stats.get('rate_per_minute_5m', 0)} | 30m={stats.get('rate_per_minute_30m', 0)} | 1h={stats.get('rate_per_minute_1h', 0)}")
                     
                     # Alert if rate is too high
                     if stats.get('rate_per_minute_5m', 0) > 10:  # Plus de 10 appels/min sur 5min
@@ -3915,7 +2987,7 @@ class TokenSyncService:
             total_duration = sum(stats.get('total_duration_seconds', 0) for stats in api_stats.values())
             total_5m = sum(stats.get('calls_5m', 0) for stats in api_stats.values())
             
-            self.logger.debug(f"📊 SUMMARY: {total_calls} total calls | {total_duration:.1f}s total | {total_5m} calls last 5min")
+            self.logger.info(f"📊 SUMMARY: {total_calls} total calls | {total_duration:.1f}s total | {total_5m} calls last 5min")
             
         except Exception as e:
             self.logger.error(f"Error printing API statistics: {e}")
@@ -3926,36 +2998,6 @@ class TokenSyncService:
                 self.logger.debug(f"API tracker stats keys: {list(self.api_tracker.stats.keys()) if hasattr(self.api_tracker, 'stats') else 'No stats'}")
 
     
-    def log_api_rate_usage(self):
-        """Log l'utilisation du rate limit en temps réel"""
-        try:
-            api_stats = self.api_tracker.get_stats()
-            
-            # Stats pour DexScreener batch
-            if 'dexscreener_tokens_batch_async' in api_stats:
-                calls_1m = api_stats['dexscreener_tokens_batch_async']['calls_1h'] / 60
-                calls_5m = api_stats['dexscreener_tokens_batch_async']['calls_5m']
-                rate_1m = api_stats['dexscreener_tokens_batch_async']['rate_per_minute_1h']
-                
-                usage_pct = (rate_1m / 60) * 100
-                
-                self.logger.debug(f"🎯 DexScreener rate usage: {rate_1m:.1f}/60 req/min ({usage_pct:.1f}%) | Last 5min: {calls_5m} calls")
-                
-                # Alert si on approche de la limite
-                if usage_pct > 85:
-                    self.logger.warning(f"⚠️ HIGH API USAGE: {usage_pct:.1f}% of rate limit!")
-                elif usage_pct > 70:
-                    self.logger.debug(f"📊 Moderate API usage: {usage_pct:.1f}%")
-            
-            # Stats globales toutes APIs
-            total_calls_5m = sum(stats.get('calls_5m', 0) for stats in api_stats.values())
-            total_rate_1h = sum(stats.get('rate_per_minute_1h', 0) for stats in api_stats.values())
-            
-            self.logger.debug(f"📈 Total API activity: {total_rate_1h:.1f} calls/min | Last 5min: {total_calls_5m} calls")
-            
-        except Exception as e:
-            self.logger.debug(f"Error logging API rate usage: {e}")
-
     def record_call(self, api_name: str, duration: float, success: bool = True, 
                 http_status: int = None, error_msg: str = None):
         """Record an API call with duration and store in database - DEBUG VERSION"""
@@ -3963,7 +3005,7 @@ class TokenSyncService:
         duration_ms = int(duration * 1000)  # Convert to milliseconds
         
         # DEBUG: Log every call
-        #print(f"🔍 DEBUG API: Recording {api_name} call - duration: {duration:.3f}s, success: {success}, cycle: {self.current_cycle_id}")
+        print(f"🔍 DEBUG API: Recording {api_name} call - duration: {duration:.3f}s, success: {success}, cycle: {self.current_cycle_id}")
         
         with self.lock:
             # Update in-memory stats (existing logic)
@@ -3985,12 +3027,12 @@ class TokenSyncService:
                     api_name, int(current_time), duration_ms, 
                     success, http_status, error_msg
                 )
-                #print(f"🔍 DEBUG API: DB storage result for {api_name}: {result}")
+                print(f"🔍 DEBUG API: DB storage result for {api_name}: {result}")
             except Exception as e:
                 # Don't fail the API call if DB storage fails
-                #print(f"❌ DEBUG API: Failed to store API metric to DB: {e}")
+                print(f"❌ DEBUG API: Failed to store API metric to DB: {e}")
                 if hasattr(self.db_service, 'logger'):
-                    self.db_service.cycle_logger.record_api_call(api_name, 1)
+                    self.db_service.logger.error(f"Failed to store API metric: {e}")
 
     def get_api_summary(self) -> str:
         """Get a quick API summary for live monitoring"""
@@ -4009,94 +3051,75 @@ class TokenSyncService:
         return f"APIs 5m: {total_5m} total ({top_summary}) | 30m: {total_30m}"
 
     def run_sync_cycle(self):
-        """Run one complete synchronization cycle - CORRIGÉ"""
-        self.logger.debug("Starting synchronization cycle...")
-        self.logger.debug(f"🔍 API tracker status: {hasattr(self, 'api_tracker')}")
+        """Run one complete synchronization cycle"""
+        self.logger.info("Starting synchronization cycle...")
+        self.logger.info(f"🔍 API tracker status: {hasattr(self, 'api_tracker')}")
         cycle_id = self.start_sync_cycle()
         total_tokens_processed = 0
         
-        # ✅ CORRECTION: Initialiser TOUTES les variables dès le début
-        new_tokens_updated = 0
-        prices_updated = 0
-        creation_timestamps_updated = 0
-        historized_count = 0
-        dead_tokens_marked = 0
-        pumpfun_updated = 0
-        
         try:
-            self.log_api_rate_usage()
-            
             # 1. Sync new tokens from transactions
-            new_tokens_updated = self.sync_new_tokens_intelligent()  # ✅ Utiliser la nouvelle méthode
-            self.logger.debug("=== STATS API APRÈS NOUVEAUX TOKENS ===")
+            new_tokens_updated = self.sync_new_tokens()
+            self.logger.info("=== STATS API APRÈS NOUVEAUX TOKENS ===")
             self.print_api_statistics()
-            self.log_api_rate_usage()
-
+            
             # 2. Update existing token prices
             prices_updated = self.update_existing_prices()
-            self.logger.debug("=== STATS API APRÈS PRIX ===")
+            self.logger.info("=== STATS API APRÈS PRIX ===")
             self.print_api_statistics()
             self.print_api_database_stats()
-            self.log_api_rate_usage()
-
+            
             total_tokens_processed = new_tokens_updated + prices_updated
-            self.logger.debug(f"Sync cycle completed: {new_tokens_updated} new, {prices_updated} price updates...")
+            self.logger.info(f"Sync cycle completed: {new_tokens_updated} new, {prices_updated} price updates...")
             
-            # # 3. Run historization cycle (every few cycles)
-            # if not hasattr(self, 'cycle_count'):
-            #     self.cycle_count = 0
+            # 3. Run historization cycle (every few cycles)
+            if not hasattr(self, 'cycle_count'):
+                self.cycle_count = 0
             
-            # self.cycle_count += 1
+            self.cycle_count += 1
+            creation_timestamps_updated = 0
+            historized_count = 0
+            dead_tokens_marked = 0
             
-            # # Every 3 cycles - run historization
-            # if self.cycle_count % 3 == 0:
-            #     historized_count = self.run_historization_cycle()
-            #     self.logger.debug("=== STATS API APRÈS HISTORISATION ===")
-            #     self.print_api_statistics()
-            #     self.log_api_rate_usage()
+            # Every 3 cycles - run historization
+            if self.cycle_count % 3 == 0:
+                historized_count = self.run_historization_cycle()
+                self.logger.info("=== STATS API APRÈS HISTORISATION ===")
+                self.print_api_statistics()
 
-            # # Every 5 cycles - update missing creation timestamps
-            # if self.cycle_count % 5 == 0:
-            #     creation_timestamps_updated = self.update_missing_creation_timestamps()
-            #     self.logger.debug("=== STATS API APRÈS TIMESTAMPS ===")
-            #     self.print_api_statistics()
-            #     self.log_api_rate_usage()
+            # Every 5 cycles - update missing creation timestamps
+            if self.cycle_count % 5 == 0:
+                creation_timestamps_updated = self.update_missing_creation_timestamps()
+                self.logger.info("=== STATS API APRÈS TIMESTAMPS ===")
+                self.print_api_statistics()
+            
+            # Every 6 cycles - check for dead tokens
+            if self.cycle_count % 6 == 0:
+                dead_tokens_marked = self.run_dead_token_check()
+                self.logger.info("=== STATS API APRÈS DEAD TOKENS ===")
+                self.print_api_statistics()
 
-            # # Every 6 cycles - check for dead tokens (DÉSACTIVÉ)
-            # # if self.cycle_count % 6 == 0:
-            # #     dead_tokens_marked = self.run_dead_token_check()
-            # #     self.logger.debug("=== STATS API APRÈS DEAD TOKENS ===")
-            # #     self.print_api_statistics()
-
-            # # Every 10 cycles - update Pump.fun tokens
-            # if self.cycle_count % 10 == 0:
-            #     pumpfun_updated = self.update_pumpfun_tokens()
-            #     self.logger.debug(f"Pump.fun tokens updated: {pumpfun_updated}")
-            #     self.logger.debug("=== STATS API APRÈS PUMPFUN ===")
-            #     self.print_api_statistics()
-            #     self.log_api_rate_usage()
+            # Every 10 cycles - update Pump.fun tokens
+            if self.cycle_count % 10 == 0:
+                pumpfun_updated = self.update_pumpfun_tokens()
+                self.logger.info(f"Pump.fun tokens updated: {pumpfun_updated}")
+                self.logger.info("=== STATS API APRÈS PUMPFUN ===")
+                self.print_api_statistics()
 
             # 4. Print statistics
             self.print_statistics()
             
-            # Summary final du rate usage
-            self.logger.debug("=== 🎯 FINAL API RATE SUMMARY ===")
-            self.log_api_rate_usage()
-
-            self.logger.debug(f"Sync cycle completed: {new_tokens_updated} new, {prices_updated} price updates, {creation_timestamps_updated} creation timestamps, {historized_count} historized, {dead_tokens_marked} marked dead")
+            self.logger.info(f"Sync cycle completed: {new_tokens_updated} new, {prices_updated} price updates, {creation_timestamps_updated} creation timestamps, {historized_count} historized, {dead_tokens_marked} marked dead")
             
         except Exception as e:
             self.logger.error(f"Error in sync cycle: {e}")
-            # ✅ CORRECTION: Log l'erreur complète pour debugging
-            import traceback
-            self.logger.error(f"Full traceback: {traceback.format_exc()}")
         finally:
             # ✅ CORRECTION - Terminer le cycle dans le finally
             self.end_sync_cycle(total_tokens_processed)
 
     def start(self):
         """Start the continuous synchronization service"""
-        self.logger.debug("Starting Token Sync Service...")
+        self.logger.info("Starting Token Sync Service...")
 
         if not self.check_database_health():
             self.logger.error("❌ Database health check failed. Stopping service.")
@@ -4120,12 +3143,11 @@ class TokenSyncService:
                 self.run_sync_cycle()
                 
                 if self.running:  # Check if still running before sleeping
-                    self.logger.debug(f"Waiting {CONFIG['update_interval']} seconds until next cycle...")
-                    self.log_api_rate_usage() 
+                    self.logger.info(f"Waiting {CONFIG['update_interval']} seconds until next cycle...")
                     time.sleep(CONFIG['update_interval'])
                     
         except KeyboardInterrupt:
-            self.logger.debug("Received interrupt signal")
+            self.logger.info("Received interrupt signal")
         except Exception as e:
             self.logger.error(f"Unexpected error in main loop: {e}")
         finally:
@@ -4133,11 +3155,11 @@ class TokenSyncService:
     
     def stop(self):
         """Stop the synchronization service"""
-        self.logger.debug("Stopping Token Sync Service...")
+        self.logger.info("Stopping Token Sync Service...")
         self.running = False
         self.session.close()
         self.print_statistics()
-        self.logger.debug("Token Sync Service stopped")
+        self.logger.info("Token Sync Service stopped")
 
 def signal_handler(signum, frame):
     """Handle termination signals"""
@@ -4154,15 +3176,15 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    #print("Token Data Synchronization Backend with Historical Tracking")
-    #print("=" * 60)
-    #print(f"Database: {CONFIG['db_path']}")
-    #print(f"Update interval: {CONFIG['update_interval']} seconds")
-    #print(f"Price update interval: {CONFIG['price_update_interval']} seconds")
-    #print(f"Historization interval: {CONFIG['historization_interval']} seconds")
-    #print(f"Dead token check interval: {CONFIG['dead_token_check_interval']} seconds")
-    #print(f"API rate limit: {CONFIG['api_rate_limit']} seconds")
-    #print("=" * 60)
+    print("Token Data Synchronization Backend with Historical Tracking")
+    print("=" * 60)
+    print(f"Database: {CONFIG['db_path']}")
+    print(f"Update interval: {CONFIG['update_interval']} seconds")
+    print(f"Price update interval: {CONFIG['price_update_interval']} seconds")
+    print(f"Historization interval: {CONFIG['historization_interval']} seconds")
+    print(f"Dead token check interval: {CONFIG['dead_token_check_interval']} seconds")
+    print(f"API rate limit: {CONFIG['api_rate_limit']} seconds")
+    print("=" * 60)
     
     # Initialize service
     service = TokenSyncService(CONFIG['db_path'])
