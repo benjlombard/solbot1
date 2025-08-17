@@ -4,6 +4,31 @@ import sqlite3
 import subprocess
 import sys
 from datetime import datetime
+import os
+from pathlib import Path
+
+# Ajouter la racine du projet au path pour accéder aux modules de config
+project_root = Path(__file__).parent.parent.parent.absolute()  # Remonter de 2 niveaux depuis pages/
+sys.path.insert(0, str(project_root))
+
+# Import du système de configuration
+try:
+    from core.config import get_config
+    
+    # Charger la configuration
+    config = get_config()
+    DEFAULT_DB_PATH = config.database.get_full_path()
+    
+    # Afficher un indicateur de succès
+    st.success(f"✅ Configuration chargée - DB: {config.database.name}")
+    
+except ImportError:
+    # Fallback si le système de config n'est pas disponible
+    DEFAULT_DB_PATH = os.getenv('TRADING_OPPORTUNITIES_DB_PATH', 'database/data/solana_wallet.db')
+    st.warning("⚠️ Système de configuration non disponible, utilisation du fallback")
+except Exception as e:
+    DEFAULT_DB_PATH = 'database/data/solana_wallet.db'
+    st.error(f"❌ Erreur chargement config: {e}")
 
 # Configuration de la page
 st.set_page_config(

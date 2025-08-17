@@ -9,6 +9,26 @@ import numpy as np
 from typing import Dict, Optional
 from streamlit_autorefresh import st_autorefresh
 from datetime import datetime, timedelta, timezone
+import sys
+import os
+from pathlib import Path
+
+# Ajouter la racine du projet au path pour accéder aux modules de config
+project_root = Path(__file__).parent.parent.absolute()
+sys.path.insert(0, str(project_root))
+
+# Import du système de configuration
+try:
+    from core.config import get_config
+    
+    # Charger la configuration
+    config = get_config()
+    DEFAULT_DB_PATH = config.database.get_full_path()
+    
+except ImportError:
+    # Fallback si le système de config n'est pas disponible
+    DEFAULT_DB_PATH = os.getenv('STREAMLIT_DB_PATH', 'database/data/solana_wallet.db')
+    print("⚠️ Système de configuration non disponible, utilisation du fallback")
 
 # Auto-refresh toutes les 30 secondes
 st_autorefresh(interval=30 * 1000, key="refresh")
@@ -941,9 +961,16 @@ def main():
     st.sidebar.header("Configuration")
     db_path = st.sidebar.text_input(
         "Database path",
-        value="solana_wallet_monitor.db",
+        value=DEFAULT_DB_PATH,  # Utiliser la valeur depuis la config
         help="SQLite file containing the data"
     )
+
+    if 'config' in globals():
+        st.sidebar.success(f"✅ Configuration chargée")
+        st.sidebar.info(f"📊 DB: {config.database.name}")
+        st.sidebar.info(f"📁 Dir: {config.database.base_dir}/{config.database.data_subdir}")
+    else:
+        st.sidebar.warning("⚠️ Configuration fallback")
 
     # Initialize analyzer
     analyzer = TokenAnalyzer(db_path)
@@ -1278,10 +1305,11 @@ def main():
         display_df['🔗 Pump.fun'] = display_df['token_mint'].apply(
             lambda x: f"https://pump.fun/{x}"
         )
-        if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
-            display_df['📈 History'] = display_df['token_mint'].apply(
-                lambda x: f"📈 View History"
-            )
+        # if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+        #     display_df['📈 History'] = display_df['token_mint'].apply(
+        #         lambda x: f"📈 View History"
+        #     )
+        
         # Optimized columns for screening
         display_columns = [
             'Token', '🏷️ Name','⏰ Ajouté DB', '⚡ Detection', 'Signal', 'score', '💰 Market Cap', '💲 Price',
@@ -1290,8 +1318,8 @@ def main():
             '🔗 DexScreener', '🔗 Pump.fun'
         ]
 
-        if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
-            display_columns.insert(-2, '📈 History')
+        # if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+        #     display_columns.insert(-2, '📈 History')
 
         # Column renaming and configuration
         column_rename = {
@@ -1313,8 +1341,8 @@ def main():
             '🔗 Pump.fun': '🚀 Pump.fun'
         }
 
-        if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
-            column_rename['📈 History'] = '📈 History'
+        # if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+        #     column_rename['📈 History'] = '📈 History'
 
         column_config = {
             '📊 DexScreener': st.column_config.LinkColumn(
@@ -1329,12 +1357,12 @@ def main():
             )
         }
 
-        if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
-            column_config['📈 History'] = st.column_config.TextColumn(  # Changer de LinkColumn à TextColumn
-                '📈 History',
-                help="Click row then use History button below",
-                width="small"
-            )
+        # if TOKEN_HISTORY_ANALYTICS_AVAILABLE:
+        #     column_config['📈 History'] = st.column_config.TextColumn(  # Changer de LinkColumn à TextColumn
+        #         '📈 History',
+        #         help="Click row then use History button below",
+        #         width="small"
+        #     )
 
         # Display with information
         st.markdown("💡 **Tokens sorted by detection speed then by score**")

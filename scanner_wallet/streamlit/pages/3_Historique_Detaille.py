@@ -8,6 +8,32 @@ import numpy as np
 from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
+import sys
+import os
+from pathlib import Path
+
+# Ajouter la racine du projet au path pour accéder aux modules de config
+project_root = Path(__file__).parent.parent.parent.absolute()  # Remonter de 2 niveaux depuis pages/
+sys.path.insert(0, str(project_root))
+
+# Import du système de configuration
+try:
+    from core.config import get_config
+    
+    # Charger la configuration
+    config = get_config()
+    DEFAULT_DB_PATH = config.database.get_full_path()
+    
+    # Afficher un indicateur de succès
+    st.success(f"✅ Configuration chargée - DB: {config.database.name}")
+    
+except ImportError:
+    # Fallback si le système de config n'est pas disponible
+    DEFAULT_DB_PATH = os.getenv('TRADING_OPPORTUNITIES_DB_PATH', 'database/data/solana_wallet.db')
+    st.warning("⚠️ Système de configuration non disponible, utilisation du fallback")
+except Exception as e:
+    DEFAULT_DB_PATH = 'database/data/solana_wallet.db'
+    st.error(f"❌ Erreur chargement config: {e}")
 
 # Configuration de la page
 st.set_page_config(
@@ -397,8 +423,14 @@ def main():
     st.sidebar.header("⚙️ Configuration")
     
     # Chemin vers la base de données
-    db_path = "solana_wallet_monitor.db"
+    db_path = DEFAULT_DB_PATH
     
+    if 'config' in globals():
+        with st.expander("ℹ️ Informations de Configuration", expanded=False):
+            st.info(f"📊 Base de données: `{db_path}`")
+            st.info(f"📁 Répertoire DB: `{config.database.base_dir}/{config.database.data_subdir}`")
+            st.info(f"⏰ Timeout DB: {config.database.timeout}s")
+
     # Chargement des données
     if 'df_history' not in st.session_state:
         with st.spinner("Chargement des données historiques..."):

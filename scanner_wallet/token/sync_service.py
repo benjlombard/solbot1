@@ -20,17 +20,49 @@ import functools
 from collections import deque, defaultdict
 import asyncio
 import aiohttp
+from pathlib import Path
 
-# HACK: Add parent directory to path to resolve imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+project_root = Path(__file__).parent.parent.absolute()
+sys.path.insert(0, str(project_root))
 
-try:
-    from scanner_wallet.core.config import get_config
-    from scanner_wallet.core.database import get_database_manager
-except ImportError:
-    print("Could not import project modules. Make sure to run from the project root.")
-    sys.exit(1)
+# Import du système de configuration et logging du projet
+from core.config import get_config
+from core.logger import get_logger, SolanaWalletLogger
 
+# Variables globales
+config = None
+logger = None
+
+def setup_sync_service_logger(config):
+    """Configure un logger spécialisé pour le service de synchronisation"""
+    global logger
+    
+    # Configuration spécialisée pour ce script
+    sync_log_file = os.getenv('SYNC_SERVICE_LOG_FILE', 'sync_service.log')
+    sync_log_level = os.getenv('SYNC_SERVICE_LOG_LEVEL', config.logging.level.value)
+    sync_log_max_size = int(os.getenv('SYNC_SERVICE_LOG_MAX_SIZE_MB', '50'))
+    sync_log_backup_count = int(os.getenv('SYNC_SERVICE_LOG_BACKUP_COUNT', '10'))
+    
+    # Créer le logger spécialisé avec fichier dédié
+    sync_logger = SolanaWalletLogger(
+        log_level=sync_log_level,
+        log_file=str(Path(config.logging.base_dir) / sync_log_file),
+        console_output=config.logging.console_output,
+        json_output=config.logging.json_output,
+        max_file_size=sync_log_max_size * 1024 * 1024,
+        backup_count=sync_log_backup_count,
+        max_age_days=config.logging.max_age_days,
+        force_reconfigure=True
+    )
+    
+    logger = sync_logger.get_logger('token_sync')
+    
+    logger.info("🚀 Token Sync Service démarré")
+    logger.info(f"📊 Base de données: {config.database.get_full_path()}")
+    logger.info(f"📝 Log fichier: {Path(config.logging.base_dir) / sync_log_file}")
+    logger.info(f"📋 Niveau de log: {sync_log_level}")
+    
+    return logger
 
 @dataclass
 class ApiCallStats:
@@ -790,12 +822,23 @@ class TokenSyncService:
     """Main service for token synchronization with historical tracking"""
     
     def __init__(self):
-        self.config = get_config()
-        self.db_manager = get_database_manager()
+
+        try:
+            self.config = get_config()
+            self.logger = setup_sync_service_logger(self.config)
+
+            self.db_path = self.config.database.get_full_path()
+
+            self.logger.info("✅ Configuration et logging initialisés")
+            self.logger.info(f"📊 Base de données: {self.db_path}")
+        except Exception as e:
+                print(f"❌ Erreur lors du chargement de la configuration: {e}")
+                raise
+
         self.running = False
-        self.logger = self._setup_logger()
         self.analyzer = TokenAnalyzer()
         self.cycle_logger = CycleLogger(self.logger)
+
         try:
             self.api_tracker = ApiStatsTracker(db_service=self)  # ← Modification
             self.logger.debug("✅ API tracker initialized successfully")
@@ -1060,27 +1103,6 @@ class TokenSyncService:
         
         # Fallback sur données Pump.fun + enrichissement
         return self.enrich_pump_prebond_token(token_address, pump_data)
-
-    def _setup_logger(self) -> logging.Logger:
-        """Setup logging configuration"""
-        logger = logging.getLogger('TokenSync')
-        logger.setLevel(logging.INFO)
-        
-        # Console handler with UTF-8 encoding
-        handler = logging.StreamHandler()
-        handler.stream = open(handler.stream.fileno(), mode='w', encoding='utf-8', buffering=1)
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        
-        # File handler with UTF-8 encoding
-        file_handler = logging.FileHandler('token_sync.log', encoding='utf-8')
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-        
-        return logger
     
     def _record_api_call(self, api_name: str, duration: float, success: bool = True, http_status: int = None):
         """Helper method to record API calls in both trackers"""
@@ -1093,8 +1115,8 @@ class TokenSyncService:
         for attempt in range(retries):
             try:
                 conn = sqlite3.connect(
-                    self.db_manager.config.db_path, 
-                    timeout=self.db_manager.config.timeout,
+                    self.db_path,
+                    timeout=self.config.database.timeout,
                     check_same_thread=False
                 )
                 conn.row_factory = sqlite3.Row
@@ -1103,7 +1125,7 @@ class TokenSyncService:
                 conn.execute("PRAGMA synchronous=NORMAL") 
                 conn.execute("PRAGMA cache_size=-65536")
                 conn.execute("PRAGMA temp_store=memory")
-                conn.execute(f"PRAGMA busy_timeout={int(self.db_manager.config.timeout * 1000)}")
+                conn.execute(f"PRAGMA busy_timeout={int(self.config.database.timeout * 1000)}")
                 conn.execute("PRAGMA wal_autocheckpoint=1000")
                 
                 conn.execute("SELECT 1").fetchone()
