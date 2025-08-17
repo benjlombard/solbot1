@@ -219,13 +219,11 @@ class BatchingConfig:
     batch_timeout: int = 25
     
     # Tailles de batch par méthode
-    batch_sizes: Dict[str, Union[int, Dict[str, int]]] = field(default_factory=lambda: {
+    batch_sizes: Dict[str, int] = field(default_factory=lambda: {
         'getMultipleAccounts': 8,
         'token_metadata': 5,
         'signatures_batch': 12,
-        'transactions_batch': 6,
-        'dexscreener': 120,
-        'pumpfun': 25
+        'transactions_batch': 6
     })
     
     # Monitoring des performances
@@ -247,16 +245,6 @@ class MonitoringConfig:
     large_transaction_threshold: float = 1.0
     default_transaction_limit: int = 35
     max_transaction_limit: int = 100
-    
-    # Enrichment specific settings
-    enrichment_interval_seconds: int = 60
-    price_update_interval_seconds: int = 60
-    price_update_limit: int = 150
-    pumpfun_rate_limit_seconds: float = 1.2
-    retry_failed_after_days: int = 7
-    max_failed_attempts: int = 1
-    historization_interval_seconds: int = 7200
-    dead_token_check_interval_seconds: int = 3600
 
 
 @dataclass
@@ -305,18 +293,6 @@ class FlaskConfig:
 
 
 @dataclass
-class TokenOpportunityAlertConfig:
-    """Configuration pour les alertes d'opportunités de trading."""
-    enabled: bool = True
-    check_interval_seconds: int = 60
-    alert_cooldown_seconds: int = 3600  # 1 heure
-    viability_score_min: float = 80.0
-    momentum_score_min: float = 50.0
-    liquidity_usd_min: float = 5000.0
-    risk_score_max: float = 70.0
-
-
-@dataclass
 class AlertingConfig:
     """Configuration du système d'alertes"""
     enabled: bool = False
@@ -327,18 +303,13 @@ class AlertingConfig:
     email_username: Optional[str] = None
     email_password: Optional[str] = None
     email_recipients: List[str] = field(default_factory=list)
-    
-    # Configuration pour les alertes système (ex: pannes, erreurs)
-    system_alert_thresholds: Dict[str, Union[int, float]] = field(default_factory=lambda: {
+    alert_thresholds: Dict[str, Union[int, float]] = field(default_factory=lambda: {
         'large_transaction_sol': 10.0,
         'large_transaction_tokens': 100000,
         'high_activity_tx_per_hour': 50,
         'error_rate_critical': 25,  # %
         'response_time_critical': 30000  # ms
     })
-
-    # Configuration dédiée aux alertes d'opportunités de trading
-    opportunity_alerts: TokenOpportunityAlertConfig = field(default_factory=TokenOpportunityAlertConfig)
 
 
 # =============================================================================
@@ -439,7 +410,7 @@ class SolanaWalletConfig:
         """Charge la configuration du batching"""
         # Charger les tailles de batch personnalisées si disponibles
         batch_sizes = {}
-        for method in ['getMultipleAccounts', 'token_metadata', 'signatures_batch', 'transactions_batch', 'dexscreener', 'pumpfun']:
+        for method in ['getMultipleAccounts', 'token_metadata', 'signatures_batch', 'transactions_batch']:
             env_key = f'BATCH_SIZE_{method.upper()}'
             if os.getenv(env_key):
                 try:
@@ -470,15 +441,7 @@ class SolanaWalletConfig:
             max_consecutive_errors=int(os.getenv('MAX_CONSECUTIVE_ERRORS', 3)),
             large_transaction_threshold=float(os.getenv('ALERT_THRESHOLD', 1.0)),
             default_transaction_limit=int(os.getenv('DEFAULT_TRANSACTION_LIMIT', 35)),
-            max_transaction_limit=int(os.getenv('MAX_TRANSACTION_LIMIT', 100)),
-            enrichment_interval_seconds=int(os.getenv('ENRICHMENT_INTERVAL_SECONDS', 60)),
-            price_update_interval_seconds=int(os.getenv('PRICE_UPDATE_INTERVAL_SECONDS', 60)),
-            price_update_limit=int(os.getenv('PRICE_UPDATE_LIMIT', 150)),
-            pumpfun_rate_limit_seconds=float(os.getenv('PUMPFUN_RATE_LIMIT_SECONDS', 1.2)),
-            retry_failed_after_days=int(os.getenv('RETRY_FAILED_AFTER_DAYS', 7)),
-            max_failed_attempts=int(os.getenv('MAX_FAILED_ATTEMPTS', 1)),
-            historization_interval_seconds=int(os.getenv('HISTORIZATION_INTERVAL_SECONDS', 7200)),
-            dead_token_check_interval_seconds=int(os.getenv('DEAD_TOKEN_CHECK_INTERVAL_SECONDS', 3600))
+            max_transaction_limit=int(os.getenv('MAX_TRANSACTION_LIMIT', 100))
         )
     
     def _load_database_config(self) -> DatabaseConfig:
@@ -525,33 +488,22 @@ class SolanaWalletConfig:
         email_recipients = os.getenv('ALERT_EMAIL_RECIPIENTS', '')
         recipients_list = [email.strip() for email in email_recipients.split(',') if email.strip()]
         
-        # Parser les seuils d'alerte système personnalisés
-        system_alert_thresholds = {}
-        system_threshold_keys = [
+        # Parser les seuils d'alerte personnalisés
+        alert_thresholds = {}
+        threshold_keys = [
             'ALERT_LARGE_TRANSACTION_SOL', 'ALERT_LARGE_TRANSACTION_TOKENS',
             'ALERT_HIGH_ACTIVITY_TX_PER_HOUR', 'ALERT_ERROR_RATE_CRITICAL',
             'ALERT_RESPONSE_TIME_CRITICAL'
         ]
         
-        for key in system_threshold_keys:
+        for key in threshold_keys:
             if os.getenv(key):
                 try:
                     threshold_name = key.replace('ALERT_', '').lower()
-                    system_alert_thresholds[threshold_name] = float(os.getenv(key))
+                    alert_thresholds[threshold_name] = float(os.getenv(key))
                 except ValueError:
                     pass
         
-        # Charger la configuration dédiée aux opportunités
-        opportunity_config = TokenOpportunityAlertConfig(
-            enabled=self._get_bool_env('ALERT_OPPORTUNITY_ENABLED', True),
-            check_interval_seconds=int(os.getenv('ALERT_OPPORTUNITY_INTERVAL_S', 60)),
-            alert_cooldown_seconds=int(os.getenv('ALERT_OPPORTUNITY_COOLDOWN_S', 3600)),
-            viability_score_min=float(os.getenv('ALERT_OPPORTUNITY_VIABILITY_MIN', 80.0)),
-            momentum_score_min=float(os.getenv('ALERT_OPPORTUNITY_MOMENTUM_MIN', 50.0)),
-            liquidity_usd_min=float(os.getenv('ALERT_OPPORTUNITY_LIQUIDITY_MIN', 5000.0)),
-            risk_score_max=float(os.getenv('ALERT_OPPORTUNITY_RISK_MAX', 70.0)),
-        )
-
         config = AlertingConfig(
             enabled=self._get_bool_env('ALERTING_ENABLED', False),
             slack_webhook_url=os.getenv('SLACK_WEBHOOK_URL'),
@@ -560,13 +512,12 @@ class SolanaWalletConfig:
             email_smtp_port=int(os.getenv('ALERT_EMAIL_SMTP_PORT', 587)),
             email_username=os.getenv('ALERT_EMAIL_USERNAME'),
             email_password=os.getenv('ALERT_EMAIL_PASSWORD'),
-            email_recipients=recipients_list,
-            opportunity_alerts=opportunity_config
+            email_recipients=recipients_list
         )
         
-        # Appliquer les seuils système personnalisés
-        if system_alert_thresholds:
-            config.system_alert_thresholds.update(system_alert_thresholds)
+        # Appliquer les seuils personnalisés
+        if alert_thresholds:
+            config.alert_thresholds.update(alert_thresholds)
         
         return config
     

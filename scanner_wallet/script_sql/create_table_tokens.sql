@@ -21,6 +21,7 @@ CREATE TABLE tokens (
     viability_score REAL DEFAULT 50.0,
     risk_score REAL DEFAULT 50.0,
     momentum_score REAL DEFAULT 0.0,
+    predictive_scam_score REAL DEFAULT 50.0, -- Score prédictif de scam/rug (0=safe, 100=danger)
     rug_risk_score INTEGER DEFAULT 50,       -- Score de risque rug
     rug_raw_score INTEGER DEFAULT 0,         -- Score brut rug
     is_rugged BOOLEAN DEFAULT 0,

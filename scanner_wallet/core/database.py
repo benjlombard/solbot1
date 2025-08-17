@@ -372,6 +372,22 @@ class DatabaseManager:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # Table pour la file d'attente de traitement des tokens
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS token_processing_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_address TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL DEFAULT 'pending', 
+                retry_count INTEGER DEFAULT 0,
+                source_transaction_signature TEXT,
+                source_wallet_address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                processing_started_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                last_error TEXT
+            )
+        ''')
         
         # Table des tokens (métadonnées)
         cursor.execute('''
@@ -499,6 +515,32 @@ class DatabaseManager:
             )
         ''')
         
+        # Table de performance des wallets
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS wallets_performance (
+                wallet_address TEXT PRIMARY KEY,
+                total_investment_usd REAL DEFAULT 0.0,
+                total_divestment_usd REAL DEFAULT 0.0,
+                current_portfolio_value_usd REAL DEFAULT 0.0,
+                realized_pnl_usd REAL DEFAULT 0.0,
+                unrealized_pnl_usd REAL DEFAULT 0.0,
+                total_pnl_usd REAL DEFAULT 0.0,
+                pnl_percentage REAL DEFAULT 0.0,
+                total_trades INTEGER DEFAULT 0,
+                winning_trades INTEGER DEFAULT 0,
+                losing_trades INTEGER DEFAULT 0,
+                win_rate REAL DEFAULT 0.0,
+                current_token_holdings_count INTEGER DEFAULT 0,
+                most_profitable_token TEXT,
+                biggest_win_usd REAL DEFAULT 0.0,
+                least_profitable_token TEXT,
+                biggest_loss_usd REAL DEFAULT 0.0,
+                last_calculated_at INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # Table des métriques d'activité des wallets
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS wallet_activity_metrics (
@@ -620,7 +662,15 @@ class DatabaseManager:
             # Index sur les logs système
             "CREATE INDEX IF NOT EXISTS idx_system_logs_timestamp ON system_logs(timestamp DESC)",
             "CREATE INDEX IF NOT EXISTS idx_system_logs_level ON system_logs(level, timestamp DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_system_logs_wallet ON system_logs(wallet_address, timestamp DESC)"
+            "CREATE INDEX IF NOT EXISTS idx_system_logs_wallet ON system_logs(wallet_address, timestamp DESC)",
+
+            # Index pour wallets_performance
+            "CREATE INDEX IF NOT EXISTS idx_wallets_perf_pnl ON wallets_performance(total_pnl_usd DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_wallets_perf_win_rate ON wallets_performance(win_rate DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_wallets_perf_updated ON wallets_performance(last_calculated_at DESC)",
+
+            # Index pour la file d'attente
+            "CREATE INDEX IF NOT EXISTS idx_queue_status_created ON token_processing_queue(status, created_at)"
         ]
         
         for index_sql in indexes:

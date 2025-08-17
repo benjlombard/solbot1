@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """
 Token Data Synchronization Backend with Historical Tracking
-Continuously monitors new tokens from transactions table and enriches them with DexScreener data
-Now includes historical tracking and intelligent filtering
+Continuously monitors new tokens from the processing queue and enriches them with external API data.
 """
-
-#script à finir 
 import sqlite3
 import requests
 import time
@@ -17,48 +14,22 @@ from typing import Dict, Optional, List, Set, Tuple
 import threading
 from dataclasses import dataclass
 import sys
+import os
 import signal
 import functools
 from collections import deque, defaultdict
-import threading
 import asyncio
 import aiohttp
 
+# HACK: Add parent directory to path to resolve imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Configuration
-CONFIG = {
-    'db_path': 'solana_wallet_monitor.db',
-    'api_rate_limit': 1.5,  # seconds between API calls
-    'batch_size':120,       # tokens to process per batch
-    'update_interval': 60,  # seconds between sync cycles
-    'price_update_interval': 60,  # 1 minute for price updates
-    'price_update_limit': 150, #number of tokens max for update per cycle
-    'dashboard_update_interval': 120, # 2.5 minutes pour dashboard tokens
-    'max_retries': 5,
-    'pumpfun_rate_limit': 1.2,  # Rate limit spécifique Pump.fun
-    'pumpfun_batch_size': 25,   # Batch plus petit pour Pump.fun
-    'request_timeout': 10,
-    'retry_failed_after_days': 7,  # Réessayer les tokens flaggés après X jours
-    'max_failed_attempts': 1,      # Nombre max de tentatives avant flagging définitif
-    'historization_interval': 7200,  # 30 minutes entre historisations
-    'dead_token_check_interval': 3600,  # 1 heure pour vérifier tokens morts
-    'db_timeout': 60.0,
-    'db_retry_delay': 0.2,  # Nouveau paramètre
-    'db_max_retries': 5,    # Nouveau paramètre
-    'max_concurrent_batches': 1,      # Nombre max de lots traités en parallèle
-    'batch_pause_seconds': 2.0,       # Pause entre lots pour éviter surcharge
-    'batch_retry_failed': True,       # Réessayer les tokens échoués dans un batch
-    'batch_log_detailed': False,      # Log détaillé pour debug
-
-    'known_quote_tokens': {
-        'So11111111111111111111111111111111111111112',  # SOL
-        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',  # USDC
-        'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',  # USDT
-        '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R',  # RAY
-        'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So'   # mSOL
-    }
-}
-
+try:
+    from scanner_wallet.core.config import get_config
+    from scanner_wallet.core.database import get_database_manager
+except ImportError:
+    print("Could not import project modules. Make sure to run from the project root.")
+    sys.exit(1)
 
 
 @dataclass
@@ -476,6 +447,7 @@ class TokenData:
     price_change_1h: float = 0.0
     price_change_6h: float = 0.0
     price_change_24h: float = 0.0
+    price_volatility_24h: float = 0.0
     liquidity_usd: float = 0.0
     liquidity_sol: float = 0.0
     fdv: float = 0.0
@@ -703,6 +675,60 @@ class TokenAnalyzer:
             return 0.0
         
         return max(-100.0, min(100.0, momentum))
+
+    def calculate_predictive_scam_score(self, rugcheck_data: Dict) -> float:
+        """
+        Calcule un score de scam prédictif basé sur les données de RugCheck.
+        Le score va de 0 (très sûr) à 100 (très risqué).
+        """
+        if not rugcheck_data:
+            return 50.0  # Score neutre si pas de données
+
+        score = 0.0
+        max_score = 100.0
+        
+        # 1. Autorité du Mint (40 points) - Le plus gros red flag
+        if not rugcheck_data.get('mint_authority_revoked', True):
+            score += 40
+            self.logger.debug(f"[ScamScore] -40pts: Mint authority non révoquée.")
+
+        # 2. Autorité du Freeze (20 points)
+        if not rugcheck_data.get('freeze_authority_revoked', True):
+            score += 20
+            self.logger.debug(f"[ScamScore] -20pts: Freeze authority non révoquée.")
+
+        # 3. Concentration des détenteurs (Top 10) (25 points)
+        top_10_pct = rugcheck_data.get('top_10_holders_percentage', 0.0)
+        if top_10_pct > 80:
+            score += 25
+        elif top_10_pct > 60:
+            score += 20
+        elif top_10_pct > 40:
+            score += 15
+        elif top_10_pct > 25:
+            score += 10
+        if top_10_pct > 25:
+            self.logger.debug(f"[ScamScore] -{score}pts: Concentration Top 10 holders: {top_10_pct:.1f}%")
+
+        # 4. Risques détectés par RugCheck (15 points)
+        risk_count = rugcheck_data.get('risk_count', 0)
+        if risk_count >= 5:
+            score += 15
+        elif risk_count >= 3:
+            score += 10
+        elif risk_count >= 1:
+            score += 5
+        if risk_count > 0:
+             self.logger.debug(f"[ScamScore] -{score}pts: {risk_count} risques détectés par RugCheck.")
+
+        # 5. Token déjà marqué comme rugged (score maximum direct)
+        if rugcheck_data.get('is_rugged', False):
+            self.logger.debug(f"[ScamScore] Max score: Token marqué comme rugged.")
+            return max_score
+            
+        # Normalisation du score pour qu'il soit entre 0 et 100
+        final_score = min(score, max_score)
+        return final_score
     
     def detect_dead_token(self, current_data: TokenData, historical_data: List[Dict] = None) -> Tuple[bool, str]:
         """Detect if a token should be marked as dead"""
@@ -763,8 +789,9 @@ class TokenAnalyzer:
 class TokenSyncService:
     """Main service for token synchronization with historical tracking"""
     
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self):
+        self.config = get_config()
+        self.db_manager = get_database_manager()
         self.running = False
         self.logger = self._setup_logger()
         self.analyzer = TokenAnalyzer()
@@ -853,7 +880,7 @@ class TokenSyncService:
             
             url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
             start_time = time.time()
-            response = self.session.get(url, timeout=3)  # ✅ Timeout plus court pour test rapide
+            response = self.session.get(url, timeout=self.config.rpc.timeout)
             api_duration = time.time() - start_time
             self._record_api_call('dexscreener_type_detection', api_duration)
             
@@ -951,7 +978,7 @@ class TokenSyncService:
             # Utiliser l'API DexScreener directement
             url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
             start_time = time.time()
-            response = self.session.get(url, timeout=CONFIG['request_timeout'])
+            response = self.session.get(url, timeout=self.config.rpc.timeout)
             api_duration = time.time() - start_time
             self._record_api_call('dexscreener_individual', api_duration)
             
@@ -1007,7 +1034,7 @@ class TokenSyncService:
                 market_cap=float(pump_data.get('market_cap', 0) or 0),
                 volume_24h=float(pump_data.get('volume_24h', 0) or 0),
                 bonding_curve_progress=float(pump_data.get('bonding_curve_progress', 0) or 0),
-                holder_count=int(pump_data.get('holder_count', 0) or 0),
+                holder_count=int(pump_data.get('holder_count', 0) or data.get('holders', 0)),  
                 creator_address=pump_data.get('creator_address'),
                 timestamp_token_created=int(pump_data.get('timestamp_token_created', 0) or 0),
                 metadata_source="pump_prebond"
@@ -1066,28 +1093,26 @@ class TokenSyncService:
         for attempt in range(retries):
             try:
                 conn = sqlite3.connect(
-                    self.db_path, 
-                    timeout=60.0,  # Augmenter le timeout
-                    check_same_thread=False  # Permettre l'utilisation dans plusieurs threads
+                    self.db_manager.config.db_path, 
+                    timeout=self.db_manager.config.timeout,
+                    check_same_thread=False
                 )
                 conn.row_factory = sqlite3.Row
                 
-                # Configuration optimisée pour éviter les locks
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL") 
                 conn.execute("PRAGMA cache_size=-65536")
                 conn.execute("PRAGMA temp_store=memory")
-                conn.execute("PRAGMA busy_timeout=60000")  # 60 secondes
-                conn.execute("PRAGMA wal_autocheckpoint=1000")  # Checkpoint automatique
+                conn.execute(f"PRAGMA busy_timeout={int(self.db_manager.config.timeout * 1000)}")
+                conn.execute("PRAGMA wal_autocheckpoint=1000")
                 
-                # Test de la connexion
                 conn.execute("SELECT 1").fetchone()
                 
                 return conn
                 
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e) and attempt < retries - 1:
-                    wait_time = delay * (2 ** attempt)  # Backoff exponentiel
+                    wait_time = delay * (2 ** attempt)
                     self.logger.warning(f"Database locked, retry {attempt + 1}/{retries} in {wait_time:.2f}s")
                     time.sleep(wait_time)
                     continue
@@ -1105,24 +1130,20 @@ class TokenSyncService:
             try:
                 cursor = conn.cursor()
                 
-                # Test basic connectivity
                 cursor.execute("SELECT 1").fetchone()
                 
-                # Check for WAL mode
                 cursor.execute("PRAGMA journal_mode")
                 journal_mode = cursor.fetchone()[0]
                 if journal_mode != 'wal':
                     self.logger.warning(f"Database not in WAL mode: {journal_mode}")
                     cursor.execute("PRAGMA journal_mode=WAL")
                     
-                # Check and fix any database integrity issues
                 cursor.execute("PRAGMA integrity_check")
                 integrity = cursor.fetchone()[0]
                 if integrity != 'ok':
                     self.logger.error(f"Database integrity issue: {integrity}")
                     return False
                     
-                # Optimize database
                 cursor.execute("PRAGMA optimize")
                 
                 self.logger.debug("✅ Database health check passed")
@@ -1145,10 +1166,9 @@ class TokenSyncService:
             conn = None
             try:
                 conn = self.get_db_connection()
-                with conn:  # Utilise un context manager pour auto-commit/rollback
+                with conn:
                     cursor = conn.cursor()
-                    cursor.execute("BEGIN IMMEDIATE")  # Lock immédiat mais court
-                    # Get the last snapshot ID for this token
+                    cursor.execute("BEGIN IMMEDIATE")
                     cursor.execute("""
                         SELECT id FROM tokens_history 
                         WHERE token_address = ? 
@@ -1158,7 +1178,6 @@ class TokenSyncService:
                     last_snapshot = cursor.fetchone()
                     previous_snapshot_id = last_snapshot[0] if last_snapshot else None
                 
-                    # Get historical data for score calculations
                     cursor.execute("""
                         SELECT * FROM tokens_history 
                         WHERE token_address = ? 
@@ -1170,7 +1189,6 @@ class TokenSyncService:
                     current_timestamp = int(time.time())
                 
                     if current_data is None:
-                        # Mode UPDATE : utiliser les données actuelles de la DB (avant mise à jour)
                         cursor.execute("""
                             SELECT * FROM tokens WHERE address = ?
                         """, (token_address,))
@@ -1208,7 +1226,6 @@ class TokenSyncService:
                             'price_change_24h': safe_get(token_row, 'price_change_24h', 0.0),
                             'holder_count': safe_get(token_row, 'holder_count', 0),
                             'bonding_curve_progress': safe_get(token_row, 'bonding_curve_progress', 0.0),
-                            # ✅ FIX: Ces champs étaient mal récupérés
                             'top_holder_percentage': safe_get(token_row, 'top_holder_percentage', 0.0),
                             'top_10_holders_percentage': safe_get(token_row, 'top_10_holders_percentage', 0.0),
                             'insider_holders_count': safe_get(token_row, 'insider_holders_count', 0),
@@ -1485,7 +1502,7 @@ class TokenSyncService:
         for i, url in enumerate(pump_fun_urls):
             try:
                 start_time = time.time()
-                response = self.session.get(url, timeout=CONFIG['request_timeout'])
+                response = self.session.get(url, timeout=self.config.rpc.timeout)
                 api_duration = time.time() - start_time
                 self._record_api_call(f'pumpfun_v{i+1}', api_duration)
                 
@@ -1570,7 +1587,7 @@ class TokenSyncService:
         try:
             url = f"https://api.rugcheck.xyz/v1/tokens/{token_address}/report"
             start_time = time.time()
-            response = self.session.get(url, timeout=CONFIG['request_timeout'])
+            response = self.session.get(url, timeout=self.config.rpc.timeout)
             api_duration = time.time() - start_time
             self._record_api_call('rugcheck', api_duration)
             
@@ -1748,7 +1765,7 @@ class TokenSyncService:
             # Test pairs endpoint first
             url_pair = f"https://api.dexscreener.com/latest/dex/pairs/solana/{address}"
             start_time = time.time()
-            response = self.session.get(url_pair, timeout=CONFIG['request_timeout'])
+            response = self.session.get(url_pair, timeout=self.config.rpc.timeout)
             api_duration = time.time() - start_time
             self._record_api_call('dexscreener_pairs_check', api_duration)
             
@@ -1760,7 +1777,7 @@ class TokenSyncService:
             # Test tokens endpoint
             url_token = f"https://api.dexscreener.com/latest/dex/tokens/{address}"
             start_time = time.time()
-            response = self.session.get(url_token, timeout=CONFIG['request_timeout'])
+            response = self.session.get(url_token, timeout=self.config.rpc.timeout)
             api_duration = time.time() - start_time
             self._record_api_call('dexscreener_tokens_check', api_duration)
             
@@ -1780,7 +1797,7 @@ class TokenSyncService:
         try:
             url = f"https://api.dexscreener.com/latest/dex/pairs/solana/{pair_address}"
             start_time = time.time()
-            response = self.session.get(url, timeout=CONFIG['request_timeout'])
+            response = self.session.get(url, timeout=self.config.rpc.timeout)
             api_duration = time.time() - start_time
             self._record_api_call('dexscreener_extract_token', api_duration)
             
@@ -1793,7 +1810,7 @@ class TokenSyncService:
                     quote_token = pair.get('quoteToken', {}).get('address')
                     
                     # Prefer base token if quote is known stable/SOL
-                    if quote_token in CONFIG['known_quote_tokens']:
+                    if quote_token in self.config.monitoring.get('known_quote_tokens', {}):
                         return base_token
                     else:
                         return base_token
@@ -1816,7 +1833,7 @@ class TokenSyncService:
         try:
             url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
             start_time = time.time()
-            response = self.session.get(url, timeout=CONFIG['request_timeout'])
+            response = self.session.get(url, timeout=self.config.rpc.timeout)
             api_duration = time.time() - start_time
             self._record_api_call('dexscreener_creation_timestamp', api_duration)
 
@@ -1854,7 +1871,7 @@ class TokenSyncService:
         try:
             url = f"https://api.solanatracker.io/tokens/{token_address}"
             start_time = time.time()
-            response = self.session.get(url, timeout=CONFIG['request_timeout'])
+            response = self.session.get(url, timeout=self.config.rpc.timeout)
             api_duration = time.time() - start_time
             self._record_api_call('solanatracker_creation_timestamp', api_duration)
 
@@ -2210,6 +2227,46 @@ class TokenSyncService:
         # Reset current cycle
         self.current_sync_cycle_id = None
 
+    def get_pending_tokens_from_queue(self, batch_size: int) -> List[str]:
+        """
+        Gets a batch of pending tokens from the queue and marks them as processing.
+        This is an atomic operation to prevent race conditions with multiple workers.
+        """
+        tokens_to_process = []
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                # Use a transaction to ensure atomicity
+                with conn:
+                    # Step 1: Select pending tokens
+                    cursor.execute("""
+                        SELECT token_address FROM token_processing_queue
+                        WHERE status = 'pending'
+                        ORDER BY created_at
+                        LIMIT ?
+                    """, (batch_size,))
+                    
+                    tokens_to_process = [row[0] for row in cursor.fetchall()]
+
+                    if not tokens_to_process:
+                        return []
+
+                    # Step 2: Mark them as 'processing'
+                    placeholders = ','.join('?' for _ in tokens_to_process)
+                    update_query = f"""
+                        UPDATE token_processing_queue
+                        SET status = 'processing', processing_started_at = CURRENT_TIMESTAMP
+                        WHERE token_address IN ({placeholders})
+                    """
+                    cursor.execute(update_query, tokens_to_process)
+            
+            self.logger.info(f"Locked {len(tokens_to_process)} tokens from queue for processing.")
+            return tokens_to_process
+
+        except Exception as e:
+            self.logger.error(f"Error getting tokens from queue: {e}")
+            return []
+
     @db_retry(max_retries=3, delay=0.3)
     def get_new_tokens_from_transactions(self) -> Set[str]:
         """Get new token addresses from transactions table (excluding flagged tokens)"""
@@ -2234,7 +2291,7 @@ class TokenSyncService:
                 ORDER BY t.created_at DESC
                 """
                 
-                cursor.execute(query, (CONFIG['retry_failed_after_days'], CONFIG['max_failed_attempts']))
+                cursor.execute(query, (self.config.monitoring.retry_failed_after_days, self.config.monitoring.max_failed_attempts))
                 results = cursor.fetchall()
                 
                 token_addresses = {row[0] for row in results}
@@ -2254,7 +2311,7 @@ class TokenSyncService:
                 cursor = conn.cursor()
                 
                 # Get tokens that haven't been updated recently and aren't flagged
-                cutoff_time = int(time.time()) - CONFIG['price_update_interval']
+                cutoff_time = int(time.time()) - self.config.monitoring.price_update_interval_seconds
                 self.logger.debug(f"DEBUG: Using cutoff time {datetime.fromtimestamp(cutoff_time)} for general price updates.")
 
                 query = """
@@ -2269,7 +2326,7 @@ class TokenSyncService:
                 LIMIT ?
                 """
                 
-                cursor.execute(query, (cutoff_time, CONFIG['max_failed_attempts'], CONFIG['batch_size']))
+                cursor.execute(query, (cutoff_time, self.config.monitoring.max_failed_attempts, self.config.batching.batch_sizes['dexscreener']))
                 results = cursor.fetchall()
                 
                 self.logger.debug(f"Found {len(results)} general tokens needing price updates.")
@@ -2285,7 +2342,7 @@ class TokenSyncService:
             with self.get_db_connection() as conn:
                 cursor = conn.cursor()
                 
-                cutoff_time = int(time.time()) - CONFIG['historization_interval']
+                cutoff_time = int(time.time()) - self.config.monitoring.historization_interval_seconds
                 
                 query = """
                 SELECT address 
@@ -2298,7 +2355,7 @@ class TokenSyncService:
                 LIMIT ?
                 """
                 
-                cursor.execute(query, (cutoff_time, CONFIG['batch_size']))
+                cursor.execute(query, (cutoff_time, self.config.batching.batch_sizes['dexscreener']))
                 results = cursor.fetchall()
                 
                 return [row[0] for row in results]
@@ -2328,7 +2385,7 @@ class TokenSyncService:
                     cursor.execute("SELECT failed_attempts FROM tokens WHERE address = ?", (token_address,))
                     result = cursor.fetchone()
                     
-                    if result and result[0] >= CONFIG['max_failed_attempts']:
+                    if result and result[0] >= self.config.monitoring.max_failed_attempts:
                         cursor.execute("""
                             UPDATE tokens 
                             SET no_data_available = 1
@@ -2557,6 +2614,7 @@ class TokenSyncService:
                     viability_score = self.analyzer.calculate_viability_score(token_data, [])
                     risk_score = self.analyzer.calculate_risk_score(token_data, [])
                     momentum_score = self.analyzer.calculate_momentum_score(token_data, [])
+                    predictive_scam_score = self.analyzer.calculate_predictive_scam_score(rugcheck_data)
                     
                     # Utiliser une transaction pour l'upsert
                     with conn:  # Context manager pour auto-commit/rollback
@@ -2585,6 +2643,7 @@ class TokenSyncService:
                                 liquidity_sol = ?,
                                 liquidity_mc_ratio = ?,
                                 volume_mc_ratio = ?,
+                                price_volatility_24h = ?,
                                 volume_5m = ?,
                                 volume_1h = ?,
                                 volume_6h = ?,
@@ -2596,6 +2655,7 @@ class TokenSyncService:
                                 viability_score = ?,
                                 risk_score = ?,
                                 momentum_score = ?,
+                                predictive_scam_score = ?,
                                 rug_risk_score = COALESCE(?, rug_risk_score),
                                 rug_raw_score = COALESCE(?, rug_raw_score),
                                 is_rugged = COALESCE(?, is_rugged),
@@ -2638,6 +2698,7 @@ class TokenSyncService:
                                 token_data.liquidity_sol,
                                 liquidity_mc_ratio,
                                 volume_mc_ratio,
+                                getattr(token_data, 'price_volatility_24h', 0.0),
                                 token_data.volume_5m,
                                 token_data.volume_1h,
                                 token_data.volume_6h,
@@ -2649,6 +2710,7 @@ class TokenSyncService:
                                 viability_score,
                                 risk_score,
                                 momentum_score,
+                                predictive_scam_score,
                                 rugcheck_data.get('rug_risk_score'),
                                 rugcheck_data.get('rug_raw_score'),
                                 rugcheck_data.get('is_rugged'),
@@ -2677,9 +2739,10 @@ class TokenSyncService:
                                 coingecko_id, is_verified, timestamp_token_created, creator_address,
                                 bonding_curve_progress, holder_count, market_cap, fdv,
                                 liquidity_usd, liquidity_sol, liquidity_mc_ratio, volume_mc_ratio,
+                                price_volatility_24h,
                                 volume_5m, volume_1h, volume_6h, volume_24h, 
                                 price_change_5m, price_change_1h, price_change_6h, price_change_24h,
-                                viability_score, risk_score, momentum_score,
+                                viability_score, risk_score, momentum_score, predictive_scam_score,
                                 rug_risk_score, rug_raw_score, is_rugged,
                                 mint_authority_revoked, freeze_authority_revoked,
                                 top_holder_percentage, top_10_holders_percentage,
@@ -2687,7 +2750,7 @@ class TokenSyncService:
                                 launchpad_name, is_pump_fun, lp_providers_count,
                                 has_low_liquidity, risk_count, last_rugcheck_update,
                                 last_price_update, metadata_source, last_historized_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """
 
                             cursor.execute(query, (
@@ -2709,6 +2772,7 @@ class TokenSyncService:
                                 token_data.liquidity_sol,
                                 liquidity_mc_ratio,
                                 volume_mc_ratio,
+                                getattr(token_data, 'price_volatility_24h', 0.0),
                                 token_data.volume_5m,
                                 token_data.volume_1h,
                                 token_data.volume_6h,
@@ -2720,6 +2784,7 @@ class TokenSyncService:
                                 viability_score,
                                 risk_score,
                                 momentum_score,
+                                predictive_scam_score,
                                 # Données rugcheck
                                 rugcheck_data.get('rug_risk_score', 50),
                                 rugcheck_data.get('rug_raw_score', 0),
@@ -2824,7 +2889,9 @@ class TokenSyncService:
                             END, 1
                         ) as recent_activity_pct,
                         ROUND((strftime('%s', 'now') - COALESCE(tk.timestamp_token_created, ts.first_tx_timestamp)) / 3600.0, 1) as token_age_hours,
-                        ROUND((ts.first_discovery - COALESCE(tk.timestamp_token_created, ts.first_tx_timestamp)) / 3600.0, 1) as discovery_delay_hours
+                        ROUND((ts.first_discovery - COALESCE(tk.timestamp_token_created, ts.first_tx_timestamp)) / 3600.0, 1) as discovery_delay_hours,
+                        ROUND((ts.last_tx_timestamp - ts.first_tx_timestamp) / 3600.0, 1) as active_lifetime_hours,
+                        ROUND(ts.avg_detection_delay, 0) as avg_detection_delay_sec
                     FROM token_stats ts
                     LEFT JOIN tokens tk ON ts.token_mint = tk.address
                 )
@@ -2841,7 +2908,7 @@ class TokenSyncService:
                 LIMIT ?
                 """
                 
-                cursor.execute(query, (CONFIG['batch_size'] * 2,))  # Plus de tokens prioritaires
+                cursor.execute(query, (self.config.batching.batch_sizes['dexscreener'] * 2,))  # Plus de tokens prioritaires
                 results = cursor.fetchall()
                 
                 token_addresses = [row[0] for row in results if row[0]]
@@ -2867,7 +2934,7 @@ class TokenSyncService:
                 
                 # Construire la requête avec placeholders
                 placeholders = ','.join(['?' for _ in dashboard_tokens])
-                cutoff_time = int(time.time()) - (CONFIG['price_update_interval'] // 2)
+                cutoff_time = int(time.time()) - (self.config.monitoring.price_update_interval_seconds // 2)
                 self.logger.debug(f"DEBUG: Using cutoff time {datetime.fromtimestamp(cutoff_time)} for dashboard token updates.")
 
                 query = f"""
@@ -2892,7 +2959,7 @@ class TokenSyncService:
                     CASE WHEN t.last_price_update IS NULL THEN 0 ELSE t.last_price_update END ASC
                 """
                 
-                params = dashboard_tokens + [CONFIG['max_failed_attempts'], cutoff_time]
+                params = dashboard_tokens + [self.config.monitoring.max_failed_attempts, cutoff_time]
                 cursor.execute(query, params)
                 results = cursor.fetchall()
                 
@@ -2921,7 +2988,7 @@ class TokenSyncService:
                 LIMIT ?
                 """
                 
-                cursor.execute(query, (CONFIG['batch_size'],))
+                cursor.execute(query, (self.config.batching.batch_sizes['dexscreener'],))
                 results = cursor.fetchall()
                 
                 return [row[0] for row in results]
@@ -2980,7 +3047,7 @@ class TokenSyncService:
                     successful_updates += 1
                 
                 # Rate limiting between creation timestamp requests
-                time.sleep(CONFIG['api_rate_limit'])
+                time.sleep(self.config.monitoring.rate_limit_delay)
                 
             except Exception as e:
                 self.logger.error(f"Error updating creation timestamp for {token_address}: {e}")
@@ -3008,7 +3075,7 @@ class TokenSyncService:
                 LIMIT ?
                 """
                 
-                cursor.execute(query, (CONFIG['batch_size'] // 2,))  # Batch plus petit
+                cursor.execute(query, (self.config.batching.batch_sizes['pumpfun'],))
                 results = cursor.fetchall()
                 
                 return [row[0] for row in results]
@@ -3047,7 +3114,7 @@ class TokenSyncService:
                     self.logger.debug(f"No Pump.fun data found for: {token_address[:8]}...")
                 
                 # Rate limiting spécifique pour Pump.fun
-                time.sleep(CONFIG.get('pumpfun_rate_limit', 1.0))
+                time.sleep(self.config.monitoring.pumpfun_rate_limit_seconds)
                 
             except Exception as e:
                 self.logger.error(f"Error updating Pump.fun data for {token_address}: {e}")
@@ -3171,7 +3238,7 @@ class TokenSyncService:
 
             try:
                 start_time = time.time()
-                async with session.get(url, timeout=CONFIG['request_timeout']) as response:
+                async with session.get(url, timeout=self.config.rpc.timeout) as response:
                     api_duration = time.time() - start_time
                     self._record_api_call('dexscreener_tokens_batch_async', api_duration)
 
@@ -3398,6 +3465,30 @@ class TokenSyncService:
 
         return token_data_map
 
+    def update_queue_status(self, token_address: str, success: bool, error_message: Optional[str] = None):
+        """Updates the status of a token in the processing queue."""
+        status = 'completed' if success else 'failed'
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                if success:
+                    cursor.execute("""
+                        UPDATE token_processing_queue
+                        SET status = ?, completed_at = CURRENT_TIMESTAMP, last_error = NULL
+                        WHERE token_address = ?
+                    """, (status, token_address))
+                else:
+                    cursor.execute("""
+                        UPDATE token_processing_queue
+                        SET status = ?, completed_at = CURRENT_TIMESTAMP, last_error = ?, retry_count = retry_count + 1
+                        WHERE token_address = ?
+                    """, (status, error_message, token_address))
+                conn.commit()
+            self.logger.debug(f"Queue status for {token_address} updated to {status}.")
+        except Exception as e:
+            self.logger.error(f"Failed to update queue status for {token_address}: {e}")
+
+
     async def process_tokens_in_batches_async(self, tokens: List[str]) -> int:
         """
         Processes a list of tokens asynchronously using the batch API endpoint.
@@ -3455,7 +3546,7 @@ class TokenSyncService:
         # 5. Exécuter les opérations de base de données
         db_results = await asyncio.gather(*db_tasks, return_exceptions=True)
 
-        # 6. Compter les résultats
+        # 6. Compter les résultats et mettre à jour la file d'attente
         failed_count = 0
         for i, result in enumerate(db_results):
             token_addr = tokens[i]
@@ -3463,11 +3554,14 @@ class TokenSyncService:
             if isinstance(result, Exception):
                 self.logger.error(f"DB operation failed for token {token_addr}: {result}")
                 failed_count += 1
+                self.update_queue_status(token_addr, success=False, error_message=str(result))
             elif result:
-                if token_addr in token_data_map:
-                    successful_upserts += 1
+                successful_upserts += 1
+                self.update_queue_status(token_addr, success=True)
             else:
                 failed_count += 1
+                error_msg = "Upsert returned False"
+                self.update_queue_status(token_addr, success=False, error_message=error_msg)
 
         # 7. Statistiques
         self.stats['successful_updates'] += successful_upserts
@@ -3492,7 +3586,7 @@ class TokenSyncService:
             url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
             
             start_time = time.time()
-            async with session.get(url, timeout=CONFIG['request_timeout']) as response:
+            async with session.get(url, timeout=self.config.rpc.timeout) as response:
                 api_duration = time.time() - start_time
                 self._record_api_call('dexscreener_individual_fallback', api_duration)
                 
@@ -3581,188 +3675,14 @@ class TokenSyncService:
                 metadata_source="dexscreener_fallback_error"
             )
 
-    def sync_new_tokens_intelligent(self) -> int:
-        """Version optimisée avec groupement par type pour éviter les appels API redondants"""
-        
-        self.logger.debug("🤖 [INTELLIGENT] Début sync intelligent optimisé...")
-        
-        new_tokens = list(self.get_new_tokens_from_transactions())
-        if not new_tokens:
-            self.logger.debug("🤖 [INTELLIGENT] Aucun nouveau token")
-            return 0
-        
-        self.logger.info(f"🤖 [INTELLIGENT] Traitement de {len(new_tokens)} nouveaux tokens")
-        
-        # Variables de suivi
-        successful_updates = 0
-        pump_530_errors = 0
-        max_530_errors = 5
-        
-        # ✅ PHASE 1: DÉTECTION ET GROUPEMENT PAR TYPE
-        self.logger.debug("🔍 [PHASE 1] Détection et groupement des tokens...")
-        
-        dex_tokens = []
-        pump_tokens = []
-        unknown_tokens = []
-        
-        # Statistiques de détection
-        detection_stats = {
-            'dex_listed': 0,
-            'pump_prebond': 0, 
-            'pump_graduated': 0,
-            'unknown': 0,
-            'skipped_530': 0
-        }
-        
-        for i, token_address in enumerate(new_tokens, 1):
-            try:
-                self.logger.debug(f"🔍 [DETECT] {i}/{len(new_tokens)}: {token_address[:8]}...")
-                
-                # Skip Pump.fun si trop d'erreurs 530
-                skip_pump_apis = pump_530_errors >= max_530_errors
-                if skip_pump_apis:
-                    self.logger.warning(f"⚠️ [DETECT] Mode DexScreener uniquement pour {token_address[:8]}...")
-                    dex_tokens.append(token_address)  # Forcer en mode DEX
-                    detection_stats['skipped_530'] += 1
-                    continue
-                
-                # Détecter le type
-                token_type_result = self.detect_token_type(token_address)
-                detection_stats[token_type_result.token_type] += 1
-                
-                self.logger.info(f"🎯 [DETECT] {token_address[:8]}... → {token_type_result.token_type} (conf: {token_type_result.confidence:.2f})")
-                
-                # Grouper par type
-                if token_type_result.token_type == "dex_listed":
-                    dex_tokens.append(token_address)
-                    
-                elif token_type_result.token_type in ["pump_prebond", "pump_graduated"]:
-                    pump_tokens.append((token_address, token_type_result))
-                    
-                else:  # unknown
-                    unknown_tokens.append((token_address, token_type_result))
-                    
-                    # Compter les erreurs 530 pour tokens unknown
-                    if token_type_result.confidence <= 0.2:
-                        pump_530_errors += 1
-                        self.logger.debug(f"🔍 [DETECT] Erreurs 530 consécutives: {pump_530_errors}/{max_530_errors}")
-                    else:
-                        pump_530_errors = 0
-                
-                # Petite pause tous les 5 tokens
-                if i % 5 == 0:
-                    time.sleep(0.2)
-                    
-            except Exception as e:
-                self.logger.error(f"❌ [DETECT] Erreur détection {token_address[:8]}...: {e}")
-                # En cas d'erreur, ajouter aux unknown pour traitement fallback
-                unknown_tokens.append((token_address, None))
-        
-        # ✅ PHASE 2: TRAITEMENT GROUPÉ PAR TYPE
-        self.logger.info(f"📊 [PHASE 2] Groupement: DEX={len(dex_tokens)}, Pump={len(pump_tokens)}, Unknown={len(unknown_tokens)}")
-        
-        # 2.1 Traitement en lot des tokens DEX
-        if dex_tokens:
-            self.logger.info(f"🔸 [DEX-BATCH] Traitement de {len(dex_tokens)} tokens DEX en lot...")
-            try:
-                batch_result = asyncio.run(self.process_tokens_in_batches_async(dex_tokens))
-                successful_updates += batch_result
-                self.logger.info(f"✅ [DEX-BATCH] {batch_result}/{len(dex_tokens)} tokens DEX traités avec succès")
-            except Exception as e:
-                self.logger.error(f"❌ [DEX-BATCH] Erreur traitement lot DEX: {e}")
-                # Fallback: créer des stubs pour tous les tokens DEX échoués
-                for token_address in dex_tokens:
-                    try:
-                        self.create_token_stub(token_address)
-                    except Exception as stub_e:
-                        self.logger.error(f"❌ [DEX-BATCH] Stub échoué pour {token_address[:8]}...: {stub_e}")
-        
-        # 2.2 Traitement individuel des tokens Pump.fun
-        if pump_tokens:
-            self.logger.info(f"🚀 [PUMP-INDIVIDUAL] Traitement de {len(pump_tokens)} tokens Pump.fun individuellement...")
-            for token_address, token_type_result in pump_tokens:
-                try:
-                    self.logger.debug(f"🚀 [PUMP] Traitement {token_address[:8]}... ({token_type_result.token_type})")
-                    
-                    token_data = self.enrich_token_by_type(token_address, token_type_result)
-                    
-                    if token_data is not None:
-                        # Ajouter métadonnées de détection
-                        try:
-                            token_data.detection_method = token_type_result.token_type
-                            token_data.detection_confidence = token_type_result.confidence
-                        except AttributeError:
-                            pass
-                        
-                        # Sauvegarder
-                        if self.upsert_token(token_data):
-                            successful_updates += 1
-                            self.logger.debug(f"✅ [PUMP] Token sauvegardé: {token_address[:8]}...")
-                        else:
-                            self.logger.warning(f"❌ [PUMP] Échec sauvegarde: {token_address[:8]}...")
-                    else:
-                        self.logger.warning(f"❌ [PUMP] Aucune donnée: {token_address[:8]}...")
-                        
-                    # Pause entre tokens Pump.fun
-                    time.sleep(0.3)
-                    
-                except Exception as e:
-                    self.logger.error(f"❌ [PUMP] Erreur {token_address[:8]}...: {e}")
-                    self.create_token_stub(token_address)
-        
-        # 2.3 Traitement des tokens unknown (fallback)
-        if unknown_tokens:
-            self.logger.info(f"❓ [UNKNOWN] Traitement de {len(unknown_tokens)} tokens unknown...")
-            for token_address, token_type_result in unknown_tokens:
-                try:
-                    if token_type_result is None:
-                        # Erreur de détection, créer directement un stub
-                        self.create_token_stub(token_address)
-                    else:
-                        # Tenter l'enrichissement unknown
-                        token_data = self.enrich_token_by_type(token_address, token_type_result)
-                        if token_data is not None and self.upsert_token(token_data):
-                            successful_updates += 1
-                            self.logger.debug(f"✅ [UNKNOWN] Token récupéré: {token_address[:8]}...")
-                    
-                    time.sleep(0.2)
-                    
-                except Exception as e:
-                    self.logger.error(f"❌ [UNKNOWN] Erreur {token_address[:8]}...: {e}")
-                    self.create_token_stub(token_address)
-        
-        # ✅ PHASE 3: STATISTIQUES FINALES
-        total_processed = len(new_tokens)
-        success_rate = (successful_updates / total_processed * 100) if total_processed > 0 else 0
-        
-        self.logger.info(f"🏁 [INTELLIGENT] Terminé: {successful_updates}/{total_processed} réussis ({success_rate:.1f}%)")
-        self.logger.info(f"📊 [INTELLIGENT] Détection: DEX={detection_stats['dex_listed']}, Pump-Pre={detection_stats['pump_prebond']}, Pump-Grad={detection_stats['pump_graduated']}, Unknown={detection_stats['unknown']}, Skipped-530={detection_stats['skipped_530']}")
-        
-        # Estimation d'optimisation
-        estimated_old_calls = len(new_tokens) * 2  # Détection + enrichissement individuel
-        estimated_new_calls = len(new_tokens) + max(1, len(dex_tokens) // 30)  # Détection + batch
-        calls_saved = estimated_old_calls - estimated_new_calls
-        
-        if calls_saved > 0:
-            self.logger.info(f"⚡ [OPTIMIZATION] ~{calls_saved} appels API économisés grâce au groupement")
-        
-        # Alerte APIs instables
-        if pump_530_errors >= max_530_errors:
-            self.logger.warning(f"🚨 [INTELLIGENT] APIs Pump.fun instables: {pump_530_errors} erreurs 530 consécutives")
-        
-        # Enregistrer pour les stats globales
-        self.cycle_logger.record_operation('new_tokens', successful_updates)
-        
-        return successful_updates
-
     def sync_new_tokens(self) -> int:
-        """Optimized version with async batch processing."""
-        self.logger.debug("🚀 Starting ASYNC token synchronization...")
+        """Optimized version with async batch processing from a queue."""
+        self.logger.debug("🚀 Starting token synchronization from queue...")
         
-        all_new_tokens = list(self.get_new_tokens_from_transactions())
+        all_new_tokens = self.get_pending_tokens_from_queue(self.config.batching.batch_sizes['dexscreener'])
         
         if not all_new_tokens:
-            self.logger.debug("No new tokens to process")
+            self.logger.debug("No new tokens in queue to process")
             return 0
         
         # We can process them all in one async run, priority doesn't matter for fetching
@@ -3787,7 +3707,7 @@ class TokenSyncService:
             self.logger.debug("No tokens need price updates.")
             return 0
         
-        self.logger.info(f"📊 Updating {len(tokens_to_update)} tokens (limit: {CONFIG['price_update_limit']})")
+        self.logger.info(f"📊 Updating {len(tokens_to_update)} tokens (limit: {self.config.monitoring.price_update_limit})")
         
         # Traitement en lot via la méthode batch existante
         try:
@@ -3808,7 +3728,7 @@ class TokenSyncService:
                 cursor = conn.cursor()
                 
                 # Calculer le timestamp de cutoff
-                cutoff_timestamp = int(time.time()) - CONFIG['price_update_interval']
+                cutoff_timestamp = int(time.time()) - self.config.monitoring.price_update_interval_seconds
                 
                 query = """
                 SELECT address 
@@ -3825,8 +3745,8 @@ class TokenSyncService:
                 
                 cursor.execute(query, (
                     cutoff_timestamp, 
-                    CONFIG['max_failed_attempts'], 
-                    CONFIG['price_update_limit']
+                    self.config.monitoring.max_failed_attempts, 
+                    self.config.monitoring.price_update_limit
                 ))
                 
                 results = cursor.fetchall()
@@ -3887,7 +3807,7 @@ class TokenSyncService:
                     SELECT COUNT(*) FROM tokens 
                     WHERE no_data_available = 1 
                     AND no_data_last_check < datetime('now', '-' || ? || ' days')
-                """, (CONFIG['retry_failed_after_days'],))
+                """, (self.config.monitoring.retry_failed_after_days,))
                 retry_eligible = cursor.fetchone()[0]
                 
                 # Tokens morts
@@ -4084,7 +4004,7 @@ class TokenSyncService:
             self.log_api_rate_usage()
             
             # 1. Sync new tokens from transactions
-            new_tokens_updated = self.sync_new_tokens_intelligent()  # ✅ Utiliser la nouvelle méthode
+            new_tokens_updated = self.sync_new_tokens()
             self.logger.debug("=== STATS API APRÈS NOUVEAUX TOKENS ===")
             self.print_api_statistics()
             self.log_api_rate_usage()
@@ -4181,9 +4101,9 @@ class TokenSyncService:
                 self.run_sync_cycle()
                 
                 if self.running:  # Check if still running before sleeping
-                    self.logger.debug(f"Waiting {CONFIG['update_interval']} seconds until next cycle...")
+                    self.logger.debug(f"Waiting {self.config.monitoring.enrichment_interval_seconds} seconds until next cycle...")
                     self.log_api_rate_usage() 
-                    time.sleep(CONFIG['update_interval'])
+                    time.sleep(self.config.monitoring.enrichment_interval_seconds)
                     
         except KeyboardInterrupt:
             self.logger.debug("Received interrupt signal")
@@ -4215,18 +4135,8 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    #print("Token Data Synchronization Backend with Historical Tracking")
-    #print("=" * 60)
-    #print(f"Database: {CONFIG['db_path']}")
-    #print(f"Update interval: {CONFIG['update_interval']} seconds")
-    #print(f"Price update interval: {CONFIG['price_update_interval']} seconds")
-    #print(f"Historization interval: {CONFIG['historization_interval']} seconds")
-    #print(f"Dead token check interval: {CONFIG['dead_token_check_interval']} seconds")
-    #print(f"API rate limit: {CONFIG['api_rate_limit']} seconds")
-    #print("=" * 60)
-    
     # Initialize service
-    service = TokenSyncService(CONFIG['db_path'])
+    service = TokenSyncService()
     
     # Start service
     service.start()

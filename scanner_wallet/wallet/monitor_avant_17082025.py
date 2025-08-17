@@ -566,13 +566,6 @@ class SolanaWalletMonitor:
                         discovery.discovery_method,
                         discovery.confidence_score
                     ))
-                    
-                    # Add new token to the processing queue
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO token_processing_queue (token_address, source_wallet_address)
-                        VALUES (?, ?)
-                    """, (discovery.token_mint, wallet_address))
-                    
                 logger.debug(f"Committing scan results for {wallet_address} to database.")
                 conn.commit()
                 logger.info(f"✅ Scan results and last_scan_time stored for {wallet_address}")
