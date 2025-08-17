@@ -625,6 +625,7 @@ class SolanaWalletLogger:
             with cls._lock:
                 if not cls._instance:
                     cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
     
     def __init__(self, 
@@ -634,12 +635,16 @@ class SolanaWalletLogger:
                  json_output: bool = False,
                  max_file_size: int = 10 * 1024 * 1024,  # 10MB
                  backup_count: int = 5,
-                 max_age_days: int = 7):
+                 max_age_days: int = 7,
+                 force_reconfigure: bool = False):
         
         # Éviter la réinitialisation multiple
-        if hasattr(self, '_initialized'):
+        if hasattr(self, '_initialized') and self._initialized and not force_reconfigure:
             return
         
+        if hasattr(self, 'logger') and force_reconfigure:
+            self.logger.handlers.clear()
+
         setup_windows_unicode()
         self.log_level = log_level.upper()
         self.log_file = log_file
@@ -920,6 +925,41 @@ class SolanaWalletLogger:
 # =============================================================================
 # FONCTIONS D'INITIALISATION ET HELPERS
 # =============================================================================
+def setup_logger_from_config(config: Optional['SolanaWalletConfig'] = None,
+                            context_provider: callable = None) -> SolanaWalletLogger:
+    """
+    Configure le logging à partir de la configuration
+    
+    Args:
+        config: Instance de configuration (auto-chargée si None)
+        context_provider: Fonction pour fournir du contexte global
+    
+    Returns:
+        Instance du logger configuré
+    """
+    # Charger la config si pas fournie
+    if config is None:
+        from core.config import get_config
+        config = get_config()
+    
+    logging_config = config.logging
+    
+    logger_instance = SolanaWalletLogger(
+        log_level=logging_config.level.value,
+        log_file=logging_config.get_full_path(),  # Utilise le chemin complet avec logs/
+        console_output=logging_config.console_output,
+        json_output=logging_config.json_output,
+        max_file_size=logging_config.max_file_size_mb * 1024 * 1024,
+        backup_count=logging_config.backup_count,
+        max_age_days=logging_config.max_age_days,
+        force_reconfigure=True
+    )
+    
+    # Configurer le context provider si fourni
+    if context_provider:
+        logger_instance.context_filter.context_provider = context_provider
+    
+    return logger_instance
 
 def setup_logger(log_level: str = "INFO",
                log_file: str = "wallet_monitor.log",

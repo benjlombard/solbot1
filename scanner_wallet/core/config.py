@@ -264,6 +264,8 @@ class DatabaseConfig:
     """Configuration de la base de données"""
     name: str = "solana_wallet.db"
     path: Optional[str] = None
+    base_dir: str = "database"  # Nouveau paramètre
+    data_subdir: str = "data"
     timeout: float = 30.0
     max_connections: int = 10
     backup_enabled: bool = True
@@ -273,15 +275,32 @@ class DatabaseConfig:
     def get_full_path(self) -> str:
         """Retourne le chemin complet de la base de données"""
         if self.path:
+            # Si un chemin spécifique est fourni, l'utiliser
             return str(Path(self.path) / self.name)
-        return self.name
+        
+        # Sinon, utiliser la structure database/data/
+        db_dir = Path(self.base_dir) / self.data_subdir
+        # Créer les répertoires si ils n'existent pas
+        db_dir.mkdir(parents=True, exist_ok=True)
+        return str(db_dir / self.name)
+
+    def get_backup_dir(self) -> str:
+        """Retourne le répertoire de backup"""
+        if self.path:
+            backup_dir = Path(self.path).parent / "backups"
+        else:
+            backup_dir = Path(self.base_dir) / "backups"
+        
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        return str(backup_dir)
 
 
 @dataclass
 class LoggingConfig:
     """Configuration du système de logging"""
     level: LogLevel = LogLevel.INFO
-    file_path: str = "wallet_monitor.log"
+    file_name: str = "wallet_monitor.log"
+    base_dir: str = "logs"
     console_output: bool = True
     json_output: bool = False
     max_file_size_mb: int = 10
@@ -290,6 +309,30 @@ class LoggingConfig:
     rate_limit_enabled: bool = True
     rate_limit_max_per_minute: int = 120
 
+    def get_full_path(self) -> str:
+        """Retourne le chemin complet du fichier de log"""
+        log_dir = Path(self.base_dir)
+        # Créer le répertoire si il n'existe pas
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return str(log_dir / self.file_name)
+    
+    def get_error_log_path(self) -> str:
+        """Retourne le chemin du fichier de log d'erreurs"""
+        log_dir = Path(self.base_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        error_file = self.file_name.replace('.log', '_errors.log')
+        return str(log_dir / error_file)
+    
+    def get_archive_dir(self) -> str:
+        """Retourne le répertoire d'archivage des logs"""
+        archive_dir = Path(self.base_dir) / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        return str(archive_dir)
+    
+    @property
+    def file_path(self) -> str:
+        """Propriété de compatibilité avec l'ancien nom"""
+        return self.get_full_path()
 
 @dataclass
 class FlaskConfig:
@@ -486,6 +529,8 @@ class SolanaWalletConfig:
         return DatabaseConfig(
             name=os.getenv('DB_NAME', 'solana_wallet.db'),
             path=os.getenv('DB_PATH'),
+            base_dir=os.getenv('DB_BASE_DIR', 'database'),
+            data_subdir=os.getenv('DB_DATA_SUBDIR', 'data'),
             timeout=float(os.getenv('DB_TIMEOUT', 30.0)),
             backup_enabled=self._get_bool_env('DB_BACKUP_ENABLED', True),
             backup_interval_hours=int(os.getenv('DB_BACKUP_INTERVAL_HOURS', 24)),
@@ -494,14 +539,28 @@ class SolanaWalletConfig:
     
     def _load_logging_config(self) -> LoggingConfig:
         """Charge la configuration du logging"""
+        log_file_env = os.getenv('LOG_FILE', 'wallet_monitor.log')
+    
+        # Si LOG_FILE contient un chemin (avec /), extraire juste le nom du fichier
+        if '/' in log_file_env or '\\' in log_file_env:
+            file_name = Path(log_file_env).name
+            # Optionnel : récupérer aussi le répertoire parent
+            base_dir = str(Path(log_file_env).parent) if Path(log_file_env).parent != Path('.') else "logs"
+        else:
+            file_name = log_file_env
+            base_dir = os.getenv('LOG_BASE_DIR', 'logs')
+
         return LoggingConfig(
             level=LogLevel(os.getenv('LOG_LEVEL', 'INFO')),
-            file_path=os.getenv('LOG_FILE', 'wallet_monitor.log'),
+            file_name=os.getenv('LOG_FILE_NAME', file_name),
+            base_dir=base_dir,
             console_output=self._get_bool_env('LOG_CONSOLE_OUTPUT', True),
             json_output=self._get_bool_env('LOG_JSON_OUTPUT', False),
             max_file_size_mb=int(os.getenv('LOG_MAX_FILE_SIZE_MB', 10)),
             backup_count=int(os.getenv('LOG_BACKUP_COUNT', 5)),
-            max_age_days=int(os.getenv('LOG_MAX_AGE_DAYS', 7))
+            max_age_days=int(os.getenv('LOG_MAX_AGE_DAYS', 7)),
+            rate_limit_enabled=self._get_bool_env('LOG_RATE_LIMIT_ENABLED', True),
+            rate_limit_max_per_minute=int(os.getenv('LOG_RATE_LIMIT_MAX_PER_MINUTE', 120))
         )
     
     def _load_flask_config(self) -> FlaskConfig:
@@ -584,8 +643,11 @@ class SolanaWalletConfig:
     def _apply_development_overrides(self):
         """Ajustements pour l'environnement de développement"""
         self.flask.debug = True
-        self.logging.level = LogLevel.DEBUG
+        if not os.getenv('LOG_LEVEL'):
+            self.logging.level = LogLevel.DEBUG
         self.logging.console_output = True
+        if not os.getenv('LOG_FILE_NAME'):
+            self.logging.file_name = "wallet_monitor_dev.log"
         self.monitoring.rate_limit_delay = 0.3  # Plus lent pour éviter les rate limits
         self.monitoring.full_scan_interval_hours = 2  # Scans plus fréquents
         self.database.backup_enabled = False  # Pas de backup en dev
@@ -609,7 +671,8 @@ class SolanaWalletConfig:
         self.flask.debug = False
         self.logging.level = LogLevel.WARNING
         self.logging.console_output = False
-        self.logging.file_path = "test_wallet_monitor.log"
+        self.logging.file_name = "wallet_monitor_test.log"
+        self.logging.base_dir = "logs/test"
         self.database.name = "test_solana_wallet.db"
         self.monitoring.update_interval = 10  # Tests plus rapides
         self.monitoring.max_consecutive_errors = 1  # Fail fast en test
@@ -621,6 +684,7 @@ class SolanaWalletConfig:
         self.flask.debug = False
         self.logging.level = LogLevel.INFO
         self.logging.json_output = True
+        self.logging.file_name = "wallet_monitor_staging.log"
         self.database.name = "staging_solana_wallet.db"
         self.monitoring.update_interval = 45
         self.alerting.enabled = True
@@ -784,7 +848,10 @@ class SolanaWalletConfig:
             f"   Batching RPC: {'✅ Activé' if self.batching.enabled else '❌ Désactivé'}",
             f"   Intervalle monitoring: {self.monitoring.update_interval}s",
             f"   Base de données: {self.database.get_full_path()}",
-            f"   Logging: {self.logging.level.value} vers {self.logging.file_path}",
+            f"   Répertoire backup: {self.database.get_backup_dir() if self.database.backup_enabled else 'Désactivé'}",
+            f"   Logging: {self.logging.level.value} vers {self.logging.get_full_path()}",
+            f"   Logs console: {'✅ Activés' if self.logging.console_output else '❌ Désactivés'}",
+            f"   Archive logs: {self.logging.get_archive_dir()}",
             f"   API Flask: {self.flask.host}:{self.flask.port}",
             f"   Alertes: {'✅ Activées' if self.alerting.enabled else '❌ Désactivées'}"
         ]
@@ -1266,6 +1333,13 @@ class ConfigValidator:
        """Valide la configuration de la base de données"""
        db_path = Path(self.config.database.get_full_path())
        
+       try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+       except PermissionError:
+            self.errors.append(f"Pas de permission pour créer le répertoire DB: {db_path.parent}")
+       except Exception as e:
+            self.errors.append(f"Erreur création répertoire DB: {e}")
+
        # Vérifier l'espace disque (approximatif)
        try:
            free_space = db_path.parent.stat().st_size if db_path.exists() else 0
@@ -1274,6 +1348,13 @@ class ConfigValidator:
        except:
            pass
        
+       if self.config.database.backup_enabled:
+            try:
+                backup_dir = Path(self.config.database.get_backup_dir())
+                backup_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                self.warnings.append(f"Impossible de créer le répertoire de backup: {e}")
+
        # Vérifier les paramètres de backup
        if self.config.database.backup_enabled and self.config.database.backup_interval_hours < 1:
            self.warnings.append("Intervalle de backup très fréquent")
@@ -1283,7 +1364,7 @@ class ConfigValidator:
    
    def _validate_logging_config(self):
        """Valide la configuration du logging"""
-       log_path = Path(self.config.logging.file_path)
+       log_path = Path(self.config.logging.get_full_path())
        
        # Vérifier les permissions d'écriture
        try:
@@ -1291,15 +1372,38 @@ class ConfigValidator:
            test_file = log_path.parent / "test_write.tmp"
            test_file.touch()
            test_file.unlink()
-       except Exception:
-           self.errors.append(f"Pas de permission d'écriture pour les logs: {log_path.parent}")
+       except PermissionError:
+            self.errors.append(f"Pas de permission d'écriture pour les logs: {log_path.parent}")
+       except Exception as e:
+            self.errors.append(f"Erreur accès répertoire logs: {e}")
        
-       # Vérifier les paramètres de rotation
+       # Vérifier que le répertoire d'archive peut être créé
+       try:
+            archive_dir = Path(self.config.logging.get_archive_dir())
+            archive_dir.mkdir(parents=True, exist_ok=True)
+       except Exception as e:
+            self.warnings.append(f"Impossible de créer le répertoire d'archive logs: {e}")
+        
+        # Vérifier les paramètres de rotation
        if self.config.logging.max_file_size_mb > 100:
-           self.warnings.append("Taille maximum de log élevée")
-       
+            self.warnings.append("Taille maximum de log élevée")
+        
        if self.config.logging.backup_count < 2:
-           self.warnings.append("Peu de fichiers de backup de logs")
+            self.warnings.append("Peu de fichiers de backup de logs")
+        
+       if self.config.logging.max_age_days < 1:
+            self.warnings.append("Rétention des logs très courte")
+        
+        # Vérifier l'espace disque pour les logs
+       try:
+            import shutil
+            free_space = shutil.disk_usage(log_path.parent).free
+            estimated_log_size = (self.config.logging.max_file_size_mb * 
+                                self.config.logging.backup_count * 1024 * 1024)
+            if free_space < estimated_log_size * 2:  # 2x la taille estimée
+                self.warnings.append("Espace disque potentiellement insuffisant pour les logs")
+       except:
+            pass
    
    def _validate_flask_config(self):
        """Valide la configuration Flask"""
@@ -1460,9 +1564,12 @@ def export_to_env_file(config: SolanaWalletConfig, file_path: str = ".env.genera
            "",
            "# Logging",
            f"LOG_LEVEL={config.logging.level.value}",
-           f"LOG_FILE={config.logging.file_path}",
+           f"LOG_FILE_NAME={config.logging.file_name}",
+           f"LOG_BASE_DIR={config.logging.base_dir}",
            f"LOG_CONSOLE_OUTPUT={str(config.logging.console_output).lower()}",
            f"LOG_JSON_OUTPUT={str(config.logging.json_output).lower()}",
+           f"LOG_MAX_FILE_SIZE_MB={config.logging.max_file_size_mb}",
+           f"LOG_BACKUP_COUNT={config.logging.backup_count}",
            "",
            "# Flask/API",
            f"FLASK_HOST={config.flask.host}",
@@ -1578,8 +1685,12 @@ class Config:
    
    @property
    def LOG_FILE(self) -> str:
-       return self._config.logging.file_path
+       return self._config.logging.get_full_path()
    
+   @property
+   def LOG_DIR(self) -> str:
+        return self._config.logging.base_dir
+
    @property
    def ENABLE_RPC_BATCHING(self) -> bool:
        return self._config.batching.enabled

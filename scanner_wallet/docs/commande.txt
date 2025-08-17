@@ -1,0 +1,421 @@
+If verification fails, the bot skips the trade.
+
+- 
+@Rugcheckxyz
+
+- 
+@TweetScout_io
+
+
+Use this prompt:
+
+"Add verification for coins through Rugcheckxyz and TweetScout_io services to prevent scams and honeypots using Python."
+
+# Lister les sessions
+tmux list-sessions
+
+# Se reconnecter à une session
+tmux attach -t mon_projet
+
+# Détacher (sans fermer) : Ctrl+B puis D
+
+# Fermer une session
+tmux kill-session -t mon_projet
+
+# Renommer une fenêtre : Ctrl+B puis ,
+
+
+Ctrl+B puis 0 : Aller à la fenêtre 0 (script1)
+Ctrl+B puis 1 : Aller à la fenêtre 1 (script2)
+Ctrl+B puis P : Fenêtre précédente
+Ctrl+B puis N : Fenêtre suivante
+
+#5 scripts à lancer
+python optimized_launcher.py --batch-size 25 --max-concurrent 25 --enable-auto-scaling --enable-performance-profiling --whale-threshold 500
+python dexscreener_enricher.py --interval 1 --batch-size 250 --strategy recent --min-hours 0 --verbose
+#mode nuit (lent mais sûr) :
+python rugcheck_update_script.py --batch-size 2 --delay 5.0 --requests-per-minute 15 --only-missing
+#progressive update : 
+python rugcheck_update_script.py --limit 500 --batch-size 5 --delay 2.5 --requests-per-minute 25 --only-missing
+#complete update : 
+python rugcheck_update_script.py --batch-size 5 --delay 2.0 --requests-per-minute 30 --only-missing
+
+python pump_fun_checker.py --single-cycle --batch-size 200 --log-level DEBUG --status 'no_dex_data';
+
+python system_health_monitor.py --continuous
+
+
+Ordre de traitement lors d'un cycle :
+
+Nouveaux tokens en priorité (sync_new_tokens)
+
+Récupère les tokens présents dans transactions mais absents de tokens
+Les traite par batch de 50 (configurable)
+Ordre : du plus récent au plus ancien (ORDER BY t.created_at DESC)
+
+
+Mise à jour des prix existants (update_existing_prices)
+
+Tokens qui n'ont pas été mis à jour depuis 5 minutes (configurable)
+Ordre : du plus ancien au plus récent (ORDER BY last_price_update ASC NULLS FIRST)
+Limite à 50 tokens par cycle
+
+
+Timestamps de création manquants (tous les 5 cycles)
+
+Tokens sans timestamp_token_created
+Ordre : du plus récent au plus ancien (ORDER BY created_at DESC)
+
+
+Données Pump.fun manquantes (tous les 10 cycles)
+
+Tokens avec market_cap faible/nulle et pas de source Pump.fun
+Tokens créés dans les 7 derniers jours
+Ordre : du plus récent au plus ancien (ORDER BY created_at DESC)
+
+
+
+Exclusions intelligentes :
+
+Tokens flaggés : Ignore les tokens marqués no_data_available = 1 pendant 7 jours
+Échecs répétés : Ignore les tokens avec 3+ tentatives échouées
+Rate limiting : 2 secondes entre chaque appel API
+
+Logique de priorité :
+
+Découverte : Nouveaux tokens d'abord
+Fraîcheur : Prix récents pour les tokens actifs
+Complétude : Données manquantes périodiquement
+Efficacité : Évite les tokens sans données disponibles
+
+
+
+
+
+
+
+
+
+
+
+
+Le token n'existe que sur la plateforme Pump.fun, où tous les achats/ventes se font contre une bonding curve système How to Create Memecoins on Pump.fun and Buy the PUMP Token | CoinGecko
+DexScreener liste automatiquement les tokens dès qu'ils sont ajoutés à une pool de liquidité et ont au moins une transaction
+Tant que le token est sur la bonding curve, il n'y a pas de pool de liquidité = pas de listing DexScreener
+
+
+1. API Routes (pour comprendre les endpoints disponibles)
+
+api/routes/dashboard.py - Routes principales du dashboard
+api/routes/analytics.py - Routes d'analytics
+api/app.py - Configuration Flask et endpoints globaux
+
+2. Modèles de données (pour la structure des réponses)
+
+models/wallet.py - Structure des données wallet
+models/transaction.py - Structure des transactions
+models/token.py - Structure des tokens
+models/schemas.py - Schémas de validation API
+
+3. Core monitoring (pour comprendre les données temps réel)
+
+wallet/balance_tracker.py - Suivi des changements de balance
+transaction/analyzer.py - Analyse des transactions
+transaction/classifier.py - Classification buy/sell/transfer
+
+4. Configuration
+
+core/config.py - Configuration système
+utils/constants.py - Constantes (ex: endpoints WebSocket, intervalles de refresh)
+
+
+
+🎯 Objectifs du dashboard que je créerai :
+
+Vue temps réel des balances des wallets suivis
+Alertes visuelles sur les changements significatifs
+Interface de trading rapide (buy/sell)
+Graphiques d'évolution des balances
+Liste des transactions récentes avec classification
+Filtres et recherche par wallet/token
+
+
+#git 
+gitleaks detect --source . --config .gitleaks.toml --verbose --no-git --log-level debug --log-opts '-p'
+git add . && git commit -m "add files" && git push origin main
+
+cd scanner_wallet
+source env_scan_wallet/Scripts/activate
+python run_monitor.py
+sqlite3 solana_wallet.db
+select wallet_address, updated_at_readable from scan_history where scan_type = 'incremental' order by updated_at_readable desc limit 15;
+select wallet_address, updated_at_readable from scan_history where scan_type = 'full' order by updated_at_readable desc limit 45;
+
+
+https://solscan.io/account/AVAZvHLR2PcWpDf8BXY4rVxNHYRBytycHkcB5z5QNXYm#balanceChanges
+https://solscan.io/account/DyvJoTQpQ2tCqKEGuL2ecWVGssm8Qci9ot49LUsmcmtG#balanceChanges
+https://solscan.io/account/BieeZkdnBAgNYknzo3RH2vku7FcPkFZMZmRJANh2TpW
+https://solscan.io/account/4DdrfiDHpmx55i4SPssxVzS9ZaKLb8qr45NKY9Er9nNh#balanceChanges
+https://solscan.io/account/DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm#balanceChanges
+https://solscan.io/account/3DKfZz4iHgu42LGu3ttQxqz6u4m5z9ptuar8pBsRqkKC#balanceChanges
+https://solscan.io/account/HXkP2HJ3436u1urLnLsupqjtX1647bA2TtcHNWiDt49U#balanceChanges
+https://solscan.io/account/DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj#balanceChanges
+https://solscan.io/account/2RH6rUTPBJ9rUDPpuV9b8z1YL56k1tYU6Uk5ZoaEFFSK#balanceChanges
+https://solscan.io/account/8DoU8mBmFkMy7o4ESEzds3tiPgG6ZcKVMrHsU7X4geKZ
+
+
+
+#system_health_monitor : 
+# Vérification unique
+python system_health_monitor.py
+# Monitoring continu (met à jour toutes les 60s)
+python system_health_monitor.py --continuous
+# Monitoring rapide (toutes les 30s)
+python system_health_monitor.py --continuous --interval 30
+# Afficher aussi les meilleurs tokens
+python system_health_monitor.py --show-tokens
+# Mode alertes uniquement (n'affiche que si problème)
+python system_health_monitor.py --continuous --alerts-only
+# Exporter les métriques en JSON
+python system_health_monitor.py --export-json health_metrics.json
+
+
+# Analyse simple de tous les tokens non-tradeable
+python non_tradeable_analyzer.py
+
+# Analyser seulement les 50 premiers
+python non_tradeable_analyzer.py --limit 50
+
+# Analyser seulement les tokens découverts dans les 24 dernières heures
+python non_tradeable_analyzer.py --age-hours 24
+
+# Mode dry-run : voir ce qui serait mis à jour sans modifier la DB
+python non_tradeable_analyzer.py --dry-run
+
+# Mettre à jour automatiquement les tokens qui devraient être tradeable
+python non_tradeable_analyzer.py --update
+
+# Exporter l'analyse en JSON
+python non_tradeable_analyzer.py --export-json analysis.json
+
+# Analyse rapide avec traitement par batch plus grand
+python non_tradeable_analyzer.py --batch-size 10 --limit 100
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+python main.py --test-solana
+python main.py --wallet-info
+python jupiter_db_scanner_k2_g2_c1.py --interval 1 --limit 15 --database tokens.db --early --social --holders-growth --update-interval 2
+python jupiter_db_scanner_k2_g2_c1.py --interval 1 --limit 15 --database tokens.db --early --social --holders-growth --update-interval 2 --log-level INFO
+
+
+
+
+
+# Tester l'analyse sur le token SOL wrappé
+python main.py --test-rugcheck So11111111111111111111111111111111111111112
+
+# Ou tester sur BONK (token populaire)
+python main.py --test-rugcheck DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
+python main.py --test-dexscreener DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
+
+python main.py --trending-analysis
+
+python main.py --test-run
+
+python main.py --log-level DEBUG
+python main.py --trending-analysis --continuous
+
+timeout 1800 python main.py
+
+
+get_trending_pairs et
+get_newest_tokens_realtime
+
+python main.py --newest-analysis
+
+
+python main.py --newest-analysis 6 --log-level DEBUG
+
+python main.py --newest-analysis 6
+
+python main.py --test-endpoints
+
+# Analyse continue (défaut 6h lookback, scan toutes les 10 minutes)
+python main.py --continuous-newest
+
+# Avec paramètres personnalisés
+python main.py --continuous-newest 12 --scan-interval 1
+
+# Analyse unique avec tous les résultats
+python main.py --newest-analysis 6
+
+
+# Méthode timestamp (par défaut)
+python main.py --newest-analysis 6
+
+# Méthode explicite
+python main.py --newest-analysis 6 --method timestamp
+
+# Mode continu avec méthode timestamp
+python main.py --continuous-newest 6 --scan-interval 1 --method timestamp
+
+# Comparer les méthodes
+python main.py --newest-analysis 6 --method optimized
+python main.py --newest-analysis 6 --method terms
+
+
+
+########### SCANNER #####################
+# Mode scanner seul (surveillance pure)
+python main.py --scanner-mode
+
+# Mode hybride (recommandé : scanner + cycles traditionnels)
+python main.py --hybrid-mode
+
+# Test du scanner
+python main.py --test-scanner
+
+# Statistiques
+python main.py --scanner-stats
+
+
+python main.py --quick-test
+
+# Test complet mais patient (5 minutes)
+python main.py --test-scanner
+
+# Voir les stats sans lancer le scanner
+python main.py --scanner-stats
+
+
+
+# Scanner continu (toutes les 10min, 15 tokens max)
+python utils/jupiter_api/jupiter_db_scanner.py --interval 10 --limit 15
+
+# Scan unique pour test
+python utils/jupiter_api/jupiter_db_scanner.py --single-scan --limit 10
+
+# Voir les statistiques de la DB
+python utils/jupiter_api/jupiter_db_scanner.py --stats
+
+# Personnaliser la base de données
+python utils/jupiter_api/jupiter_db_scanner.py --database my_tokens.db --interval 5 --limit 20
+
+#birdeye
+# Nouveaux tokens Birdeye (dernières 12 heures)
+python main.py --birdeye-new 12
+
+# Tokens trending Birdeye
+python main.py --birdeye-trending 24h
+
+# Multi-sources avec filtrage par âge
+python main.py --multi-source birdeye dexscreener --max-age 6 --token-limit 20
+
+# Analyse combinée trending + nouveaux
+python main.py --multi-source trending_birdeye birdeye --max-age 24
+
+
+python utils/jupiter_api/jupiter_db_scanner_1.py --single-scan --limit 5 --database tokens.db
+
+
+
+
+
+24hFxRJKXzzCdc3zWnJoyFNW1LbE2mJMn7aSHrvwCaYf
+2yuXES5zWjuhdBGFeMjsyioqazNgx3zhDV6fM9e6DNCR
+377Yb1Svmspv1MkAANmuK7HrhzWFZ9hDn9eZS9Bor2Td
+37tkHeKnT7b3pJQEHqBYT1NPaKbyWiknH75Rw1mZrFgT	ruggé
+39oBjRkF7iWmkJZuDLyaffP2KrT5NgpAAwhjTidJRxwA	ruggé
+3DcjU5XCnAE7pm2BZzt2PEe4fYbdDzZ79Dyo9NgsBMJ9	ruggé
+3LvJCgF5cahuaaEPQNvrzcUxea5wKBXQiqUSCvwcTyGk	ruggé
+3fP9a34cy5JFqXMVrX9wP5UTh27WkigjkMiGccSGxnfr	ruggé
+43nh1c1Zhuv6TtygtFMKbu5uyWGyWwFxSJY3DS9Bq4tK	ruggé
+4nVzy8RU4vSo3LTxeGe1Npff6SuUgpV4SoVxU7hUB7PW	ruggé
+4rhZL5amLM82rsddsTnWk6Nwke45JiyGiPFuBe83J5wW	ruggé
+4sVnuou8Nh7XNCM2KYiwi74cAo2Vr9roPY9bUhK4VpBi	ruggé
+4u5Xanvoy8LQycpapMeQ4ChjbUm458EHZSYqBswFp1xX	ruggé
+5LgbFvdLqDNrAoDtEZa97uSg3L7pRAfvLAz2xLfnxB1q	ruggé
+5VEFMjQBgoh4fbWM44y86xoPjsY8JC1GEaoEeUrJ2Tpn	ruggé
+5bCVWTHpB4juGGKR7yTPhcL1odjdJ4bezmQ1YYgvYcN3	ruggé
+5iAaj28XEXSJydkUFe9WqRv7sfyqHBZx3RYs1vhrPnnk	ruggé
+64X7TQ8sSxZQ9Vtcvnw1b1FpuTYsEooKC8QGyA8epHUC	ruggé
+64iA89EP11zmq9XXsX8VntjNE6gNVRHyGyCTtp563sb4	ruggé
+6BABZn41kqBxr5syVoMB6RmpNjBjeBAQtUgiXf2wSByn	ruggé
+6oKKu8U8c2tU2fSnr96mcazcdsLkb5HzTSRXKEeXky2V
+78iGMvqB1vWEkzgh511snsv9G265Hw9FcsB5oTUKFqVg
+7Bvax6mw767HCht7jh68KmU87dMFyBFuAogkC8Ft4DNC
+7FrjifYuC1y34S3vgQtVJgaRzW9ApJvyUPKrPEFh4tBj
+7TnzxerRDh88NKb2gjXqWPgwwAifSKoqZt4gsr12pump
+7bkwqaN8tFNtQ79QAh2KX857kJQfT1CeZQfNViravNpc
+7nycTS3cgtzQdKCLT9zTCpbJDKt8EHsLPq2EoXAPTsq8
+7seAsc4DVTV4mDJLRq2k95JNGdoHFDPyRnDgQajzAXFe
+81U1XD8HZ3zCCNiRanFqMwqKgYfvWdMGHfYGfCpeRVpV
+8EzQ23V4PZ6wdM6FRwX3cXEhuJWZNpb8BbYAS2iUG1dx
+8PLwcQkZ7pXodiwmAJmtYnThk47t2R1cnS3mVVDhkz5s
+92tqTQuMFiRCNaikdbDT2JmsqFLFwUBPZhPwKFvmUWic
+95jQdPA2eRh9kjcjegSqw1xZxznRZHgDfm5kD28KCcDa
+9JWZdvSuGzvyBKwGJSy1qiGP5TbnG5bEb9yitbuvUhzC
+9Mtn7cZALkcg9z3sG2ZKfgKXvfEY4kTUSUkxM9QcNjUQ
+9U23EboDBN2zhfhZ7JMKygaV1JiWjdwF8tcLMGvVv2ny
+9VKouXMpU1MuWbgFJpgwGxJANuHy9tZGJC2xMN1dwusH
+9dnW1PvrAWtgaCz3u2E3QDMwzGcfwVsRW2qRvQHwxTM9
+9mXUGqVWn6ojThxFZemyPHKg2LR2A4cXytGkBC5RVjiK
+9zAhgij2B4m8vPNJhrzXtEpdsRhsUomLbtMGhrdPjC9f
+AAie3UUKaZgLNCRJy5nkbqBtRKh1pMpw9RrD9bHorA9B
+AV18JyH3h2uGEyBTm5QxUbEALVD9QXyY9SDm4DQThFtb
+AZBRbNNgmNQSsZtZD3w5y2gooue6umu9F3RwKnejH6L1
+AtgtacrbS3Cz8Eg9iganUimVqATneuQvFmWwezoWdffA
+B72t2pkdapuRzMPo8MuYp1WpqfWo82T8uP1AVUfZqU48
+BQ3x6HY5ifX5yrFFBKBSwpzkW9DjHUD291YaXxKyN1o9
+ByyHYEGvkQHLF24gJSXBr4KHaq9wG8G4opTAFqyxkigF
+CCnk4B28nFegarvwub6oz6iwSP183zXRHZSv2dsiFgu2
+CFPSwg13eq5JHxU3FGh52ByxnFCfSKLZqeG93oGN6pHf
+CJcvEkmn533fx6csCZnKyrLcUxfw8L3ReJHdE6BwsKZA
+CSBr9gZURpjXZgcsapsnqc86C1g37rQ5tXSnLs9LoC25
+D57DaqNkiYpev2eVCnqJosFnkBc7oSAko6mmdxuNsK1B
+DMgLK9qdiTTUNky86fvK2YCkjfZKwb28NZVarKeznGHM
+DPYebqo8aENmMvsfV1KTzC3ioDdkMfPWQBGQh9oFaykM
+DntSoDdKXsNhpBENHcZ8MBV53kpbN5UMMBPFpB8njNvh
+EYrETyDEecgmXWtxj5N3jmfnyERUw5nTvRHkS3vbgaKc
+EbU6nHFGnEfbYd97Qti6iro8LxQDuczbdeQpm3KCemSy
+Ehy81DVGsnSYPnGVL1eVVPwCETNiC64DK4Zcah91n267
+Ek4qFcKHEewGcTmQVrxDksM819vunGn5NTFXQAe276EY
+EwB9CzVEbUyRV53r6RcaLPCLja9WsK3pNVd5sYb4H57u
+EzqJ8cza2Y1N8nVmeCCPQuS12g1sRy4NrZYmHvAsuLon
+F8AnCzA5ptNBALXmJwQF5p3deVCc3nHKBJApwUBwY16W
+FYTcjqYy4BkMGXU8jmW9k1RT7KHd6TZYnvPSsbaAqtQ9
+FqALwHxp6hia6XwRjvf4iLA3F3C5wvBvE3y8xZknW6fs
+G3g8rEB5ryiyBVyJLQdx2FcPp8y3tpZmHY28MGSLSNtm
+GFhD3aRJfVahtTZz6WzLsFww3n712tcAWQbVvHCAvBgB
+GPng2v5w4KSUdVDpEnfh2m7STjdvEcfxN3E1iNMfZPcL
+GmNx62eH4Pg1B8i6sy6Pefx7p14VjpnqxfLHkdQzJqRT
+GmQss651WVS3SW5XrGVvocEj26g83XBaq8EQfDqEBsg5
+GomBMqdn6ppq2RQ5We6ztv19i2fDr6oYH6hRHYJj4hnQ
+GqbKgQbf13jJZEKDSNjLAbvuR76LPt7t5G4hhZMnLe4e
+HGqsTNyESeeg9st3Y2cyLBFBboaWZqi9fGnnUqDLPQuM
+HYkYHLx1vA7RLycHgeNAgwbaiXtY3myZwTxpVYYmEYFF
+WLSQBHXDJBvor7WVFWN85eubpS7Q7DtcwLaKg5zhDGz	ruggé
+kzSEBCwkaQGP18T5G2i1Gnjh4fQmjLqcYkoBEMdndP4	ruggé
+yR6hmLf9rMdRgQSwpRQGX8Y7KwNpMbfwD22GyQD5Ycy	ruggé
