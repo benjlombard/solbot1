@@ -436,16 +436,24 @@ def get_time_filter_options():
         "🔵 Dernières 24 heures": 86400
     }
 
-def format_token_db_added_time(db_timestamp):  # ← Le paramètre s'appelle db_timestamp
-    """Formate le temps d'ajout du token dans la DB"""
-    if db_timestamp is None or pd.isna(db_timestamp):  # ← Utiliser db_timestamp
+def format_token_db_added_time(db_timestamp):
+    """Formate le temps d'ajout du token dans la DB (gère UTC -> Local)"""
+    if db_timestamp is None or pd.isna(db_timestamp):
         return "❓ Inconnu"
     
     try:
-        # Convertir le string datetime en objet datetime
-        creation_time = datetime.strptime(str(db_timestamp), '%Y-%m-%d %H:%M:%S')  # ← Utiliser db_timestamp
-        now = datetime.now(datetime.timezone.utc)
-        time_diff = now - creation_time
+        # Convertir le string datetime UTC en objet datetime
+        creation_time_utc = datetime.strptime(str(db_timestamp), '%Y-%m-%d %H:%M:%S')
+        
+        # Ajouter timezone UTC
+        creation_time_utc = creation_time_utc.replace(tzinfo=timezone.utc)
+        
+        # Convertir en heure locale
+        creation_time_local = creation_time_utc.astimezone()
+        
+        # Comparer avec l'heure locale actuelle
+        now_local = datetime.now()
+        time_diff = now_local - creation_time_local.replace(tzinfo=None)
         
         if time_diff.total_seconds() < 300:  # 5 minutes
             minutes = int(time_diff.total_seconds() / 60)
@@ -465,8 +473,8 @@ def format_token_db_added_time(db_timestamp):  # ← Le paramètre s'appelle db_
         else:
             days = int(time_diff.days)
             return f"⚪ Ajouté il y a {days}j"
-    except:
-        return "❓ Erreur"
+    except Exception as e:
+        return f"❓ Erreur: {str(e)}"
 
 def format_token_creation_time(timestamp):
     """Formate le temps de création du token de manière lisible"""
@@ -836,6 +844,107 @@ def display_detection_analysis_chart(overview_df, analyzer):
                     st.info("ℹ️ No clear correlation")
 
 
+def filter_tokens_by_db_creation_time(filtered_df, time_limit_seconds):
+    """
+    Filtre les tokens par leur temps de création dans la DB
+    """
+    if time_limit_seconds is None:
+        return filtered_df
+    
+    if 'token_db_created_at' not in filtered_df.columns:
+        st.sidebar.error("❌ Colonne 'token_db_created_at' introuvable!")
+        return filtered_df
+    
+    now_local  = datetime.now()
+    
+    def is_recent_token_db(created_at_str):
+        if pd.isna(created_at_str):
+            return False
+        try:
+            # Convertir le string datetime en objet datetime
+            token_time_utc = datetime.strptime(str(created_at_str), '%Y-%m-%d %H:%M:%S')
+            
+            # Ajouter timezone UTC
+            token_time_utc = token_time_utc.replace(tzinfo=timezone.utc)
+            
+            # Convertir en heure locale
+            token_time_local = token_time_utc.astimezone()
+            
+            # Calculer la différence avec l'heure locale
+            time_diff_seconds = (now_local - token_time_local.replace(tzinfo=None)).total_seconds()
+            
+            return time_diff_seconds <= time_limit_seconds
+        except Exception as e:
+            return False
+    
+    # Debug: analyser les timestamps avant filtrage
+    st.sidebar.write(f"**🔍 DEBUG Filtre temporel:**")
+    st.sidebar.write(f"Limite: {time_limit_seconds} secondes ({time_limit_seconds/60:.1f} min)")
+    st.sidebar.write(f"Tokens avant filtre: {len(filtered_df)}")
+    
+    # Examiner quelques valeurs pour debug
+    sample_values = filtered_df['token_db_created_at'].dropna().head(3).tolist()
+    st.sidebar.write(f"Échantillon timestamps: {sample_values}")
+    
+    # Compter les tokens récents
+    recent_mask = filtered_df['token_db_created_at'].apply(is_recent_token_db)
+    recent_count = recent_mask.sum()
+    
+    st.sidebar.write(f"Tokens récents détectés: {recent_count}")
+    
+    # Analyser la répartition temporelle pour debug
+    time_analysis = []
+    for created_at_str in filtered_df['token_db_created_at'].dropna().head(5):
+        try:
+            token_time = datetime.strptime(str(created_at_str), '%Y-%m-%d %H:%M:%S')
+            time_diff_seconds = (current_time - token_time).total_seconds()
+            time_diff_minutes = time_diff_seconds / 60
+            is_recent = time_diff_seconds <= time_limit_seconds
+            time_analysis.append(f"{'✅' if is_recent else '❌'} {created_at_str} ({time_diff_minutes:.1f}min ago)")
+        except Exception as e:
+            time_analysis.append(f"❌ {created_at_str} (erreur)")
+    
+    st.sidebar.write(f"**⏰ Analyse détaillée:**")
+    for analysis in time_analysis:
+        st.sidebar.write(analysis)
+    
+    # Appliquer le filtre
+    filtered_result = filtered_df[recent_mask].copy()
+    
+    st.sidebar.write(f"**📊 Résultat:**")
+    st.sidebar.write(f"Tokens filtrés: {len(filtered_result)}")
+    
+    return filtered_result
+
+# ===== FONCTION POUR COMPTER LES TOKENS RÉCENTS =====
+
+def count_recent_tokens_for_display(overview_df, time_limit_seconds):
+    """
+    Compte les tokens récents pour l'affichage dans les métriques
+    """
+    if time_limit_seconds is None:
+        return 0
+    
+    now_local  = datetime.now()
+    count = 0
+    
+    for created_at_str in overview_df['token_db_created_at'].dropna():
+        try:
+            token_time_utc = datetime.strptime(str(created_at_str), '%Y-%m-%d %H:%M:%S')
+            token_time_utc = token_time_utc.replace(tzinfo=timezone.utc)
+            
+            # Convertir en heure locale
+            token_time_local = token_time_utc.astimezone()
+            
+            # Calculer différence avec heure locale
+            time_diff_seconds = (now_local - token_time_local.replace(tzinfo=None)).total_seconds()
+            
+            if time_diff_seconds <= time_limit_seconds:
+                count += 1
+        except:
+            continue
+    
+    return count
 
 
 def add_transaction_analytics_help():
@@ -1052,22 +1161,8 @@ def main():
         with col8:
             # Affichage du compteur de tokens récents
             if time_limit_seconds:
-                current_time = datetime.utcnow()  # ← CHANGEMENT ICI
-                
-                def count_recent_tokens_db():
-                    count = 0
-                    for created_at_str in overview_df['token_db_created_at']:
-                        if pd.notna(created_at_str):
-                            try:
-                                token_time = datetime.strptime(str(created_at_str), '%Y-%m-%d %H:%M:%S')
-                                if (current_time - token_time).total_seconds() <= time_limit_seconds:
-                                    count += 1
-                            except:
-                                pass
-                    return count
-                
-                recent_count = count_recent_tokens_db()
-                
+                recent_count = count_recent_tokens_for_display(overview_df, time_limit_seconds)
+    
                 st.metric(
                     "🔥 Ajoutés DB récents",
                     recent_count,
@@ -1078,104 +1173,8 @@ def main():
 
         if time_limit_seconds:
             before_time_filter = len(filtered_df)
-            # CORRECTION : Utiliser UTC au lieu de l'heure locale
-            current_time = datetime.utcnow()  # ← CHANGEMENT ICI
+            filtered_df = filter_tokens_by_db_creation_time(filtered_df, time_limit_seconds)
             
-            st.sidebar.write(f"**🔍 DEBUG Filtre temporel:**")
-            st.sidebar.write(f"Limite: {time_limit_seconds} secondes ({selected_time_filter})")
-            st.sidebar.write(f"Heure actuelle UTC: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")  # ← CHANGEMENT ICI
-            
-            # Vérifier si la colonne existe
-            if 'token_db_created_at' not in filtered_df.columns:
-                st.sidebar.error("❌ Colonne 'token_db_created_at' introuvable!")
-                st.sidebar.write(f"Colonnes disponibles: {list(filtered_df.columns)}")
-            else:
-                st.sidebar.write(f"✅ Colonne 'token_db_created_at' trouvée")
-                
-                # Examiner quelques valeurs
-                sample_values = filtered_df['token_db_created_at'].head(3).tolist()
-                st.sidebar.write(f"Échantillon de valeurs: {sample_values}")
-                
-                # Compter les valeurs non nulles
-                non_null_count = filtered_df['token_db_created_at'].notna().sum()
-                st.sidebar.write(f"Valeurs non nulles: {non_null_count}/{len(filtered_df)}")
-                
-                # Analyser les temps pour comprendre la répartition
-                if non_null_count > 0:
-                    times_analysis = []
-                    for created_at_str in filtered_df['token_db_created_at'].dropna().head(5):
-                        try:
-                            token_time = datetime.strptime(str(created_at_str), '%Y-%m-%d %H:%M:%S')
-                            time_diff_seconds = (current_time - token_time).total_seconds()
-                            time_diff_minutes = time_diff_seconds / 60
-                            times_analysis.append(f"{created_at_str} -> {time_diff_minutes:.1f}min ago")
-                        except:
-                            pass
-                    
-                    st.sidebar.write(f"**⏰ Analyse des temps (UTC):**")
-                    for analysis in times_analysis:
-                        st.sidebar.write(analysis)
-                    
-                    # Compter par tranche de temps
-                    count_5min = 0
-                    count_30min = 0
-                    count_1h = 0
-                    count_6h = 0
-                    count_24h = 0
-                    
-                    for created_at_str in filtered_df['token_db_created_at'].dropna():
-                        try:
-                            token_time = datetime.strptime(str(created_at_str), '%Y-%m-%d %H:%M:%S')
-                            time_diff_seconds = (current_time - token_time).total_seconds()
-                            
-                            if time_diff_seconds <= 300:  # 5 min
-                                count_5min += 1
-                            if time_diff_seconds <= 1800:  # 30 min
-                                count_30min += 1
-                            if time_diff_seconds <= 3600:  # 1h
-                                count_1h += 1
-                            if time_diff_seconds <= 21600:  # 6h
-                                count_6h += 1
-                            if time_diff_seconds <= 86400:  # 24h
-                                count_24h += 1
-                        except:
-                            pass
-                    
-                    st.sidebar.write(f"**📊 Répartition temporelle (UTC):**")
-                    st.sidebar.write(f"5 min: {count_5min} tokens")
-                    st.sidebar.write(f"30 min: {count_30min} tokens")
-                    st.sidebar.write(f"1h: {count_1h} tokens")
-                    st.sidebar.write(f"6h: {count_6h} tokens")
-                    st.sidebar.write(f"24h: {count_24h} tokens")
-            
-            # Fonction pour vérifier si un token est récent
-            def is_recent_token_db(created_at_str):
-                if pd.isna(created_at_str):
-                    return False
-                try:
-                    token_time = datetime.strptime(str(created_at_str), '%Y-%m-%d %H:%M:%S')
-                    time_diff_seconds = (current_time - token_time).total_seconds()
-                    is_recent = time_diff_seconds <= time_limit_seconds
-                    return is_recent
-                except Exception as e:
-                    return False
-            
-            # Appliquer le filtre
-            if 'token_db_created_at' in filtered_df.columns:
-                time_condition = filtered_df['token_db_created_at'].apply(is_recent_token_db)
-                recent_count = time_condition.sum()
-                st.sidebar.write(f"Tokens récents trouvés: {recent_count}")
-                
-                filtered_df = filtered_df[time_condition]
-                
-                st.sidebar.write(f"**📊 Résultat filtre temporel:**")
-                st.sidebar.write(f"Avant: {before_time_filter} tokens")
-                st.sidebar.write(f"Après: {len(filtered_df)} tokens (exclu {before_time_filter - len(filtered_df)})")
-            else:
-                st.sidebar.error("❌ Impossible d'appliquer le filtre temporel")
-            
-            
-
         before_basic_filters = len(filtered_df)
 
         # Apply filters

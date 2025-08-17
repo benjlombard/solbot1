@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Script de détection et mise à jour des tokens ruggés
+Script de détection et mise à jour des tokens ruggés - VERSION CONTINUE
 Analyse les tokens suspects et confirme les rug pulls avant mise à jour
+Fonctionne en continu avec vérifications périodiques
 Version sans emojis pour compatibilité Windows
 """
 
@@ -11,21 +12,41 @@ from datetime import datetime
 from typing import Set, List, Tuple
 import sys
 import os
+import time
+import signal
+import threading
+from pathlib import Path
+
+# Variables globales pour la gestion du cycle
+running = True
+cycle_count = 0
 
 # Configuration du logging compatible Windows
-log_filename = f'rug_pull_update_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+def setup_logging():
+    """Configuration du système de logging"""
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    
+    log_filename = log_dir / f'rug_pull_continuous_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+    
+    # Configuration du logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filename, encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    return logging.getLogger(__name__)
 
-# Configuration du logger
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_filename, encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-
-logger = logging.getLogger(__name__)
+# Gestionnaire pour arrêt propre
+def signal_handler(signum, frame):
+    """Gestionnaire pour arrêt propre avec Ctrl+C"""
+    global running
+    logger.info("[ARRET] Signal d'arret recu - Arret en cours...")
+    running = False
 
 class RugPullDetector:
     """Détecteur et gestionnaire des rug pulls"""
@@ -33,23 +54,57 @@ class RugPullDetector:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.connection = None
+        self.last_check_time = None
+        self.stats = {
+            'total_cycles': 0,
+            'total_tokens_updated': 0,
+            'total_history_updated': 0,
+            'last_detection_time': None
+        }
         
     def connect(self):
-        """Connexion à la base de données"""
-        try:
-            self.connection = sqlite3.connect(self.db_path)
-            self.connection.row_factory = sqlite3.Row
-            logger.info(f"[OK] Connexion etablie avec {self.db_path}")
-            return True
-        except Exception as e:
-            logger.error(f"[ERREUR] Erreur connexion DB: {e}")
-            return False
+        """Connexion à la base de données avec retry"""
+        max_retries = 3
+        retry_delay = 5
+        
+        for attempt in range(max_retries):
+            try:
+                self.connection = sqlite3.connect(self.db_path, timeout=30.0)
+                self.connection.row_factory = sqlite3.Row
+                # Test de la connexion
+                self.connection.execute("SELECT 1").fetchone()
+                logger.info(f"[OK] Connexion etablie avec {self.db_path}")
+                return True
+            except Exception as e:
+                logger.error(f"[ERREUR] Tentative {attempt + 1}/{max_retries} - Erreur connexion DB: {e}")
+                if attempt < max_retries - 1:
+                    logger.info(f"[RETRY] Nouvelle tentative dans {retry_delay}s...")
+                    time.sleep(retry_delay)
+                else:
+                    logger.error("[ECHEC] Impossible de se connecter après plusieurs tentatives")
+                    return False
     
     def disconnect(self):
         """Fermeture de la connexion"""
         if self.connection:
-            self.connection.close()
-            logger.info("[FERME] Connexion fermee")
+            try:
+                self.connection.close()
+                logger.debug("[FERME] Connexion fermee")
+            except Exception as e:
+                logger.error(f"[ERREUR] Erreur fermeture connexion: {e}")
+    
+    def reconnect_if_needed(self):
+        """Reconnecte si la connexion est fermée"""
+        try:
+            if self.connection is None:
+                return self.connect()
+            # Test de la connexion
+            self.connection.execute("SELECT 1").fetchone()
+            return True
+        except Exception:
+            logger.warning("[RECONNECT] Connexion perdue - Reconnexion...")
+            self.disconnect()
+            return self.connect()
     
     def get_suspect_tokens(self) -> Set[str]:
         """
@@ -139,12 +194,13 @@ class RugPullDetector:
         # Tokens seulement confirmés (cas improbable mais possible)
         only_confirmed = confirmed - suspects
         
-        logger.info("=" * 50)
-        logger.info("[ANALYSE] RESULTATS DES REQUETES:")
-        logger.info(f"   [CIBLE] Tokens a mettre a jour (dans les 2 requetes): {len(to_update)}")
-        logger.info(f"   [EXCLUS] Tokens seulement suspects: {len(only_suspects)}")
-        logger.info(f"   [BIZARR] Tokens seulement confirmes: {len(only_confirmed)}")
-        logger.info("=" * 50)
+        if to_update:
+            logger.info("=" * 50)
+            logger.info("[ANALYSE] NOUVEAUX RUG PULLS DETECTES:")
+            logger.info(f"   [CIBLE] Tokens a mettre a jour: {len(to_update)}")
+            logger.info(f"   [EXCLUS] Tokens seulement suspects: {len(only_suspects)}")
+            logger.info(f"   [BIZARR] Tokens seulement confirmes: {len(only_confirmed)}")
+            logger.info("=" * 50)
         
         return to_update, only_suspects, only_confirmed
     
@@ -173,7 +229,6 @@ class RugPullDetector:
         ÉTAPE 1: Mise à jour de la table tokens
         """
         if not token_addresses:
-            logger.warning("[VIDE] Aucun token a mettre a jour dans la table tokens")
             return 0
         
         logger.info(f"[ETAPE1] Mise a jour table tokens pour {len(token_addresses)} tokens")
@@ -227,7 +282,6 @@ class RugPullDetector:
         ÉTAPE 2: Mise à jour de la table tokens_history
         """
         if not token_addresses:
-            logger.warning("[VIDE] Aucun token a mettre a jour dans tokens_history")
             return 0
         
         logger.info(f"[ETAPE2] Mise a jour table tokens_history pour {len(token_addresses)} tokens")
@@ -268,23 +322,6 @@ class RugPullDetector:
         logger.info(f"[SAUVE] ETAPE 2 terminee: {total_updated} snapshots mis a jour au total")
         return total_updated
     
-    def log_excluded_tokens(self, only_suspects: Set[str], only_confirmed: Set[str]):
-        """Log des tokens exclus avec leurs raisons"""
-        
-        if only_suspects:
-            logger.info(f"[EXCLUS] TOKENS SEULEMENT SUSPECTS ({len(only_suspects)}):")
-            for token in list(only_suspects)[:10]:  # Limiter l'affichage
-                logger.info(f"   [SUSPECT] {token[:12]}... - Liquidite = 0 mais criteres rug incomplets")
-            if len(only_suspects) > 10:
-                logger.info(f"   [INFO] ... et {len(only_suspects) - 10} autres")
-        
-        if only_confirmed:
-            logger.info(f"[BIZARR] TOKENS SEULEMENT CONFIRMES ({len(only_confirmed)}):")
-            for token in list(only_confirmed)[:10]:
-                logger.info(f"   [ETRANGE] {token[:12]}... - Confirme mais pas dans suspects (cas rare)")
-            if len(only_confirmed) > 10:
-                logger.info(f"   [INFO] ... et {len(only_confirmed) - 10} autres")
-    
     def get_token_info(self, token_address: str) -> dict:
         """Récupère les infos d'un token pour les logs"""
         query = """
@@ -296,39 +333,122 @@ class RugPullDetector:
         result = cursor.fetchone()
         return dict(result) if result else {}
     
-    def generate_summary_report(self, to_update: Set[str], tokens_updated: int, history_updated: int):
-        """Génère un rapport de synthèse"""
-        logger.info("=" * 60)
-        logger.info("[RAPPORT] SYNTHESE FINALE")
-        logger.info("=" * 60)
-        logger.info(f"[CIBLE] Tokens identifies pour mise a jour: {len(to_update)}")
-        logger.info(f"[FAIT] Tokens table mise a jour: {tokens_updated}")
-        logger.info(f"[FAIT] Snapshots history mis a jour: {history_updated}")
-        logger.info(f"[DATE] Date traitement: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
+    def log_detection_summary(self, to_update: Set[str], tokens_updated: int, history_updated: int):
+        """Log du résumé de détection"""
         if to_update:
-            logger.info("")
-            logger.info("[RUGGED] TOKENS MARQUES COMME RUGGES:")
-            for token in list(to_update)[:5]:  # Top 5
+            self.stats['last_detection_time'] = datetime.now()
+            self.stats['total_tokens_updated'] += tokens_updated
+            self.stats['total_history_updated'] += history_updated
+            
+            logger.info("[DETECTION] NOUVEAUX RUG PULLS TRAITES:")
+            logger.info(f"   [TOKENS] {tokens_updated} tokens marques comme rugges")
+            logger.info(f"   [HISTORY] {history_updated} snapshots mis a jour")
+            
+            # Afficher quelques exemples
+            for token in list(to_update)[:3]:
                 info = self.get_token_info(token)
                 symbol = info.get('symbol', 'N/A')
-                name = info.get('name', 'Unknown')
-                logger.info(f"   [TOKEN] {token[:12]}... ({symbol} - {name})")
-            if len(to_update) > 5:
-                logger.info(f"   [INFO] ... et {len(to_update) - 5} autres")
-        
-        logger.info("=" * 60)
+                logger.info(f"   [EXEMPLE] {token[:12]}... ({symbol})")
+    
+    def run_detection_cycle(self) -> bool:
+        """Exécute un cycle de détection"""
+        try:
+            # Vérifier la connexion
+            if not self.reconnect_if_needed():
+                return False
+            
+            # Récupération des tokens suspects et confirmés
+            suspects = self.get_suspect_tokens()
+            confirmed = self.get_confirmed_rugs()
+            
+            # Analyse des ensembles
+            to_update, only_suspects, only_confirmed = self.analyze_token_sets(suspects, confirmed)
+            
+            # Mise à jour si des tokens valides
+            if to_update:
+                logger.info("[PHASE] Nouveaux rug pulls detectes - Mise a jour en cours")
+                
+                # ÉTAPE 1: Table tokens
+                tokens_updated = self.update_tokens_table(to_update)
+                
+                # ÉTAPE 2: Table tokens_history
+                history_updated = self.update_tokens_history_table(to_update)
+                
+                # Log du résumé
+                self.log_detection_summary(to_update, tokens_updated, history_updated)
+                
+            else:
+                logger.info(f"[CLEAN] Cycle {self.stats['total_cycles']} - Aucun nouveau rug pull detecte")
+            
+            self.last_check_time = datetime.now()
+            return True
+            
+        except Exception as e:
+            logger.error(f"[ERREUR] Erreur pendant le cycle de detection: {e}")
+            return False
+    
+    def print_status_report(self):
+        """Affiche un rapport de statut périodique"""
+        try:
+            # Statistiques générales
+            cursor = self.connection.execute("SELECT COUNT(*) as total FROM tokens WHERE is_rugged = 1")
+            total_rugged = cursor.fetchone()['total']
+            
+            cursor = self.connection.execute("SELECT COUNT(*) as total FROM tokens")
+            total_tokens = cursor.fetchone()['total']
+            
+            uptime = datetime.now() - start_time
+            
+            logger.info("=" * 60)
+            logger.info("[RAPPORT] STATUT DU SYSTEME")
+            logger.info("=" * 60)
+            logger.info(f"[TEMPS] Demarrage: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"[TEMPS] Uptime: {str(uptime).split('.')[0]}")
+            logger.info(f"[CYCLES] Cycles executes: {self.stats['total_cycles']}")
+            logger.info(f"[DB] Total tokens: {total_tokens}")
+            logger.info(f"[DB] Tokens rugges: {total_rugged}")
+            logger.info(f"[STATS] Tokens rugges detectes: {self.stats['total_tokens_updated']}")
+            logger.info(f"[STATS] Snapshots mis a jour: {self.stats['total_history_updated']}")
+            
+            if self.stats['last_detection_time']:
+                last_detection = self.stats['last_detection_time'].strftime('%Y-%m-%d %H:%M:%S')
+                logger.info(f"[DERNIERE] Derniere detection: {last_detection}")
+            
+            if self.last_check_time:
+                last_check = self.last_check_time.strftime('%H:%M:%S')
+                logger.info(f"[CHECK] Derniere verification: {last_check}")
+            
+            logger.info("=" * 60)
+            
+        except Exception as e:
+            logger.error(f"[ERREUR] Erreur rapport de statut: {e}")
 
 def main():
     """Fonction principale"""
+    global running, cycle_count, start_time, logger
     
     # Configuration
-    DB_PATH = "solana_wallet_monitor.db"  # Ajustez le chemin si nécessaire
+    DB_PATH = "solana_wallet_monitor.db"
+    CHECK_INTERVAL = 30  # secondes
+    STATUS_REPORT_INTERVAL = 300  # 5 minutes
     
-    logger.info("[DEMARR] DETECTION ET MISE A JOUR DES RUG PULLS")
+    # Initialisation du logging
+    logger = setup_logging()
+    start_time = datetime.now()
+    
+    # Gestionnaire de signaux
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    logger.info("[DEMARR] DETECTION RUG PULLS - MODE CONTINU")
+    logger.info("=" * 60)
+    logger.info(f"[CONFIG] Intervalle verification: {CHECK_INTERVAL}s")
+    logger.info(f"[CONFIG] Rapport de statut: {STATUS_REPORT_INTERVAL}s")
+    logger.info(f"[CONFIG] Base de donnees: {DB_PATH}")
+    logger.info(f"[INFO] Utilisez Ctrl+C pour arreter proprement")
     logger.info("=" * 60)
     
-    # Initialisation
+    # Initialisation du détecteur
     detector = RugPullDetector(DB_PATH)
     
     if not detector.connect():
@@ -336,49 +456,53 @@ def main():
         sys.exit(1)
     
     try:
-        # Étape 1: Récupération des tokens suspects et confirmés
-        logger.info("[PHASE1] Analyse des tokens")
-        suspects = detector.get_suspect_tokens()
-        confirmed = detector.get_confirmed_rugs()
+        last_status_report = time.time()
         
-        # Étape 2: Analyse des ensembles
-        to_update, only_suspects, only_confirmed = detector.analyze_token_sets(suspects, confirmed)
-        
-        # Étape 3: Log des tokens exclus
-        detector.log_excluded_tokens(only_suspects, only_confirmed)
-        
-        # Étape 4: Mise à jour si des tokens valides
-        if to_update:
-            logger.info("[PHASE2] Mise a jour des tables")
+        while running:
+            cycle_start = time.time()
+            cycle_count += 1
+            detector.stats['total_cycles'] = cycle_count
             
-            # ÉTAPE 1: Table tokens
-            tokens_updated = detector.update_tokens_table(to_update)
+            # Exécuter le cycle de détection
+            success = detector.run_detection_cycle()
             
-            # ÉTAPE 2: Table tokens_history
-            history_updated = detector.update_tokens_history_table(to_update)
+            if not success:
+                logger.error("[ECHEC] Echec du cycle de detection - Tentative suivante dans 30s")
             
-            # Rapport final
-            detector.generate_summary_report(to_update, tokens_updated, history_updated)
+            # Rapport de statut périodique
+            current_time = time.time()
+            if current_time - last_status_report >= STATUS_REPORT_INTERVAL:
+                detector.print_status_report()
+                last_status_report = current_time
             
-        else:
-            logger.info("[PROPRE] Aucun nouveau rug pull detecte - Base de donnees a jour")
+            # Calcul du temps d'attente
+            cycle_duration = time.time() - cycle_start
+            wait_time = max(0, CHECK_INTERVAL - cycle_duration)
             
-            # Afficher statistiques des tokens déjà ruggés
-            try:
-                cursor = detector.connection.execute("SELECT COUNT(*) as total FROM tokens WHERE is_rugged = 1")
-                total_rugged = cursor.fetchone()['total']
-                logger.info(f"[STATS] Tokens deja marques comme rugges: {total_rugged}")
-            except Exception as e:
-                logger.error(f"[ERREUR] Impossible de recuperer les stats: {e}")
+            logger.info(f"[CYCLE] {cycle_count} termine en {cycle_duration:.1f}s - Attente {wait_time:.1f}s")
+            
+            # Attente avec vérification d'arrêt
+            end_time = time.time() + wait_time
+            while time.time() < end_time and running:
+                time.sleep(1)
     
+    except KeyboardInterrupt:
+        logger.info("[ARRET] Interruption clavier detectee")
     except Exception as e:
         logger.error(f"[CRITIQUE] Erreur critique: {e}")
-        sys.exit(1)
-    
     finally:
+        running = False
         detector.disconnect()
-    
-    logger.info("[FINI] Script execute avec succes")
+        
+        # Rapport final
+        uptime = datetime.now() - start_time
+        logger.info("=" * 60)
+        logger.info("[FINAL] ARRET DU SYSTEME")
+        logger.info(f"[STATS] Cycles executes: {cycle_count}")
+        logger.info(f"[STATS] Uptime total: {str(uptime).split('.')[0]}")
+        logger.info(f"[STATS] Tokens rugges detectes: {detector.stats['total_tokens_updated']}")
+        logger.info("[FINI] Arret propre du script")
+        logger.info("=" * 60)
 
 if __name__ == "__main__":
     main()

@@ -318,7 +318,8 @@ class TokenMetricsCollector:
                 cursor.execute("""
                     SELECT COUNT(*) FROM tokens 
                     WHERE last_price_update < ? 
-                    AND is_dead = 0
+                    AND (is_dead = 0)
+                    AND (is_rugged = 0)
                 """, (stale_cutoff,))
                 health.tokens_stale = cursor.fetchone()[0]
                 
@@ -338,6 +339,7 @@ class TokenMetricsCollector:
                     WHERE updated_at > datetime('now', '-5 minutes')
                     AND no_data_available != 1 
                     AND (symbol NOT LIKE 'UNK%' OR symbol IS NULL)
+                    AND (is_rugged = 0)
                 """)
                 health.tokens_recently_updated = cursor.fetchone()[0]
                 
@@ -348,6 +350,7 @@ class TokenMetricsCollector:
                     WHERE updated_at < datetime('now', '-5 minutes')
                     AND no_data_available != 1 
                     AND (symbol NOT LIKE 'UNK%' OR symbol IS NULL)
+                    AND (is_rugged = 0)
                 """)
                 health.tokens_outdated = cursor.fetchone()[0]
                 

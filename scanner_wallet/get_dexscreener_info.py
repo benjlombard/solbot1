@@ -29,10 +29,10 @@ import aiohttp
 CONFIG = {
     'db_path': 'solana_wallet_monitor.db',
     'api_rate_limit': 1.5,  # seconds between API calls
-    'batch_size':500,       # tokens to process per batch
-    'update_interval': 45,  # seconds between sync cycles
-    'price_update_interval': 30,  # 1 minute for price updates
-    'price_update_limit': 300, #number of tokens max for update per cycle
+    'batch_size':120,       # tokens to process per batch
+    'update_interval': 60,  # seconds between sync cycles
+    'price_update_interval': 45,  # 1 minute for price updates
+    'price_update_limit': 150, #number of tokens max for update per cycle
     'dashboard_update_interval': 120, # 2.5 minutes pour dashboard tokens
     'max_retries': 5,
     'pumpfun_rate_limit': 1.2,  # Rate limit spécifique Pump.fun
@@ -2263,6 +2263,7 @@ class TokenSyncService:
                 AND (no_data_available = 0 OR no_data_available IS NULL)
                 AND (failed_attempts < ? OR failed_attempts IS NULL)
                 AND is_dead = 0
+                AND (is_rugged = 0 OR is_rugged IS NULL)
                 ORDER BY last_price_update ASC NULLS FIRST
                 LIMIT ?
                 """
@@ -2289,6 +2290,7 @@ class TokenSyncService:
                 SELECT address 
                 FROM tokens 
                 WHERE is_dead = 0
+                AND (is_rugged = 0 OR is_rugged IS NULL)
                 AND (last_historized_at < ? OR last_historized_at IS NULL)
                 AND (price_usd > 0 OR market_cap > 0)
                 ORDER BY last_historized_at ASC NULLS FIRST
@@ -2820,6 +2822,7 @@ class TokenSyncService:
                 FROM tokens t
                 WHERE t.address IN ({placeholders})
                 AND t.is_dead = 0
+                AND (t.is_rugged = 0 OR t.is_rugged IS NULL)
                 AND (t.no_data_available = 0 OR t.no_data_available IS NULL)
                 AND (t.failed_attempts < ? OR t.failed_attempts IS NULL)
                 AND (
@@ -2947,6 +2950,7 @@ class TokenSyncService:
                 AND (metadata_source IS NULL OR metadata_source NOT LIKE '%pumpfun%')
                 AND (created_at >= datetime('now', '-7 days'))
                 AND is_dead = 0
+                AND (is_rugged = 0 OR is_rugged IS NULL)
                 ORDER BY created_at DESC
                 LIMIT ?
                 """
