@@ -159,7 +159,7 @@ class TokenAnalyzer:
             FROM transactions t
             WHERE t.token_mint IS NOT NULL AND t.token_mint != ''
             GROUP BY t.token_mint
-            HAVING total_buys > 0
+            HAVING total_buys >= 0
         ),
         enriched_stats AS (
             SELECT 
@@ -1178,15 +1178,14 @@ def main():
         before_basic_filters = len(filtered_df)
 
         # Apply filters
-        filtered_df = filtered_df[
-            (filtered_df['unique_buyers'] >= min_buyers) &
-            (
-                (filtered_df['volume_ratio'].fillna(0) >= min_volume_ratio) |  # Condition normale
-                (filtered_df['volume_ratio'] < 0)
-            ) &
-            (filtered_df['recent_activity_pct'].fillna(0) >= min_recent_activity)
-            #(filtered_df['token_age_hours'] <= max_age_hours)
-        ].copy()
+        # filtered_df = filtered_df[
+        #     (filtered_df['unique_buyers'] >= min_buyers) &
+        #     (
+        #         (filtered_df['volume_ratio'].fillna(0) >= min_volume_ratio) |  # Condition normale
+        #         (filtered_df['volume_ratio'] < 0)
+        #     ) &
+        #     (filtered_df['recent_activity_pct'].fillna(0) >= min_recent_activity)
+        # ].copy()
 
         
         # Detection speed filter

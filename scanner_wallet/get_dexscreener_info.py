@@ -31,7 +31,7 @@ CONFIG = {
     'api_rate_limit': 1.5,  # seconds between API calls
     'batch_size':120,       # tokens to process per batch
     'update_interval': 60,  # seconds between sync cycles
-    'price_update_interval': 45,  # 1 minute for price updates
+    'price_update_interval': 60,  # 1 minute for price updates
     'price_update_limit': 150, #number of tokens max for update per cycle
     'dashboard_update_interval': 120, # 2.5 minutes pour dashboard tokens
     'max_retries': 5,
@@ -479,6 +479,7 @@ class TokenData:
     liquidity_usd: float = 0.0
     liquidity_sol: float = 0.0
     fdv: float = 0.0
+    rug_risk_score: float = 50.0
     metadata_source: str = None
     original_address: str = None  # For tracking pair -> token conversion
 
@@ -1335,8 +1336,8 @@ class TokenSyncService:
                             creator_address, symbol, name, decimals, logo_uri, is_verified, metadata_source,
                             snapshot_timestamp, previous_snapshot_id,
                             price_delta_usd, market_cap_delta, volume_24h_delta, holder_count_delta,
-                            rug_risk_score_delta, top_holder_percentage_delta, insider_holders_delta
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            rug_risk_score_delta, top_holder_percentage_delta, insider_holders_delta,created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))
                     """, (
                         token_address,
                         snapshot_data['price_usd'], snapshot_data['market_cap'], snapshot_data['fdv'],
@@ -2397,6 +2398,58 @@ class TokenSyncService:
             self.logger.error(f"Error creating token stub {token_address}: {e}")
             return False
 
+    def debug_historization_status(self):
+        """Méthode pour debugger l'état de l'historisation"""
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Dernières historisations
+                cursor.execute("""
+                    SELECT token_address, snapshot_timestamp, price_usd, market_cap
+                    FROM tokens_history 
+                    ORDER BY snapshot_timestamp DESC 
+                    LIMIT 10
+                """)
+                
+                recent_hist = cursor.fetchall()
+                
+                self.logger.info("=== 📊 DERNIÈRES HISTORISATIONS ===")
+                for row in recent_hist:
+                    hist_time = datetime.fromtimestamp(row['snapshot_timestamp'])
+                    self.logger.info(f"Token: {row['token_address'][:8]}..., Time: {hist_time}, Prix: ${row['price_usd']}, MC: ${row['market_cap']}")
+                
+                # Tokens candidats à l'historisation
+                cursor.execute("""
+                    SELECT address, symbol, price_usd, market_cap, last_historized_at,
+                        (strftime('%s', 'now') - COALESCE(last_historized_at, 0)) as seconds_since_hist
+                    FROM tokens 
+                    WHERE (price_usd > 0 OR market_cap > 0)
+                    AND is_dead = 0
+                    ORDER BY seconds_since_hist DESC
+                    LIMIT 10
+                """)
+                
+                candidates = cursor.fetchall()
+                
+                self.logger.info("=== 🎯 CANDIDATS HISTORISATION ===")
+                for row in candidates:
+                    self.logger.info(f"Token: {row['address'][:8]}... ({row['symbol']}), Prix: ${row['price_usd']}, Dernière hist: {row['seconds_since_hist']}s ago")
+                
+                # Stats générales
+                cursor.execute("SELECT COUNT(*) as total FROM tokens_history WHERE snapshot_timestamp > ?", (int(time.time()) - 3600,))
+                hist_last_hour = cursor.fetchone()['total']
+                
+                cursor.execute("SELECT COUNT(*) as total FROM tokens WHERE last_historized_at > ?", (int(time.time()) - 3600,))
+                tokens_hist_last_hour = cursor.fetchone()['total']
+                
+                self.logger.info(f"=== 📈 STATS HISTORISATION ===")
+                self.logger.info(f"Historisations dernière heure: {hist_last_hour}")
+                self.logger.info(f"Tokens historisés dernière heure: {tokens_hist_last_hour}")
+                
+        except Exception as e:
+            self.logger.error(f"Erreur debug historization: {e}")
+
     def upsert_token(self, token_data: TokenData) -> bool:
         """Insert or update token in database with historization - enhanced version with retry logic"""
         max_retries = 3
@@ -2437,8 +2490,8 @@ class TokenSyncService:
                         # Historiser seulement si le token a déjà des données réelles
                         if existing_row and (existing_row['price_usd'] > 0 or existing_row['market_cap'] > 0):
                             # Appeler historize_token_data qui a maintenant sa propre logique de retry
-                            self.historize_token_data(token_data.address, token_data)
-                            if self.historize_token_data(token_data.address, token_data):
+                            historization_success = self.historize_token_data(token_data.address, token_data)
+                            if historization_success:
                                 # ✅ AJOUT: Logger l'historisation automatique
                                 self.cycle_logger.record_operation('historized_tokens', 1)
                         else:
@@ -2747,7 +2800,7 @@ class TokenSyncService:
                     FROM transactions t
                     WHERE t.token_mint IS NOT NULL AND t.token_mint != ''
                     GROUP BY t.token_mint
-                    HAVING total_buys > 0
+                    HAVING total_buys >= 0
                 ),
                 enriched_stats AS (
                     SELECT 
@@ -4036,6 +4089,8 @@ class TokenSyncService:
             self.print_api_statistics()
             self.log_api_rate_usage()
 
+            
+
             # 2. Update existing token prices
             prices_updated = self.update_existing_prices()
             self.logger.debug("=== STATS API APRÈS PRIX ===")
@@ -4046,6 +4101,8 @@ class TokenSyncService:
             total_tokens_processed = new_tokens_updated + prices_updated
             self.logger.debug(f"Sync cycle completed: {new_tokens_updated} new, {prices_updated} price updates...")
             
+            self.debug_historization_status()
+
             # # 3. Run historization cycle (every few cycles)
             # if not hasattr(self, 'cycle_count'):
             #     self.cycle_count = 0

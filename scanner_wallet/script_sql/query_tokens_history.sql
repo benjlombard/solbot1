@@ -21,8 +21,8 @@ SELECT
 FROM tokens_history 
 WHERE snapshot_timestamp = (SELECT MAX(snapshot_timestamp) FROM tokens_history)
     AND momentum_score > 70
-    --AND risk_score < 30
-    --AND rug_risk_score < 20
+    AND risk_score < 30
+    AND rug_risk_score < 20
     AND price_change_24h > 10
     AND volume_24h > 10000
     AND liquidity_mc_ratio > 0.1
