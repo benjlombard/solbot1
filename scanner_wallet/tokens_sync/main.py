@@ -26,8 +26,8 @@ except ImportError as e:
     sys.exit(1)
 
 # Import our modular components
-from token_sync.services.sync_service import create_sync_service
-from token_sync.database.connection import DatabaseConnection
+from tokens_sync.services.sync_service import create_sync_service
+from tokens_sync.database.connection import DatabaseConnection
 
 
 class TokenSyncApplication:
