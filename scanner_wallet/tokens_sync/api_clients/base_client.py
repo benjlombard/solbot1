@@ -53,6 +53,8 @@ class BaseApiClient(ABC):
         self.rate_limit = rate_limit or RateLimitConfig()
         self.logger = logger or logging.getLogger(f"{__name__}.{api_name}")
         
+        self.api_tracker = api_tracker
+
         # Rate limiting tracking
         self._call_history: List[float] = []
         self._last_call_time = 0.0
@@ -209,7 +211,16 @@ class BaseApiClient(ABC):
                 if not api_response.success and self._should_retry(api_response, attempt, max_retries):
                     continue
                 
-                return api_response
+                if self.api_tracker:
+                    self.api_tracker.record_call(
+                        api_name=f"{self.api_name}_{endpoint}",
+                        duration=duration,
+                        success=(response.status_code == 200),
+                        http_status=response.status_code,
+                        error_msg=response.text if response.status_code != 200 else None
+                    )
+                
+                return self._handle_response(response, duration)
                 
             except requests.exceptions.Timeout as e:
                 self.logger.warning(f"Timeout on attempt {attempt + 1}: {e}")
