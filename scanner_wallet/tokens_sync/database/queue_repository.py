@@ -331,7 +331,42 @@ class QueueRepository:
         """
         with self.db.get_connection_context() as conn:
             cursor = conn.cursor()
+
+            # LOG: Vérification de l'état initial
+            cursor.execute("""
+                SELECT status, processing_node, created_at, processing_started_at
+                FROM token_processing_queue
+                WHERE token_address = ?
+            """, (token_address,))
             
+            current_record = cursor.fetchone()
+            
+            if not current_record:
+                self.logger.warning(f"🚨 Queue state error: {token_address[:8]}... not found in queue at all")
+                return False
+            
+            current_status, current_node, created_at, started_at = current_record
+            
+            # LOG: État actuel détaillé
+            self.logger.debug(f"📋 Queue state check: {token_address[:8]}... status={current_status}, node={current_node}, expected_node={processing_node}")
+            
+            if current_status != 'processing':
+                self.logger.warning(f"🚨 Queue state error: {token_address[:8]}... in state '{current_status}', expected 'processing'")
+                return False
+            
+            if current_node != processing_node:
+                self.logger.warning(f"🚨 Queue node mismatch: {token_address[:8]}... node='{current_node}', expected='{processing_node}'")
+                return False
+            
+            # LOG: Durée de processing
+            if started_at:
+                try:
+                    start_time = datetime.fromisoformat(started_at)
+                    processing_duration = (datetime.now() - start_time).total_seconds()
+                    self.logger.debug(f"⏱️ Processing duration: {token_address[:8]}... took {processing_duration:.1f}s")
+                except:
+                    pass
+
             current_time = datetime.now().isoformat()
             
             if success:
@@ -346,7 +381,10 @@ class QueueRepository:
                     AND processing_node = ?
                 """, (current_time, token_address, processing_node))
                 
-                self.logger.debug(f"✅ Marked {token_address[:8]}... as completed")
+                if cursor.rowcount > 0:
+                    self.logger.debug(f"✅ Queue updated: {token_address[:8]}... marked as completed")
+                else:
+                    self.logger.error(f"❌ Queue update failed: {token_address[:8]}... no rows affected")
                 
             else:
                 # Get current retry info

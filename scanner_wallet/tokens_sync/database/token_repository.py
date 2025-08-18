@@ -6,6 +6,7 @@ import time
 import logging
 from typing import List, Dict, Optional, Set, Tuple
 from datetime import datetime, timedelta
+import sqlite3
 
 from .connection import DatabaseConnection, db_retry
 from ..models.token_data import TokenData, QueueItem
@@ -347,7 +348,6 @@ class TokenRepository:
             with self.db.get_connection_context() as conn:
                 cursor = conn.cursor()
                 
-                # CORRECTION: Gestion des erreurs de contraintes
                 try:
                     query = """
                     INSERT INTO tokens (
@@ -364,7 +364,7 @@ class TokenRepository:
                         9,
                         0.0,
                         1,
-                        0,
+                        0,  # Pas immédiatement marqué comme no_data
                         int(time.time()),
                         "stub"
                     ))
@@ -374,8 +374,9 @@ class TokenRepository:
                     return True
                     
                 except sqlite3.IntegrityError as e:
-                    self.logger.warning(f"Integrity error creating stub for {token_address}: {e}")
-                    return False
+                    # Token existe déjà, marquer comme no_data au lieu d'échouer
+                    self.logger.debug(f"Token {token_address[:8]}... already exists, marking as no_data")
+                    return self.mark_token_no_data(token_address)
                     
         except Exception as e:
             self.logger.error(f"Error creating token stub {token_address}: {e}")

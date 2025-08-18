@@ -149,21 +149,49 @@ class DexScreenerClient(BaseApiClient):
             self.logger.warning(f"Batch size {len(batch)} exceeds DexScreener limit of 30")
             return {}
         
+        if not batch:
+            return {}
+
+        valid_addresses = []
+        for addr in batch:
+            if addr and len(addr.strip()) >= 32:  # Adresse Solana valide
+                valid_addresses.append(addr.strip())
+            else:
+                self.logger.debug(f"Invalid token address skipped: {addr}")
+        
+        if not valid_addresses:
+            self.logger.warning("No valid addresses in batch")
+            return {}
         # CORRECTION: Construire l'URL correctement
-        addresses_str = ','.join(batch)
+        addresses_str = ','.join(valid_addresses)
         
         # Vérifier la longueur de l'URL pour éviter les erreurs 400
         test_url = f"{self.base_url}/dex/tokens/{addresses_str}"
-        if len(test_url) > 2000:  # Limite URL
+        if len(test_url) > 1800:  # Limite URL
             self.logger.warning(f"URL too long ({len(test_url)} chars), splitting batch")
-            return {}
+            mid = len(valid_addresses) // 2
+            batch1 = valid_addresses[:mid]
+            batch2 = valid_addresses[mid:]
+            
+            result1 = await self._fetch_batch_async(session, batch1)
+            result2 = await self._fetch_batch_async(session, batch2)
+            
+            result1.update(result2)
+            return result1
         
         response = await self.make_async_request(session, f"dex/tokens/{addresses_str}")
         
-        if response.success:
-            return self._parse_batch_response(batch, response.data)
-        else:
-            self.logger.warning(f"Batch request failed: {response.error_message}")
+        try:
+            response = await self.make_async_request(session, f"dex/tokens/{addresses_str}")
+            
+            if response.success and response.data:
+                return self._parse_batch_response(valid_addresses, response.data)
+            else:
+                self.logger.debug(f"Batch request failed: {response.error_message}")
+                return {}
+                
+        except Exception as e:
+            self.logger.warning(f"Batch request exception: {e}")
             return {}
     
     def get_pair_data(self, pair_address: str) -> Optional[Dict]:

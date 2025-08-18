@@ -135,7 +135,7 @@ class BatchProcessor:
         results = {}
         
         # CORRECTION: Réduire la concurrence pour éviter les timeouts
-        semaphore = asyncio.Semaphore(3)  # Réduit de 5 à 3
+        semaphore = asyncio.Semaphore(2)  # Réduit de 5 à 3
         
         async def fetch_single_token(token_addr: str) -> Tuple[str, Optional[TokenData]]:
             async with semaphore:
@@ -143,7 +143,7 @@ class BatchProcessor:
                     # CORRECTION: Timeout plus court pour les requêtes individuelles
                     response = await asyncio.wait_for(
                         self.dex_client.make_async_request(session, f"dex/tokens/{token_addr}"),
-                        timeout=8.0  # Réduit de 30s à 8s
+                        timeout=15.0  # Réduit de 30s à 8s
                     )
                     
                     if response.success and response.data:
@@ -165,7 +165,7 @@ class BatchProcessor:
                     return token_addr, None
         
         # CORRECTION: Traitement par plus petits groupes
-        chunk_size = 10
+        chunk_size = 5
         for i in range(0, len(token_addresses), chunk_size):
             chunk = token_addresses[i:i + chunk_size]
             tasks = [fetch_single_token(addr) for addr in chunk]
@@ -173,7 +173,7 @@ class BatchProcessor:
             try:
                 chunk_results = await asyncio.wait_for(
                     asyncio.gather(*tasks, return_exceptions=True),
-                    timeout=30.0
+                    timeout=45.0
                 )
                 
                 for result in chunk_results:
@@ -186,8 +186,16 @@ class BatchProcessor:
             except asyncio.TimeoutError:
                 self.logger.warning(f"Chunk timeout for {len(chunk)} tokens")
                 
+                for addr in chunk:
+                    try:
+                        individual_result = await fetch_single_token(addr)
+                        if individual_result[1]:
+                            results[individual_result[0]] = individual_result[1]
+                    except Exception as e:
+                        self.logger.debug(f"Final fallback failed for {addr}: {e}")
+
             # Pause entre chunks pour éviter le rate limiting
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
         
         return results
     
@@ -288,23 +296,40 @@ class BatchProcessor:
             True if handled successfully, False otherwise
         """
         try:
-            # Create stub entry or mark as no data
-            success = self.token_repo.create_token_stub(token_address)
-            
-            # Update queue status
-            if success:
-                self.queue_repo.update_token_status(token_address, success=True)
-                self.logger.debug(f"📝 Created stub for {token_address[:8]}...")
+            # CORRECTION: Vérifier d'abord si le token existe déjà
+            if self.token_repo.token_exists(token_address):
+                # Token existe, juste marquer comme échec
+                success = self.token_repo.mark_token_no_data(token_address, increment_attempts=True)
+                
+                if success:
+                    self.queue_repo.update_token_status(token_address, success=True)
+                    self.logger.debug(f"📝 Marked existing token as no data: {token_address[:8]}...")
+                else:
+                    self.queue_repo.update_token_status(
+                        token_address, 
+                        success=False, 
+                        error_message="Failed to mark as no data"
+                    )
+                    self.logger.warning(f"❌ Failed to mark existing token: {token_address[:8]}...")
+                
+                return success
             else:
-                self.queue_repo.update_token_status(
-                    token_address, 
-                    success=False, 
-                    error_message="Failed to create stub"
-                )
-                self.logger.warning(f"❌ Failed to create stub for {token_address[:8]}...")
-            
-            return success
-            
+                # Token n'existe pas, créer un stub
+                success = self.token_repo.create_token_stub(token_address)
+                
+                if success:
+                    self.queue_repo.update_token_status(token_address, success=True)
+                    self.logger.debug(f"📝 Created stub for {token_address[:8]}...")
+                else:
+                    self.queue_repo.update_token_status(
+                        token_address, 
+                        success=False, 
+                        error_message="Failed to create stub"
+                    )
+                    self.logger.warning(f"❌ Failed to create stub for {token_address[:8]}...")
+                
+                return success
+                
         except Exception as e:
             self.logger.error(f"❌ Error handling missing token {token_address[:8]}...: {e}")
             self.queue_repo.update_token_status(token_address, success=False, error_message=str(e))

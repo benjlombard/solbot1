@@ -103,7 +103,14 @@ class TokenSyncApplication:
         """Setup specialized logging for the sync service"""
         # Use environment variables for sync service specific logging
         sync_log_file = os.getenv('SYNC_SERVICE_LOG_FILE', self.config.logging.log_file)
-        sync_log_level = os.getenv('SYNC_SERVICE_LOG_LEVEL', self.config.logging.level)
+        
+        # CORRECTION: Prioriser TOKENS_SYNC_LOG_LEVEL puis SYNC_SERVICE_LOG_LEVEL
+        sync_log_level = (
+            os.getenv('TOKENS_SYNC_LOG_LEVEL') or 
+            os.getenv('SYNC_SERVICE_LOG_LEVEL') or 
+            self.config.logging.level
+        )
+        
         sync_log_max_size = int(os.getenv('SYNC_SERVICE_LOG_MAX_SIZE_MB', self.config.logging.max_file_size_mb))
         sync_log_backup_count = int(os.getenv('SYNC_SERVICE_LOG_BACKUP_COUNT', self.config.logging.backup_count))
         
@@ -126,7 +133,7 @@ class TokenSyncApplication:
         logger.info("🚀 TOKEN SYNCHRONIZATION SERVICE STARTING")
         logger.info("=" * 80)
         logger.info(f"📝 Log file: {Path(self.config.logging.log_dir) / sync_log_file}")
-        logger.info(f"📋 Log level: {sync_log_level}")
+        logger.info(f"📋 Log level: {sync_log_level}")  # Affichera DEBUG maintenant
         logger.info(f"📊 Database: {self.config.database.get_full_path()}")
         logger.info(f"🔄 Sync interval: {self.config.processing.enrichment_interval_seconds}s")
         logger.info(f"📈 Price update interval: {self.config.processing.price_update_interval_seconds}s")
