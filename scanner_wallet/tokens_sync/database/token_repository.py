@@ -333,6 +333,13 @@ class TokenRepository:
     def create_token_stub(self, token_address: str) -> bool:
         """Create a minimal token entry when no data is found"""
         try:
+            # CORRECTION: Validation de l'adresse du token
+            if not token_address or len(token_address.strip()) < 32:
+                self.logger.warning(f"Invalid token address: {token_address}")
+                return False
+            
+            token_address = token_address.strip()
+            
             # Check if token already exists
             if self.token_exists(token_address):
                 return self.mark_token_no_data(token_address)
@@ -340,30 +347,36 @@ class TokenRepository:
             with self.db.get_connection_context() as conn:
                 cursor = conn.cursor()
                 
-                query = """
-                INSERT INTO tokens (
-                    address, symbol, name, decimals, price_usd, 
-                    failed_attempts, no_data_available,
-                    last_price_update, metadata_source, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """
-                
-                cursor.execute(query, (
-                    token_address,
-                    f"UNK_{token_address[:6]}",
-                    f"Unknown Token {token_address[:8]}",
-                    9,
-                    0.0,
-                    1,
-                    0,
-                    int(time.time()),
-                    "stub"
-                ))
-                
-                conn.commit()
-                self.logger.debug(f"Created stub entry for {token_address[:8]}...")
-                return True
-                
+                # CORRECTION: Gestion des erreurs de contraintes
+                try:
+                    query = """
+                    INSERT INTO tokens (
+                        address, symbol, name, decimals, price_usd, 
+                        failed_attempts, no_data_available,
+                        last_price_update, metadata_source, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """
+                    
+                    cursor.execute(query, (
+                        token_address,
+                        f"UNK_{token_address[:6]}",
+                        f"Unknown Token {token_address[:8]}",
+                        9,
+                        0.0,
+                        1,
+                        0,
+                        int(time.time()),
+                        "stub"
+                    ))
+                    
+                    conn.commit()
+                    self.logger.debug(f"✅ Created stub entry for {token_address[:8]}...")
+                    return True
+                    
+                except sqlite3.IntegrityError as e:
+                    self.logger.warning(f"Integrity error creating stub for {token_address}: {e}")
+                    return False
+                    
         except Exception as e:
             self.logger.error(f"Error creating token stub {token_address}: {e}")
             return False

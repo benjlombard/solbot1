@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 
 from ..database.connection import DatabaseConnection
 from ..database.token_repository import TokenRepository, QueueRepository
+from ..database.history_repository import HistoryRepository
 from ..api_clients.dexscreener_client import DexScreenerClient
 from ..processors.batch_processor import BatchProcessor
 from ..monitoring.cycle_logger import CycleLogger
@@ -38,6 +39,7 @@ class SyncService:
         # Initialize repositories
         self.token_repo = TokenRepository(self.db_connection, self.logger)
         self.queue_repo = QueueRepository(self.db_connection, self.logger)
+        self.history_repo = HistoryRepository(self.db_connection, self.logger)
         
         # Initialize API clients
         self.dex_client = DexScreenerClient(logger=self.logger)
@@ -50,6 +52,19 @@ class SyncService:
             config=config,
             logger=self.logger
         )
+        
+        # Initialize historization processor if available
+        self.historization_processor = None
+        try:
+            from ..processors.historization_processor import HistorizationProcessor
+            self.historization_processor = HistorizationProcessor(
+                db_connection=self.db_connection,
+                config=config,
+                logger=self.logger
+            )
+            self.logger.debug("✅ Historization processor initialized")
+        except ImportError:
+            self.logger.warning("⚠️ Historization processor not available")
         
         # Initialize monitoring
         self.api_tracker = ApiTracker(db_connection=self.db_connection, logger=self.logger)
@@ -67,6 +82,7 @@ class SyncService:
         # Cycle management
         self.current_sync_cycle_id = None
         self.cycle_count = 0
+        self._cycle_started = False  # Flag pour éviter double logging
         
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -117,7 +133,10 @@ class SyncService:
         self.cycle_count += 1
         cycle_id = self._start_sync_cycle()
         
-        self.logger.info(f"🔄 CYCLE {self.cycle_count} STARTED - ID: {cycle_id}")
+        # Log seulement si pas déjà loggé
+        if not self._cycle_started:
+            self.logger.info(f"🔄 CYCLE {self.cycle_count} STARTED - ID: {cycle_id}")
+            self._cycle_started = True
         
         try:
             # 1. Process new tokens from queue
@@ -128,7 +147,11 @@ class SyncService:
             prices_updated = self._update_existing_prices()
             self.cycle_logger.record_operation('updated_tokens', prices_updated)
             
-            # 3. Periodic tasks (every N cycles)
+            # 3. Historization améliorée
+            historized_count = self._run_historization_improved()
+            self.cycle_logger.record_operation('historized_tokens', historized_count)
+            
+            # 4. Periodic tasks (every N cycles)
             self._run_periodic_tasks()
             
             # Update statistics
@@ -136,7 +159,7 @@ class SyncService:
             
             self.logger.info(
                 f"✅ CYCLE {self.cycle_count} COMPLETED: "
-                f"{new_tokens_processed} new, {prices_updated} updated"
+                f"{new_tokens_processed} new, {prices_updated} updated, {historized_count} historized"
             )
             
         except Exception as e:
@@ -144,6 +167,7 @@ class SyncService:
             self.cycle_logger.record_error(str(e))
         finally:
             self._end_sync_cycle(cycle_id)
+            self._cycle_started = False  # Reset flag
     
     def _process_new_tokens(self) -> int:
         """Process new tokens from the queue"""
@@ -151,7 +175,7 @@ class SyncService:
         
         # Get pending tokens from queue
         pending_tokens = self.queue_repo.get_pending_tokens(
-            self.config.batching.batch_sizes['dexscreener']
+            self.config.batching.batch_sizes.get('dexscreener', 60)
         )
         
         if not pending_tokens:
@@ -183,11 +207,59 @@ class SyncService:
         # Process updates in batch
         return asyncio.run(self.batch_processor.process_tokens_batch(tokens_to_update))
     
+    def _run_historization_improved(self) -> int:
+        """Run token historization with better logic"""
+        try:
+            # Historisation basée sur le temps plutôt que sur le numéro de cycle
+            historization_interval = getattr(
+                self.config.monitoring, 
+                'historization_interval_seconds', 
+                3600  # Default 1 heure
+            )
+            
+            # Obtenir les tokens qui ont besoin d'historisation
+            tokens_to_historize = self.token_repo.get_tokens_needing_historization(
+                interval_seconds=historization_interval,
+                limit=min(50, self.config.batching.batch_sizes.get('historization', 50))
+            )
+            
+            if not tokens_to_historize:
+                self.logger.debug("📈 No tokens need historization")
+                return 0
+            
+            self.logger.info(f"📈 Starting historization for {len(tokens_to_historize)} tokens")
+            
+            # Utiliser le processeur d'historisation si disponible
+            if self.historization_processor:
+                try:
+                    result = self.historization_processor.manually_historize_tokens(tokens_to_historize)
+                    successful_count = result.get('successful', 0)
+                    self.logger.info(f"📈 Historization completed: {successful_count}/{len(tokens_to_historize)} successful")
+                    return successful_count
+                except Exception as e:
+                    self.logger.error(f"Error using historization processor: {e}")
+                    # Fallback vers la méthode directe
+            
+            # Fallback vers l'historisation directe
+            successful_count = 0
+            for token_address in tokens_to_historize:
+                try:
+                    if self.history_repo.create_snapshot(token_address):
+                        successful_count += 1
+                except Exception as e:
+                    self.logger.debug(f"Error historizing {token_address[:8]}...: {e}")
+                    continue
+            
+            self.logger.info(f"📈 Historization completed: {successful_count}/{len(tokens_to_historize)} successful")
+            return successful_count
+                
+        except Exception as e:
+            self.logger.error(f"Error in historization: {e}")
+            return 0
+    
     def _run_periodic_tasks(self):
         """Run periodic maintenance tasks"""
-        # Every 3 cycles - run historization
-        if self.cycle_count % 3 == 0:
-            self._run_historization()
+        # Tâches périodiques moins fréquentes pour éviter la surcharge
         
         # Every 5 cycles - update creation timestamps
         if self.cycle_count % 5 == 0:
@@ -197,30 +269,19 @@ class SyncService:
         if self.cycle_count % 10 == 0:
             self._database_maintenance()
     
-    def _run_historization(self):
-        """Run token historization"""
-        self.logger.debug("📈 Running historization...")
-        
-        tokens_to_historize = self.token_repo.get_tokens_needing_historization(
-            interval_seconds=self.config.monitoring.historization_interval_seconds,
-            limit=self.config.batching.batch_sizes['dexscreener']
-        )
-        
-        if tokens_to_historize:
-            # This would be implemented in a separate historization processor
-            self.logger.info(f"📈 Would historize {len(tokens_to_historize)} tokens")
-            # TODO: Implement historization processor
-            self.cycle_logger.record_operation('historized_tokens', len(tokens_to_historize))
-    
     def _update_creation_timestamps(self):
         """Update missing creation timestamps"""
         self.logger.debug("⏰ Updating creation timestamps...")
         
-        tokens_missing_timestamps = self.token_repo.get_tokens_missing_creation_timestamp(
-            limit=self.config.batching.batch_sizes['dexscreener']
-        )
-        
-        if tokens_missing_timestamps:
+        try:
+            tokens_missing_timestamps = self.token_repo.get_tokens_missing_creation_timestamp(
+                limit=min(50, self.config.batching.batch_sizes.get('dexscreener', 60))
+            )
+            
+            if not tokens_missing_timestamps:
+                self.logger.debug("No tokens need timestamp updates")
+                return
+            
             updated_count = 0
             for token_address in tokens_missing_timestamps:
                 try:
@@ -236,8 +297,12 @@ class SyncService:
                     self.logger.error(f"Error updating timestamp for {token_address}: {e}")
                     continue
             
-            self.logger.info(f"⏰ Updated {updated_count} creation timestamps")
-            self.cycle_logger.record_operation('creation_timestamps', updated_count)
+            if updated_count > 0:
+                self.logger.info(f"⏰ Updated {updated_count} creation timestamps")
+                self.cycle_logger.record_operation('creation_timestamps', updated_count)
+                
+        except Exception as e:
+            self.logger.error(f"Error in update_creation_timestamps: {e}")
     
     def _database_maintenance(self):
         """Perform database maintenance"""
@@ -250,7 +315,8 @@ class SyncService:
             
             # Get flagged tokens stats
             stats = self.token_repo.get_flagged_tokens_stats()
-            self.logger.info(f"📊 Flagged tokens: {stats}")
+            if stats:
+                self.logger.info(f"📊 Flagged tokens: {stats}")
             
             # Periodic vacuum (every 100 cycles)
             if self.cycle_count % 100 == 0:
@@ -263,6 +329,12 @@ class SyncService:
     def _start_sync_cycle(self) -> int:
         """Start a new sync cycle"""
         cycle_id = int(time.time() * 1000)
+        
+        # Éviter la duplication d'ID
+        while cycle_id == self.current_sync_cycle_id:
+            time.sleep(0.001)  # Attendre 1ms
+            cycle_id = int(time.time() * 1000)
+        
         self.current_sync_cycle_id = cycle_id
         
         self.api_tracker.set_current_cycle(cycle_id)
@@ -289,32 +361,41 @@ class SyncService:
     
     def _print_statistics(self):
         """Print current service statistics"""
-        if self.stats['start_time']:
-            runtime = time.time() - self.stats['start_time']
-            runtime_str = str(timedelta(seconds=int(runtime)))
-        else:
-            runtime_str = "N/A"
+        try:
+            if self.stats['start_time']:
+                runtime = time.time() - self.stats['start_time']
+                runtime_str = str(timedelta(seconds=int(runtime)))
+            else:
+                runtime_str = "N/A"
+            
+            self.logger.info("=== 📊 SYNC SERVICE STATISTICS ===")
+            self.logger.info(f"⏱️ Runtime: {runtime_str}")
+            self.logger.info(f"🔄 Cycles completed: {self.stats['cycles_completed']}")
+            self.logger.info(f"📊 Tokens processed: {self.stats['processed_tokens']}")
+            self.logger.info(f"✅ Successful updates: {self.stats['successful_updates']}")
+            self.logger.info(f"❌ Failed updates: {self.stats['failed_updates']}")
+            
+            if self.stats['processed_tokens'] > 0:
+                success_rate = (self.stats['successful_updates'] / self.stats['processed_tokens']) * 100
+                self.logger.info(f"📈 Success rate: {success_rate:.1f}%")
+            
+            # API statistics
+            self._print_api_statistics()
+            
+            # Queue statistics
+            queue_stats = self.queue_repo.get_queue_status_summary()
+            if queue_stats:
+                self.logger.info("=== 📋 QUEUE STATISTICS ===")
+                for key, value in queue_stats.items():
+                    if key in ['pending', 'processing', 'completed', 'failed']:
+                        self.logger.info(f"  {key}: {value}")
+                    elif key == 'completion_rate_percent':
+                        self.logger.info(f"  completion_rate: {value}%")
+                    elif key == 'avg_processing_time_seconds':
+                        self.logger.info(f"  avg_processing_time: {value:.1f}s")
         
-        self.logger.info("=== 📊 SYNC SERVICE STATISTICS ===")
-        self.logger.info(f"⏱️ Runtime: {runtime_str}")
-        self.logger.info(f"🔄 Cycles completed: {self.stats['cycles_completed']}")
-        self.logger.info(f"📊 Tokens processed: {self.stats['processed_tokens']}")
-        self.logger.info(f"✅ Successful updates: {self.stats['successful_updates']}")
-        self.logger.info(f"❌ Failed updates: {self.stats['failed_updates']}")
-        
-        if self.stats['processed_tokens'] > 0:
-            success_rate = (self.stats['successful_updates'] / self.stats['processed_tokens']) * 100
-            self.logger.info(f"📈 Success rate: {success_rate:.1f}%")
-        
-        # API statistics
-        self._print_api_statistics()
-        
-        # Queue statistics
-        queue_stats = self.queue_repo.get_queue_stats()
-        if queue_stats:
-            self.logger.info("=== 📋 QUEUE STATISTICS ===")
-            for key, value in queue_stats.items():
-                self.logger.info(f"  {key}: {value}")
+        except Exception as e:
+            self.logger.error(f"Error printing statistics: {e}")
     
     def _print_api_statistics(self):
         """Print API usage statistics"""
@@ -346,19 +427,94 @@ class SyncService:
         if not token_addresses:
             return 0
         
-        return self.queue_repo.add_tokens_to_queue(token_addresses)
+        try:
+            return self.queue_repo.add_tokens_to_queue(token_addresses)
+        except Exception as e:
+            self.logger.error(f"Error adding tokens to queue: {e}")
+            return 0
     
     def get_service_status(self) -> Dict[str, Any]:
         """Get current service status"""
-        return {
-            'running': self.running,
-            'current_cycle_id': self.current_sync_cycle_id,
-            'cycle_count': self.cycle_count,
-            'stats': self.stats.copy(),
-            'queue_stats': self.queue_repo.get_queue_stats(),
-            'api_stats': self.api_tracker.get_stats() if hasattr(self.api_tracker, 'get_stats') else {},
-            'database_healthy': self.db_connection.check_health()
-        }
+        try:
+            return {
+                'running': self.running,
+                'current_cycle_id': self.current_sync_cycle_id,
+                'cycle_count': self.cycle_count,
+                'stats': self.stats.copy(),
+                'queue_stats': self.queue_repo.get_queue_status_summary(),
+                'api_stats': self.api_tracker.get_stats() if hasattr(self.api_tracker, 'get_stats') else {},
+                'database_healthy': self.db_connection.check_health(),
+                'historization_processor_available': self.historization_processor is not None
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting service status: {e}")
+            return {
+                'running': self.running,
+                'error': str(e)
+            }
+    
+    def force_historization(self, token_addresses: Optional[list] = None) -> Dict[str, Any]:
+        """
+        Force historization for specific tokens or all eligible tokens
+        
+        Args:
+            token_addresses: Optional list of specific token addresses
+            
+        Returns:
+            Historization results
+        """
+        try:
+            if token_addresses:
+                # Force historization for specific tokens
+                if self.historization_processor:
+                    result = self.historization_processor.manually_historize_tokens(token_addresses)
+                else:
+                    successful_count = 0
+                    for token_address in token_addresses:
+                        try:
+                            if self.history_repo.create_snapshot(token_address):
+                                successful_count += 1
+                        except Exception as e:
+                            self.logger.error(f"Error historizing {token_address}: {e}")
+                    
+                    result = {
+                        'success': True,
+                        'processed': len(token_addresses),
+                        'successful': successful_count,
+                        'failed': len(token_addresses) - successful_count
+                    }
+            else:
+                # Force historization for all eligible tokens
+                result = {'successful': self._run_historization_improved()}
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error in force historization: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def cleanup_old_data(self, days_to_keep: int = 30) -> Dict[str, Any]:
+        """
+        Clean up old historical data
+        
+        Args:
+            days_to_keep: Number of days of data to keep
+            
+        Returns:
+            Cleanup results
+        """
+        try:
+            deleted_count = self.history_repo.cleanup_old_history(days_to_keep)
+            
+            return {
+                'success': True,
+                'records_deleted': deleted_count,
+                'days_kept': days_to_keep
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error cleaning up old data: {e}")
+            return {'success': False, 'error': str(e)}
     
     def stop(self):
         """Stop the synchronization service"""
@@ -366,6 +522,10 @@ class SyncService:
         self.running = False
         
         try:
+            # Stop historization processor if available
+            if self.historization_processor and hasattr(self.historization_processor, 'stop_processor'):
+                self.historization_processor.stop_processor()
+            
             # Close API clients
             self.dex_client.close()
             

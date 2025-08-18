@@ -142,6 +142,15 @@ class CycleLogger:
         
     def start_cycle(self, cycle_id: int):
         """Start a new synchronization cycle"""
+        # CORRECTION: Vérifier si un cycle est déjà en cours
+        if (self.current_cycle is not None and self.current_cycle.cycle_id == cycle_id):
+            self.logger.debug(f"Cycle {cycle_id} already started, skipping")
+            return
+        
+        if self.current_cycle is not None:
+            self.logger.warning(f"Previous cycle {self.current_cycle.cycle_id} not properly ended")
+            self.end_cycle()
+
         self.cycle_count += 1
         
         self.current_cycle = CycleMetrics(
@@ -153,9 +162,7 @@ class CycleLogger:
         if self.cumulative_stats['start_time'] is None:
             self.cumulative_stats['start_time'] = self.current_cycle.start_time
         
-        # Log cycle start
         self.logger.info(f"🔄 CYCLE {self.cycle_count} STARTED - ID: {cycle_id}")
-        self.logger.debug(f"   Start time: {datetime.fromtimestamp(self.current_cycle.start_time).strftime('%H:%M:%S')}")
     
     def end_cycle(self):
         """End the current synchronization cycle and generate reports"""

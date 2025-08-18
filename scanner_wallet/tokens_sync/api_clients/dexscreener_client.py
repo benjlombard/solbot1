@@ -93,70 +93,77 @@ class DexScreenerClient(BaseApiClient):
         
         return all_tokens_data
     
-    async def get_tokens_batch_async(
-        self, 
-        session: aiohttp.ClientSession, 
-        token_addresses: List[str], 
-        batch_size: int = 30
-    ) -> Dict[str, TokenData]:
+    async def get_tokens_batch_async(self, session: aiohttp.ClientSession, token_addresses: List[str], batch_size: int = 30) -> Dict[str, TokenData]:
         """
         Asynchronously get token data for multiple addresses
-        
-        Args:
-            session: aiohttp session
-            token_addresses: List of token addresses
-            batch_size: Maximum tokens per batch
-            
-        Returns:
-            Dictionary mapping token_address -> TokenData
         """
         all_tokens_data = {}
         
-        # Create batch tasks
+        # Limite DexScreener: maximum 30 tokens par requête
+        max_batch_size = min(30, batch_size)
+        
+        # Create batch tasks avec limitation
         tasks = []
-        for i in range(0, len(token_addresses), batch_size):
-            batch = token_addresses[i:i + batch_size]
-            task = self._fetch_batch_async(session, batch)
-            tasks.append(task)
-        
-        # Execute batches
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results
-        for i, result in enumerate(batch_results):
-            if isinstance(result, Exception):
-                batch_start = i * batch_size
-                batch = token_addresses[batch_start:batch_start + batch_size]
-                self.logger.error(f"Batch {i+1} failed: {result}")
-                
-                # Fallback to individual requests
+        for i in range(0, len(token_addresses), max_batch_size):
+            batch = token_addresses[i:i + max_batch_size]
+            # CORRECTION: Vérifier la taille du batch
+            if len(batch) > max_batch_size:
+                # Si trop gros, traiter individuellement
                 for token_addr in batch:
-                    try:
-                        individual_response = await self.make_async_request(
-                            session, f"dex/tokens/{token_addr}"
-                        )
-                        if individual_response.success:
-                            token_data = self._parse_single_token_response(
-                                token_addr, individual_response.data
-                            )
-                            if token_data:
-                                all_tokens_data[token_addr] = token_data
-                    except Exception as e:
-                        self.logger.debug(f"Individual fallback failed for {token_addr[:8]}...: {e}")
+                    task = self._fetch_single_token_async(session, token_addr)
+                    tasks.append(('individual', token_addr, task))
             else:
-                all_tokens_data.update(result)
+                task = self._fetch_batch_async(session, batch)
+                tasks.append(('batch', batch, task))
+        
+        # Execute batches avec timeout plus court
+        for task_type, addresses, task in tasks:
+            try:
+                if task_type == 'batch':
+                    result = await asyncio.wait_for(task, timeout=15.0)  # Timeout réduit
+                    all_tokens_data.update(result)
+                else:  # individual
+                    result = await asyncio.wait_for(task, timeout=10.0)
+                    if result:
+                        all_tokens_data[addresses] = result
+                        
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Timeout for {task_type} request: {addresses}")
+                # Fallback immédiat vers individual pour les batch qui timeout
+                if task_type == 'batch':
+                    for addr in addresses:
+                        try:
+                            individual_result = await self._fetch_single_token_async(session, addr)
+                            if individual_result:
+                                all_tokens_data[addr] = individual_result
+                        except Exception as e:
+                            self.logger.debug(f"Individual fallback failed for {addr}: {e}")
+            except Exception as e:
+                self.logger.error(f"Error in {task_type} request: {e}")
         
         return all_tokens_data
     
     async def _fetch_batch_async(self, session: aiohttp.ClientSession, batch: List[str]) -> Dict[str, TokenData]:
-        """Fetch a single batch asynchronously"""
+        """Fetch a single batch asynchronously avec validation"""
+        if len(batch) > 30:
+            self.logger.warning(f"Batch size {len(batch)} exceeds DexScreener limit of 30")
+            return {}
+        
+        # CORRECTION: Construire l'URL correctement
         addresses_str = ','.join(batch)
+        
+        # Vérifier la longueur de l'URL pour éviter les erreurs 400
+        test_url = f"{self.base_url}/dex/tokens/{addresses_str}"
+        if len(test_url) > 2000:  # Limite URL
+            self.logger.warning(f"URL too long ({len(test_url)} chars), splitting batch")
+            return {}
+        
         response = await self.make_async_request(session, f"dex/tokens/{addresses_str}")
         
         if response.success:
             return self._parse_batch_response(batch, response.data)
         else:
-            self.logger.warning(f"Async batch request failed for {len(batch)} tokens: {response.error_message}")
+            self.logger.warning(f"Batch request failed: {response.error_message}")
             return {}
     
     def get_pair_data(self, pair_address: str) -> Optional[Dict]:

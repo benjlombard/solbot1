@@ -126,30 +126,23 @@ class BatchProcessor:
         return tokens_data
     
     async def _fetch_individual_tokens(
-        self, 
-        session: aiohttp.ClientSession, 
-        token_addresses: List[str]
-    ) -> Dict[str, TokenData]:
-        """
-        Fetch tokens individually as fallback
-        
-        Args:
-            session: aiohttp session
-            token_addresses: List of token addresses
-            
-        Returns:
-            Dictionary mapping token_address -> TokenData
-        """
+    self, 
+    session: aiohttp.ClientSession, 
+    token_addresses: List[str]
+) -> Dict[str, TokenData]:
+        """Fetch tokens individually as fallback avec timeout optimisé"""
         results = {}
         
-        # Limit concurrent individual requests
-        semaphore = asyncio.Semaphore(5)  # Max 5 concurrent requests
+        # CORRECTION: Réduire la concurrence pour éviter les timeouts
+        semaphore = asyncio.Semaphore(3)  # Réduit de 5 à 3
         
         async def fetch_single_token(token_addr: str) -> Tuple[str, Optional[TokenData]]:
             async with semaphore:
                 try:
-                    response = await self.dex_client.make_async_request(
-                        session, f"dex/tokens/{token_addr}"
+                    # CORRECTION: Timeout plus court pour les requêtes individuelles
+                    response = await asyncio.wait_for(
+                        self.dex_client.make_async_request(session, f"dex/tokens/{token_addr}"),
+                        timeout=8.0  # Réduit de 30s à 8s
                     )
                     
                     if response.success and response.data:
@@ -157,31 +150,43 @@ class BatchProcessor:
                             token_addr, response.data
                         )
                         if token_data:
-                            self.logger.debug(f"✅ Individual fallback successful for {token_addr[:8]}...")
+                            self.logger.debug(f"✅ Individual success: {token_addr[:8]}...")
                             return token_addr, token_data
                     
-                    self.logger.debug(f"❌ Individual fallback failed for {token_addr[:8]}...")
+                    self.logger.debug(f"❌ Individual failed: {token_addr[:8]}...")
                     return token_addr, None
                     
+                except asyncio.TimeoutError:
+                    self.logger.debug(f"⏰ Individual timeout: {token_addr[:8]}...")
+                    return token_addr, None
                 except Exception as e:
-                    self.logger.debug(f"❌ Individual fallback error for {token_addr[:8]}...: {e}")
+                    self.logger.debug(f"❌ Individual error {token_addr[:8]}...: {e}")
                     return token_addr, None
         
-        # Execute individual requests
-        tasks = [fetch_single_token(addr) for addr in token_addresses]
-        individual_results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results
-        for result in individual_results:
-            if isinstance(result, Exception):
-                self.logger.debug(f"Individual fetch exception: {result}")
-                continue
+        # CORRECTION: Traitement par plus petits groupes
+        chunk_size = 10
+        for i in range(0, len(token_addresses), chunk_size):
+            chunk = token_addresses[i:i + chunk_size]
+            tasks = [fetch_single_token(addr) for addr in chunk]
             
-            token_addr, token_data = result
-            if token_data:
-                results[token_addr] = token_data
-        
-        self.logger.debug(f"🔍 Individual fallback: {len(results)}/{len(token_addresses)} successful")
+            try:
+                chunk_results = await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=30.0
+                )
+                
+                for result in chunk_results:
+                    if isinstance(result, Exception):
+                        continue
+                    token_addr, token_data = result
+                    if token_data:
+                        results[token_addr] = token_data
+                        
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Chunk timeout for {len(chunk)} tokens")
+                
+            # Pause entre chunks pour éviter le rate limiting
+            await asyncio.sleep(0.5)
         
         return results
     

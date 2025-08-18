@@ -155,17 +155,27 @@ class TokenSyncApplication:
             
             db_connection = DatabaseConnection(
                 db_path=self.config.database.get_full_path(),
-                timeout=self.config.database.timeout,
+                timeout=10.0,  # Réduit de 30s à 10s
                 logger=self.logger
             )
             
-            if not db_connection.check_health():
-                self.logger.error("❌ Database health check failed")
+            # CORRECTION: Test simple et rapide
+            start_time = time.time()
+            
+            with db_connection.get_connection_context() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                result = cursor.fetchone()
+                
+            test_duration = time.time() - start_time
+            
+            if result[0] == 1:
+                self.logger.info(f"✅ Database connection test passed ({test_duration:.2f}s)")
+                return True
+            else:
+                self.logger.error("❌ Database test query failed")
                 return False
-            
-            self.logger.info("✅ Database connection test passed")
-            return True
-            
+                
         except Exception as e:
             self.logger.error(f"❌ Database connection test failed: {e}")
             return False
@@ -208,7 +218,7 @@ class TokenSyncApplication:
         """Populate the processing queue with initial tokens if needed"""
         try:
             self.logger.info("🔍 Checking for tokens to add to processing queue...")
-            
+            max_initial_tokens = 500
             # Get new tokens from transactions that aren't in the queue yet
             if hasattr(self.sync_service, 'token_repo'):
                 new_tokens = self.sync_service.token_repo.get_new_tokens_from_transactions(
@@ -216,9 +226,14 @@ class TokenSyncApplication:
                     max_failed_attempts=self.config.monitoring.max_failed_attempts
                 )
                 
+                # CORRECTION: Limiter et prioriser
                 if new_tokens:
-                    added_count = self.sync_service.add_tokens_to_queue(list(new_tokens))
-                    self.logger.info(f"➕ Added {added_count} new tokens to processing queue")
+                    limited_tokens = list(new_tokens)[:max_initial_tokens]
+                    added_count = self.sync_service.add_tokens_to_queue(limited_tokens)
+                    self.logger.info(f"➕ Added {added_count}/{len(new_tokens)} tokens to queue (limited to {max_initial_tokens})")
+                    
+                    if len(new_tokens) > max_initial_tokens:
+                        self.logger.info(f"📋 {len(new_tokens) - max_initial_tokens} tokens queued for next cycles")
                 else:
                     self.logger.info("📋 No new tokens found to add to queue")
             
