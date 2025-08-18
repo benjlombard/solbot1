@@ -148,8 +148,11 @@ class TokenRepository:
             with self.db.get_connection_context() as conn:
                 cursor = conn.cursor()
                 
-                # Check if token exists
+                check_start = time.time()
                 token_exists = self.token_exists(token_data.address)
+                check_duration = time.time() - check_start
+            
+                self.logger.debug(f"💾 Token exists check: {token_data.address[:8]}... exists={token_exists} ({check_duration:.3f}s)")
                 
                 # Calculate advanced metrics
                 liquidity_mc_ratio = 0.0
@@ -159,6 +162,7 @@ class TokenRepository:
                     volume_mc_ratio = token_data.volume_24h / token_data.market_cap
                 
                 if token_exists:
+                    update_start = time.time()
                     # Update existing token
                     query = """
                     UPDATE tokens SET
@@ -232,9 +236,15 @@ class TokenRepository:
                         token_data.metadata_source,
                         token_data.address
                     ))
+
+                    update_duration = time.time() - update_start
+                    rows_affected = cursor.rowcount
                 
+                    self.logger.debug(f"💾 Update query for {token_data.address[:8]}... completed in {update_duration:.3f}s, rows affected: {rows_affected}")
+
                 else:
                     # Insert new token
+                    insert_start = time.time()
                     query = """
                     INSERT INTO tokens (
                         address, symbol, name, decimals, price_usd, logo_uri,
@@ -280,8 +290,13 @@ class TokenRepository:
                         token_data.metadata_source,
                         current_timestamp
                     ))
+                    insert_duration = time.time() - insert_start
+                    rows_affected = cursor.rowcount
                 
+                    self.logger.debug(f"💾 Insert query for {token_data.address[:8]}... completed in {insert_duration:.3f}s, rows affected: {rows_affected}")
                 conn.commit()
+                commit_duration = time.time() - (update_start if token_exists else insert_start)
+                self.logger.debug(f"✅ Upsert completed for {token_data.address[:8]}... total time: {commit_duration:.3f}s")
                 return True
                 
         except Exception as e:

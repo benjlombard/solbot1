@@ -329,6 +329,8 @@ class QueueRepository:
         Returns:
             True if update was successful
         """
+        self.logger.debug(f"📋 Updating queue status for {token_address[:8]}... success={success}")
+
         with self.db.get_connection_context() as conn:
             cursor = conn.cursor()
 
@@ -342,20 +344,20 @@ class QueueRepository:
             current_record = cursor.fetchone()
             
             if not current_record:
-                self.logger.warning(f"🚨 Queue state error: {token_address[:8]}... not found in queue at all")
+                self.logger.error(f"🚨 Queue state error: {token_address[:8]}... not found in queue at all")
                 return False
             
             current_status, current_node, created_at, started_at = current_record
             
             # LOG: État actuel détaillé
-            self.logger.debug(f"📋 Queue state check: {token_address[:8]}... status={current_status}, node={current_node}, expected_node={processing_node}")
+            self.logger.debug(f"📋 Current queue state: {token_address[:8]}... status={current_status}, node={current_node}")
             
             if current_status != 'processing':
-                self.logger.warning(f"🚨 Queue state error: {token_address[:8]}... in state '{current_status}', expected 'processing'")
+                self.logger.error(f"🚨 Queue state error: {token_address[:8]}... in state '{current_status}', expected 'processing'")
                 return False
             
             if current_node != processing_node:
-                self.logger.warning(f"🚨 Queue node mismatch: {token_address[:8]}... node='{current_node}', expected='{processing_node}'")
+                self.logger.error(f"🚨 Queue node mismatch: {token_address[:8]}... node='{current_node}', expected='{processing_node}'")
                 return False
             
             # LOG: Durée de processing
@@ -397,7 +399,7 @@ class QueueRepository:
                 
                 result = cursor.fetchone()
                 if not result:
-                    self.logger.warning(f"Token {token_address[:8]}... not found in processing state")
+                    self.logger.error(f"❌ Token {token_address[:8]}... retry info not found")
                     return False
                 
                 retry_count, max_retries = result
@@ -424,7 +426,7 @@ class QueueRepository:
                         retry_time.isoformat(), token_address, processing_node
                     ))
                     
-                    self.logger.warning(f"🔄 Scheduled {token_address[:8]}... for retry {retry_count}/{max_retries}")
+                    self.logger.info(f"🔄 Scheduled {token_address[:8]}... for retry {retry_count}/{max_retries}")
                     
                 else:
                     # Mark as failed (exhausted retries)
@@ -439,10 +441,13 @@ class QueueRepository:
                         AND processing_node = ?
                     """, (current_time, error_message, token_address, processing_node))
                     
-                    self.logger.error(f"❌ Marked {token_address[:8]}... as failed (max retries exceeded)")
+                    self.logger.info(f"❌ Marked {token_address[:8]}... as failed (max retries exceeded)")
             
             conn.commit()
-            return cursor.rowcount > 0
+            success_result = cursor.rowcount > 0
+        
+            self.logger.debug(f"📋 Queue status update for {token_address[:8]}... completed, success: {success_result}")
+            return success_result
     
     @db_retry(max_retries=3, delay=0.3)
     def get_retry_ready_tokens(self, batch_size: int) -> List[str]:

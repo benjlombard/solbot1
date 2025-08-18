@@ -96,35 +96,47 @@ class BatchProcessor:
         Returns:
             Dictionary mapping token_address -> TokenData
         """
-        self.logger.debug(f"📡 Fetching data for {len(token_addresses)} tokens via API")
+        self.logger.info(f"📡 Starting API fetch for {len(token_addresses)} tokens")
+        self.logger.debug(f"📡 Token addresses: {[addr[:8] + '...' for addr in token_addresses[:5]]}")
         
         # Create aiohttp session with timeout
         timeout = aiohttp.ClientTimeout(total=self.config.rpc.timeout)
         
         async with aiohttp.ClientSession(timeout=timeout) as session:
             # Use DexScreener batch API
+            start_time = time.time()
             tokens_data = await self.dex_client.get_tokens_batch_async(
                 session=session,
                 token_addresses=token_addresses,
                 batch_size=self.config.apis.dexscreener_batch_size
             )
-            
+            api_duration = time.time() - start_time
+        
+            self.logger.info(f"📡 DexScreener batch API completed in {api_duration:.2f}s")
+            self.logger.debug(f"📡 Batch API returned {len(tokens_data)} tokens")
             # Handle missing tokens with individual fallback
             missing_tokens = set(token_addresses) - set(tokens_data.keys())
             
             if missing_tokens:
                 self.logger.warning(f"🔍 {len(missing_tokens)} tokens missing from batch, trying individual fallback")
-                
+                self.logger.debug(f"🔍 Missing tokens: {[addr[:8] + '...' for addr in list(missing_tokens)[:3]]}")
                 # Try individual requests for missing tokens
+                fallback_start = time.time()
                 individual_results = await self._fetch_individual_tokens(session, list(missing_tokens))
+                allback_duration = time.time() - fallback_start
+            
+                self.logger.info(f"🔍 Individual fallback completed in {fallback_duration:.2f}s, found {len(individual_results)} tokens")
                 tokens_data.update(individual_results)
         
         found_count = len(tokens_data)
         missing_count = len(token_addresses) - found_count
         
         self.logger.info(f"📊 API Results: {found_count} found, {missing_count} missing")
-        
-        return tokens_data
+        if tokens_data:
+            sample_tokens = list(tokens_data.items())[:3]
+            for addr, token_data in sample_tokens:
+                self.logger.debug(f"📊 Found: {addr[:8]}... ({token_data.symbol}, ${token_data.price_usd:.6f})")
+            return tokens_data
     
     async def _fetch_individual_tokens(
     self, 
@@ -214,36 +226,54 @@ class BatchProcessor:
         Returns:
             Number of successful operations
         """
-        self.logger.debug(f"💾 Processing database operations for {len(token_addresses)} tokens")
+        self.logger.info(f"💾 Starting database operations for {len(token_addresses)} tokens")
+        self.logger.debug(f"💾 {len(tokens_data)} tokens have data, {len(token_addresses) - len(tokens_data)} are missing")
         
         # Create database tasks
         db_tasks = []
+        tokens_with_data = 0
+        tokens_without_data = 0
+
         for token_address in token_addresses:
             token_data = tokens_data.get(token_address)
             
             if token_data:
                 # Token data found - upsert to database
                 task = asyncio.to_thread(self._upsert_token_with_queue_update, token_address, token_data)
+                self.logger.debug(f"💾 Scheduled upsert for {token_address[:8]}... ({token_data.symbol})")
             else:
+                tokens_without_data += 1
                 # No token data found - create stub or mark as no data
                 task = asyncio.to_thread(self._handle_missing_token, token_address)
+                self.logger.debug(f"💾 Scheduled stub creation for {token_address[:8]}...")
             
             db_tasks.append(task)
-        
+
+        self.logger.info(f"💾 Created {len(db_tasks)} database tasks: {tokens_with_data} upserts, {tokens_without_data} stubs")
+
+        db_start = time.time()
+
         # Execute database operations
         db_results = await asyncio.gather(*db_tasks, return_exceptions=True)
-        
+        db_duration = time.time() - db_start
+        self.logger.info(f"💾 Database operations completed in {db_duration:.2f}s")
+
         # Count successful operations
         successful_count = 0
+        exception_count = 0
+        false_count = 0
+
         for i, result in enumerate(db_results):
             token_addr = token_addresses[i]
             
             if isinstance(result, Exception):
+                exception_count += 1
                 self.logger.error(f"💾 Database operation failed for {token_addr[:8]}...: {result}")
                 self.queue_repo.update_token_status(token_addr, success=False, error_message=str(result))
             elif result:
                 successful_count += 1
             else:
+                false_count += 1
                 self.logger.warning(f"💾 Database operation returned False for {token_addr[:8]}...")
                 self.queue_repo.update_token_status(token_addr, success=False, error_message="Database operation failed")
         
@@ -263,13 +293,22 @@ class BatchProcessor:
             True if successful, False otherwise
         """
         try:
+            self.logger.debug(f"💾 Starting upsert for {token_address[:8]}... ({token_data.symbol})")
             # Upsert token to database
+            upsert_start = time.time()
             success = self.token_repo.upsert_token(token_data)
-            
+            upsert_duration = time.time() - upsert_start
+        
+            self.logger.debug(f"💾 Upsert for {token_address[:8]}... took {upsert_duration:.3f}s, result: {success}")
             # Update queue status
             if success:
-                self.queue_repo.update_token_status(token_address, success=True)
-                self.logger.debug(f"✅ Successfully upserted {token_address[:8]}... ({token_data.symbol})")
+                queue_start = time.time()
+                queue_success = self.queue_repo.update_token_status(token_address, success=True)
+                queue_duration = time.time() - queue_start
+                if queue_success:
+                    self.logger.debug(f"✅ Successfully processed {token_address[:8]}... ({token_data.symbol}) in {upsert_duration + queue_duration:.3f}s")
+                else:
+                    self.logger.warning(f"💾 Queue update failed for {token_address[:8]}... after successful upsert")
             else:
                 self.queue_repo.update_token_status(
                     token_address, 
@@ -296,14 +335,26 @@ class BatchProcessor:
             True if handled successfully, False otherwise
         """
         try:
-            # CORRECTION: Vérifier d'abord si le token existe déjà
-            if self.token_repo.token_exists(token_address):
+            self.logger.debug(f"📝 Handling missing token {token_address[:8]}...")
+            
+            # Vérifier d'abord si le token existe déjà
+            check_start = time.time()
+            token_exists = self.token_repo.token_exists(token_address)
+            check_duration = time.time() - check_start
+            
+            self.logger.debug(f"📝 Token existence check for {token_address[:8]}... took {check_duration:.3f}s, exists: {token_exists}")
+            
+            if token_exists:
                 # Token existe, juste marquer comme échec
+                mark_start = time.time()
                 success = self.token_repo.mark_token_no_data(token_address, increment_attempts=True)
+                mark_duration = time.time() - mark_start
+                
+                self.logger.debug(f"📝 Mark no_data for {token_address[:8]}... took {mark_duration:.3f}s, result: {success}")
                 
                 if success:
-                    self.queue_repo.update_token_status(token_address, success=True)
-                    self.logger.debug(f"📝 Marked existing token as no data: {token_address[:8]}...")
+                    queue_success = self.queue_repo.update_token_status(token_address, success=True)
+                    self.logger.debug(f"📝 Marked existing token as no data: {token_address[:8]}..., queue_update: {queue_success}")
                 else:
                     self.queue_repo.update_token_status(
                         token_address, 
@@ -315,11 +366,15 @@ class BatchProcessor:
                 return success
             else:
                 # Token n'existe pas, créer un stub
+                stub_start = time.time()
                 success = self.token_repo.create_token_stub(token_address)
+                stub_duration = time.time() - stub_start
+                
+                self.logger.debug(f"📝 Create stub for {token_address[:8]}... took {stub_duration:.3f}s, result: {success}")
                 
                 if success:
-                    self.queue_repo.update_token_status(token_address, success=True)
-                    self.logger.debug(f"📝 Created stub for {token_address[:8]}...")
+                    queue_success = self.queue_repo.update_token_status(token_address, success=True)
+                    self.logger.debug(f"📝 Created stub for {token_address[:8]}..., queue_update: {queue_success}")
                 else:
                     self.queue_repo.update_token_status(
                         token_address, 
@@ -331,7 +386,7 @@ class BatchProcessor:
                 return success
                 
         except Exception as e:
-            self.logger.error(f"❌ Error handling missing token {token_address[:8]}...: {e}")
+            self.logger.error(f"❌ Exception handling missing token {token_address[:8]}...: {e}", exc_info=True)
             self.queue_repo.update_token_status(token_address, success=False, error_message=str(e))
             return False
     
