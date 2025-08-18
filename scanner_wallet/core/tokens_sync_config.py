@@ -231,7 +231,9 @@ class TokenSyncMonitoringConfig:
     calculate_trends: bool = True
     export_metrics: bool = False
     metrics_export_interval_hours: int = 24
-
+    price_update_interval_seconds: int = 300  # 5 minutes par défaut
+    max_failed_attempts: int = 3
+    price_update_limit: int = 100
 
 @dataclass
 class TokenSyncLoggingConfig:
@@ -339,9 +341,9 @@ class TokenSyncConfig:
     def _load_database_config(self) -> TokenSyncDatabaseConfig:
         """Charge la configuration de base de données"""
         return TokenSyncDatabaseConfig(
-            name=os.getenv('TOKENS_SYNC_DB_NAME', 'tokens_sync.db'),
+            name=os.getenv('TOKENS_SYNC_DB_NAME', 'solana_wallet_monitor.db'),
             path=os.getenv('TOKENS_SYNC_DB_PATH'),
-            base_dir=os.getenv('TOKENS_SYNC_DB_BASE_DIR', 'database/tokens_sync'),
+            base_dir=os.getenv('TOKENS_SYNC_DB_BASE_DIR', 'database/data'),
             timeout=float(os.getenv('TOKENS_SYNC_DB_TIMEOUT', '30.0')),
             backup_enabled=self._get_bool_env('TOKENS_SYNC_DB_BACKUP_ENABLED', True),
             backup_interval_hours=int(os.getenv('TOKENS_SYNC_DB_BACKUP_INTERVAL_HOURS', '12')),
@@ -767,13 +769,13 @@ class TokenSyncConfig:
             "# =============================================================================",
             "",
             "# Nom de la base de données",
-            "TOKENS_SYNC_DB_NAME=tokens_sync.db",
+            "TOKENS_SYNC_DB_NAME=solana_wallet_monitor.db",
             "",
             "# Chemin personnalisé (optionnel)",
             "# TOKENS_SYNC_DB_PATH=/custom/path",
             "",
             "# Répertoire de base",
-            "TOKENS_SYNC_DB_BASE_DIR=database/tokens_sync",
+            "TOKENS_SYNC_DB_BASE_DIR=database/data",
             "",
             "# Timeout de connexion (secondes)",
             "TOKENS_SYNC_DB_TIMEOUT=30.0",

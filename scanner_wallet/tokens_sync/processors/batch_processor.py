@@ -10,7 +10,8 @@ from typing import List, Dict, Set, Optional, Tuple
 from datetime import datetime
 
 from ..models.token_data import TokenData, BatchResult
-from ..database.token_repository import TokenRepository, QueueRepository
+from ..database.token_repository import TokenRepository
+from ..database.queue_repository import QueueRepository
 from ..api_clients.dexscreener_client import DexScreenerClient
 from ..api_clients.base_client import ApiResponse
 

@@ -504,3 +504,4 @@ class TokenRepository:
             results = cursor.fetchall()
             
             return [row[0] for row in results if row[0]]
+
