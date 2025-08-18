@@ -374,18 +374,33 @@ class DatabaseManager:
         ''')
 
         # Table pour la file d'attente de traitement des tokens
-        cursor.execute('''
+         cursor.execute('''
             CREATE TABLE IF NOT EXISTS token_processing_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                token_address TEXT NOT NULL UNIQUE,
-                status TEXT NOT NULL DEFAULT 'pending', 
+                token_address TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                priority INTEGER DEFAULT 2,
+                
+                -- Timestamps
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                processing_started_at DATETIME NULL,
+                completed_at DATETIME NULL,
+                last_retry_at DATETIME NULL,
+                
+                -- Processing info
                 retry_count INTEGER DEFAULT 0,
-                source_transaction_signature TEXT,
-                source_wallet_address TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                processing_started_at TIMESTAMP,
-                completed_at TIMESTAMP,
-                last_error TEXT
+                max_retries INTEGER DEFAULT 3,
+                processing_node TEXT NULL,
+                
+                -- Error tracking
+                last_error TEXT NULL,
+                error_count INTEGER DEFAULT 0,
+                
+                -- Metadata
+                source TEXT NULL,
+                metadata TEXT NULL,
+                
+                UNIQUE(token_address, status) ON CONFLICT IGNORE
             )
         ''')
         

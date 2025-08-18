@@ -35,7 +35,7 @@ class CleanupService:
         
         # Repositories for database operations
         self.token_repo = TokenRepository(db_connection, logger)
-        self.history_repo = HistoryRepository(db_connection, logger)
+        self.history_repo = HistoryRepository(db_connection, self.config, logger)
         
         # Cleanup configuration
         self.cleanup_config = {

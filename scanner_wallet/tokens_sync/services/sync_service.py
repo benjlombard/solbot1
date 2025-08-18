@@ -40,7 +40,7 @@ class SyncService:
         # Initialize repositories
         self.token_repo = TokenRepository(self.db_connection, self.logger)
         self.queue_repo = QueueRepository(self.db_connection, self.logger)
-        self.history_repo = HistoryRepository(self.db_connection, self.logger)
+        self.history_repo = HistoryRepository(self.db_connection, self.config, self.logger)
         
         # Initialize API clients
         self.dex_client = DexScreenerClient(logger=self.logger)
@@ -85,14 +85,7 @@ class SyncService:
         self.cycle_count = 0
         self._cycle_started = False  # Flag pour éviter double logging
         
-        # Setup signal handlers
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-    
-    def _signal_handler(self, signum, frame):
-        """Handle termination signals"""
-        self.logger.info("Received termination signal, stopping gracefully...")
-        self.stop()
+        pass
     
     def start(self):
         """Start the continuous synchronization service"""
@@ -350,15 +343,19 @@ class SyncService:
         self.current_sync_cycle_id = None
     
     def _wait_for_next_cycle(self):
-        """Wait for the next sync cycle"""
+        """Wait for the next sync cycle in a way that can be interrupted."""
         interval = self.config.processing.enrichment_interval_seconds
         self.logger.debug(f"⏳ Waiting {interval} seconds until next cycle...")
-        
+
         # Print statistics periodically
         if self.cycle_count % 5 == 0:
             self._print_statistics()
-        
-        time.sleep(interval)
+
+        end_time = time.time() + interval
+        while time.time() < end_time:
+            if not self.running:
+                break
+            time.sleep(1)  # Sleep for 1 second at a time
     
     def _print_statistics(self):
         """Print current service statistics"""

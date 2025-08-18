@@ -42,26 +42,7 @@ class TokenSyncApplication:
         self.sync_service = None
         self.config_override = config_override or {}
         
-        # Signal handling
         self.shutdown_requested = False
-        self._setup_signal_handlers()
-    
-    def _setup_signal_handlers(self):
-        """Setup graceful shutdown signal handlers"""
-        def signal_handler(signum, frame):
-            signal_name = signal.Signals(signum).name
-            print(f"\n🛑 Received {signal_name} signal, initiating graceful shutdown...")
-            self.shutdown_requested = True
-            
-            if self.sync_service:
-                self.sync_service.stop()
-        
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-        
-        # Windows compatibility
-        if hasattr(signal, 'SIGBREAK'):
-            signal.signal(signal.SIGBREAK, signal_handler)
     
     def initialize(self) -> bool:
         """

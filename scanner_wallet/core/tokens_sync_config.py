@@ -66,7 +66,7 @@ class TokenSyncDatabaseConfig:
         if self.path:
             return str(Path(self.path) / self.name)
         
-        db_dir = Path(self.base_dir) / self.data_subdir
+        db_dir = Path(self.base_dir)
         db_dir.mkdir(parents=True, exist_ok=True)
         return str(db_dir / self.name)
     
@@ -331,6 +331,7 @@ class TokenSyncConfig:
         self.monitoring = self._load_monitoring_config()
         self.logging = self._load_logging_config()
         self.queue = self._load_queue_config()
+        self.rpc = self._load_rpc_config()
         
         # Appliquer les ajustements d'environnement
         self._apply_environment_overrides()
@@ -343,7 +344,7 @@ class TokenSyncConfig:
         return TokenSyncDatabaseConfig(
             name=os.getenv('TOKENS_SYNC_DB_NAME', 'solana_wallet_monitor.db'),
             path=os.getenv('TOKENS_SYNC_DB_PATH'),
-            base_dir=os.getenv('TOKENS_SYNC_DB_BASE_DIR', 'database'),
+            base_dir=os.getenv('TOKENS_SYNC_DB_BASE_DIR', 'database/data'),
             timeout=float(os.getenv('TOKENS_SYNC_DB_TIMEOUT', '30.0')),
             backup_enabled=self._get_bool_env('TOKENS_SYNC_DB_BACKUP_ENABLED', True),
             backup_interval_hours=int(os.getenv('TOKENS_SYNC_DB_BACKUP_INTERVAL_HOURS', '12')),
@@ -461,6 +462,22 @@ class TokenSyncConfig:
             completed_items_retention_hours=int(os.getenv('TOKENS_SYNC_QUEUE_COMPLETED_RETENTION', '24')),
             failed_items_retention_days=int(os.getenv('TOKENS_SYNC_QUEUE_FAILED_RETENTION_DAYS', '7'))
         )
+
+    def _load_rpc_config(self):
+        """Charge la configuration RPC depuis la config principale ou des valeurs par défaut"""
+        if self.main_config and hasattr(self.main_config, 'rpc'):
+            return self.main_config.rpc
+        
+        # Fallback vers une configuration RPC par défaut si la config principale n'est pas disponible
+        try:
+            from .config import RPCConfig
+            return RPCConfig()
+        except ImportError:
+            # Fallback encore plus basique si RPCConfig n'est pas importable
+            @dataclass
+            class FallbackRPCConfig:
+                timeout: int = 30
+            return FallbackRPCConfig()
     
     def _apply_environment_overrides(self):
         """Applique les ajustements spécifiques à l'environnement"""

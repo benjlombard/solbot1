@@ -14,8 +14,9 @@ from ..models.token_data import TokenData, HistoricalSnapshot
 class HistoryRepository:
     """Repository for token historical data operations"""
     
-    def __init__(self, db_connection: DatabaseConnection, logger: Optional[logging.Logger] = None):
+    def __init__(self, db_connection: DatabaseConnection, config, logger: Optional[logging.Logger] = None):
         self.db = db_connection
+        self.config = config
         self.logger = logger or logging.getLogger(__name__)
     
     @db_retry(max_retries=3, delay=0.3)
@@ -119,6 +120,7 @@ class HistoryRepository:
                 volume_mc_ratio = (snapshot_data['volume_24h'] / snapshot_data['market_cap']) if snapshot_data['market_cap'] > 0 else 0.0
                 
                 # Insert historical snapshot
+                # Insert historical snapshot
                 cursor.execute("""
                     INSERT INTO tokens_history (
                         token_address,
@@ -137,9 +139,8 @@ class HistoryRepository:
                         snapshot_timestamp, previous_snapshot_id,
                         price_delta_usd, market_cap_delta, volume_24h_delta, 
                         holder_count_delta, rug_risk_score_delta, 
-                        top_holder_percentage_delta, insider_holders_delta,
-                        created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))
+                        top_holder_percentage_delta, insider_holders_delta
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     token_address,
                     snapshot_data.get('price_usd', 0.0), 

@@ -70,7 +70,7 @@ class HistorizationProcessor:
         
         # Initialize repositories
         self.token_repo = TokenRepository(db_connection, logger)
-        self.history_repo = HistoryRepository(db_connection, logger)
+        self.history_repo = HistoryRepository(db_connection, self.config, logger)
         
         # Initialize analyzer
         self.analyzer = TokenAnalyzer()
