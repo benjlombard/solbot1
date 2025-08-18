@@ -1,0 +1,123 @@
+token_sync/
+├── __init__.py
+├── main.py                     # Point d'entrée principal
+├── models/
+│   ├── __init__.py
+│   ├── token_data.py          # Classes de données (TokenData, HistoricalSnapshot, etc.)
+│   └── api_stats.py           # Classes pour les statistiques API
+├── database/
+│   ├── __init__.py
+│   ├── connection.py          # Gestion des connexions DB
+│   ├── token_repository.py    # Opérations CRUD pour tokens
+│   ├── history_repository.py  # Opérations pour l'historique
+│   └── queue_repository.py    # Gestion de la queue de processing
+├── api_clients/
+│   ├── __init__.py
+│   ├── base_client.py         # Client de base avec retry/rate limiting
+│   ├── dexscreener_client.py  # Client DexScreener
+│   ├── pumpfun_client.py      # Client Pump.fun
+│   ├── rugcheck_client.py     # Client RugCheck
+│   └── solana_tracker_client.py
+├── analyzers/
+│   ├── __init__.py
+│   ├── token_analyzer.py      # Analyse des tokens (scores, detection dead tokens)
+│   └── token_type_detector.py # Détection du type de token
+├── processors/
+│   ├── __init__.py
+│   ├── batch_processor.py     # Traitement en batch
+│   ├── token_enricher.py      # Enrichissement des données token
+│   └── historization_processor.py
+├── monitoring/
+│   ├── __init__.py
+│   ├── api_tracker.py         # Tracking des appels API
+│   ├── cycle_logger.py        # Logging des cycles
+│   └── performance_monitor.py # Monitoring des performances
+└── services/
+    ├── __init__.py
+    ├── sync_service.py         # Service principal orchestrateur
+    ├── queue_service.py        # Gestion de la queue
+    └── cleanup_service.py      # Nettoyage et maintenance
+
+
+
+
+
+    Modules principaux
+1. Models (token_data.py)
+Toutes les classes de données centralisées
+2. Database Layer
+
+connection.py: Gestion robuste des connexions SQLite
+token_repository.py: CRUD operations pour les tokens
+history_repository.py: Gestion de l'historique
+queue_repository.py: Gestion de la queue de traitement
+
+3. API Clients
+
+base_client.py: Logique commune (retry, rate limiting, session management)
+Clients spécialisés pour chaque API externe
+
+4. Analyzers
+
+token_analyzer.py: Calculs de scores, détection tokens morts
+token_type_detector.py: Logique de détection du type de token
+
+5. Processors
+
+batch_processor.py: Traitement asynchrone en lots
+token_enricher.py: Enrichissement des données
+historization_processor.py: Gestion de l'historisation
+
+6. Monitoring
+
+api_tracker.py: Suivi des performances API
+cycle_logger.py: Logging spécialisé pour les cycles
+performance_monitor.py: Métriques globales
+
+7. Services
+
+sync_service.py: Orchestrateur principal simplifié
+queue_service.py: Gestion de la queue de traitement
+cleanup_service.py: Maintenance et nettoyage
+
+Avantages de cette architecture
+✅ Séparation des responsabilités
+
+Chaque module a un rôle bien défini
+Facilite les tests unitaires
+Réduction de la complexité
+
+✅ Réutilisabilité
+
+Les composants peuvent être utilisés indépendamment
+Clients API réutilisables pour d'autres projets
+
+✅ Maintenabilité
+
+Modifications isolées par domaine
+Debugging facilité
+Code plus lisible
+
+✅ Extensibilité
+
+Ajout facile de nouveaux clients API
+Nouveaux types d'analyse
+Nouvelles stratégies de traitement
+
+✅ Testabilité
+
+Tests unitaires par module
+Mocking facilité
+Tests d'intégration ciblés
+
+Configuration
+La configuration reste centralisée mais chaque module n'accède qu'aux sections qui le concernent.
+Migration progressive
+
+Commencer par extraire les models
+Séparer les clients API
+Créer les repositories
+Refactoriser les services
+Optimiser le monitoring
+
+Cette architecture permettra une maintenance plus facile et une évolution plus sereine du code.

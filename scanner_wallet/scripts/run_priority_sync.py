@@ -17,9 +17,9 @@ sys.path.insert(0, str(project_root))
 from core.config import get_config
 from core.priority_config import PriorityConfig
 from core.logger import get_logger, SolanaWalletLogger
-from token.priority_manager import TokenPriorityManager
-from token.priority_scheduler import PriorityScheduler
-from token.sync_service import TokenSyncService  # Import de votre service existant
+from tokens.priority_manager import TokenPriorityManager
+from tokens.priority_scheduler import PriorityScheduler
+from tokens.sync_service import TokenSyncService  # Import de votre service existant
 
 class PriorityTokenService:
     """Service principal du système de priorité"""

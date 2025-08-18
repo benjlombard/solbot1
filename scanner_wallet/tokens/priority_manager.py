@@ -11,7 +11,7 @@ from datetime import datetime
 from core.priority_config import TokenPriority, PriorityConfig
 from core.logger import get_logger
 from core.config import get_config
-from token.priority_calculator import TokenPriorityCalculator
+from tokens.priority_calculator import TokenPriorityCalculator
 
 class TokenPriorityManager:
     """Gestionnaire du système de priorité des tokens"""

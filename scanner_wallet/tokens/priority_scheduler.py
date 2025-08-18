@@ -11,7 +11,7 @@ from datetime import datetime
 
 from core.priority_config import TokenPriority, PriorityConfig
 from core.logger import get_logger
-from token.priority_manager import TokenPriorityManager
+from tokens.priority_manager import TokenPriorityManager
 
 class PriorityScheduler:
     """Ordonnanceur des cycles de mise à jour par priorité"""

@@ -333,3 +333,35 @@ Rollback facile si problème
 Performance mesurable avant/après
 
 Voulez-vous que je vous montre le code de ces nouveaux modules ? On peut commencer par le plus simple (priority_calculator.py) pour valider l'approche ?
+
+
+# ====================================================================
+# CONFIGURATION DE PRODUCTION RECOMMANDÉE
+# ====================================================================
+
+# Pour la production, vous pourriez vouloir:
+# - Moins de tokens CRITICAL (plus sélectif)
+# - Plus de tokens HOT (tokens vraiment actifs)
+# - Distribution plus progressive
+
+# Exemple de configuration production:
+# PRIORITY_HOT_THRESHOLD=55.0
+# PRIORITY_WARM_THRESHOLD=25.0  
+# PRIORITY_COLD_THRESHOLD=5.0
+# NEW_TOKEN_AGE_HOURS=0.5
+# CRITICAL_VOLUME_THRESHOLD=5000000
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
