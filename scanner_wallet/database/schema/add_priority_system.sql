@@ -4,8 +4,8 @@
 -- Ajouter les colonnes de priorité à la table tokens
 ALTER TABLE tokens ADD COLUMN priority_level INTEGER DEFAULT 2;  -- WARM par défaut
 ALTER TABLE tokens ADD COLUMN priority_score REAL DEFAULT 50.0;
-ALTER TABLE tokens ADD COLUMN last_priority_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE tokens ADD COLUMN priority_recalc_needed INTEGER DEFAULT 1;
+ALTER TABLE tokens ADD COLUMN last_priority_update INTEGER DEFAULT 0;  -- Timestamp Unix
 
 -- Créer un index pour optimiser les requêtes par priorité
 CREATE INDEX IF NOT EXISTS idx_tokens_priority_level ON tokens(priority_level);
