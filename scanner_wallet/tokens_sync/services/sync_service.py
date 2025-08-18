@@ -41,9 +41,13 @@ class SyncService:
         self.token_repo = TokenRepository(self.db_connection, self.logger)
         self.queue_repo = QueueRepository(self.db_connection, self.logger)
         self.history_repo = HistoryRepository(self.db_connection, self.config, self.logger)
-        
+        self.api_tracker = ApiTracker(
+            db_connection=self.db_connection, 
+            logger=self.logger
+        )
+        self.cycle_logger = CycleLogger(logger=self.logger)
         # Initialize API clients
-        self.dex_client = DexScreenerClient(logger=self.logger)
+        self.dex_client = DexScreenerClient(logger=self.logger, api_tracker=self.api_tracker)
         
         # Initialize processors
         self.batch_processor = BatchProcessor(
@@ -87,6 +91,21 @@ class SyncService:
         
         pass
     
+    def get_api_statistics(self) -> Dict[str, Any]:
+        """Get detailed API statistics"""
+        try:
+            return {
+                'api_tracker_stats': self.api_tracker.get_stats(),
+                'global_stats': self.api_tracker.get_global_stats(),
+                'health_report': self.api_tracker.get_api_health_report(),
+                'top_apis_by_calls': self.api_tracker.get_top_apis(limit=10, sort_by='calls'),
+                'top_apis_by_duration': self.api_tracker.get_top_apis(limit=5, sort_by='duration'),
+                'top_apis_by_failures': self.api_tracker.get_top_apis(limit=5, sort_by='failures')
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting API statistics: {e}")
+            return {'error': str(e)}
+
     def start(self):
         """Start the continuous synchronization service"""
         self.logger.info("🚀 Starting Token Sync Service...")
@@ -441,17 +460,33 @@ class SyncService:
     def _print_api_statistics(self):
         """Print API usage statistics"""
         try:
-            api_stats = self.api_tracker.get_stats()
+            self.logger.info("=== 🌐 API STATISTICS ===")
             
-            if api_stats:
-                self.logger.info("=== 🌐 API STATISTICS ===")
-                for api_name, stats in api_stats.items():
-                    if stats.get('total_calls', 0) > 0:
-                        self.logger.info(
-                            f"🔗 {api_name}: {stats.get('total_calls', 0)} calls, "
-                            f"avg {stats.get('avg_duration_seconds', 0):.3f}s, "
-                            f"rate {stats.get('rate_per_minute_5m', 0):.1f}/min"
-                        )
+            # Stats globales
+            global_stats = self.api_tracker.get_global_stats()
+            if global_stats:
+                self.logger.info(f"🌍 Global: {global_stats.get('total_api_calls', 0)} total calls")
+                self.logger.info(f"📊 Success rate: {global_stats.get('global_success_rate', 0):.1f}%")
+                self.logger.info(f"⚡ Current rate: {global_stats.get('current_rate_1m', 0)} calls/min")
+            
+            # Top APIs par nombre d'appels
+            top_apis = self.api_tracker.get_top_apis(limit=5, sort_by='calls')
+            if top_apis:
+                self.logger.info("🔝 Top APIs by calls:")
+                for api_name, stats in top_apis:
+                    self.logger.info(
+                        f"  🔗 {api_name}: {stats.get('total_calls', 0)} calls, "
+                        f"avg {stats.get('avg_duration_seconds', 0):.3f}s, "
+                        f"success {stats.get('success_rate', 0):.1f}%"
+                    )
+            
+            # Health report
+            health_report = self.api_tracker.get_api_health_report()
+            if health_report.get('failing_apis'):
+                self.logger.warning(f"⚠️ Failing APIs: {health_report['failing_apis']}")
+            if health_report.get('degraded_apis'):
+                self.logger.warning(f"🐌 Degraded APIs: {health_report['degraded_apis']}")
+                
         except Exception as e:
             self.logger.debug(f"Error printing API statistics: {e}")
     

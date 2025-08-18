@@ -189,6 +189,8 @@ class TokenSyncApplication:
             # Add some tokens to queue for initial processing if needed
             self._populate_initial_queue()
             
+            self._setup_signal_handlers()
+
             # Start the main sync service
             self.sync_service.start()
             
@@ -198,6 +200,7 @@ class TokenSyncApplication:
             
         except KeyboardInterrupt:
             self.logger.info("🛑 Keyboard interrupt received")
+            self._print_final_api_statistics()
             return 0
             
         except Exception as e:
@@ -245,17 +248,137 @@ class TokenSyncApplication:
         except Exception as e:
             self.logger.error(f"❌ Error during cleanup: {e}")
     
+        def _setup_signal_handlers(self):
+            """Setup signal handlers pour afficher les stats"""
+            import signal
+            
+            def signal_handler(signum, frame):
+                if signum == signal.SIGUSR1:  # Signal personnalisé pour stats
+                    self._print_detailed_api_statistics()
+                elif signum == signal.SIGINT:
+                    self.logger.info("🛑 Interrupt signal received")
+                    self._print_final_api_statistics()
+                    sys.exit(0)
+            
+            try:
+                signal.signal(signal.SIGUSR1, signal_handler)
+                signal.signal(signal.SIGINT, signal_handler)
+                self.logger.debug("📡 Signal handlers configured (send SIGUSR1 for API stats)")
+            except Exception as e:
+                self.logger.debug(f"Could not setup signal handlers: {e}")
+    
+        def _print_detailed_api_statistics(self):
+            """Afficher des statistiques API détaillées"""
+            try:
+                if hasattr(self.sync_service, 'get_api_statistics'):
+                    self.logger.info("=" * 80)
+                    self.logger.info("📊 DETAILED API STATISTICS ON DEMAND")
+                    self.logger.info("=" * 80)
+                    
+                    api_stats = self.sync_service.get_api_statistics()
+                    
+                    # Stats globales
+                    global_stats = api_stats.get('global_stats', {})
+                    if global_stats:
+                        self.logger.info(f"🌍 Total API calls: {global_stats.get('total_api_calls', 0)}")
+                        self.logger.info(f"📊 Global success rate: {global_stats.get('global_success_rate', 0):.1f}%")
+                        self.logger.info(f"⏱️ Runtime: {global_stats.get('runtime_hours', 0):.1f} hours")
+                        self.logger.info(f"⚡ Current rate: {global_stats.get('current_rate_1m', 0)} calls/min")
+                    
+                    # Top APIs
+                    top_apis = api_stats.get('top_apis_by_calls', [])
+                    if top_apis:
+                        self.logger.info("\n🔝 TOP APIs BY CALLS:")
+                        for i, (api_name, stats) in enumerate(top_apis[:10], 1):
+                            self.logger.info(
+                                f"  {i:2d}. {api_name}: {stats.get('total_calls', 0)} calls "
+                                f"(avg: {stats.get('avg_duration_seconds', 0):.3f}s, "
+                                f"success: {stats.get('success_rate', 0):.1f}%)"
+                            )
+                    
+                    # Health report
+                    health_report = api_stats.get('health_report', {})
+                    if health_report.get('failing_apis'):
+                        self.logger.warning(f"\n⚠️  FAILING APIS: {len(health_report['failing_apis'])}")
+                        for api_info in health_report['failing_apis']:
+                            self.logger.warning(f"  ❌ {api_info['name']}: {api_info['consecutive_failures']} failures")
+                    
+                    if health_report.get('degraded_apis'):
+                        self.logger.warning(f"\n🐌 DEGRADED APIS: {len(health_report['degraded_apis'])}")
+                        for api_info in health_report['degraded_apis']:
+                            self.logger.warning(f"  ⚠️  {api_info['name']}: {api_info['success_rate']:.1f}% success")
+                    
+                    self.logger.info("=" * 80)
+                    
+            except Exception as e:
+                self.logger.error(f"Error printing detailed API statistics: {e}")
+    
+        def _print_final_api_statistics(self):
+            """Afficher les statistiques API finales au shutdown"""
+            try:
+                self.logger.info("=" * 80)
+                self.logger.info("📊 FINAL API STATISTICS SUMMARY")
+                self.logger.info("=" * 80)
+                
+                if hasattr(self.sync_service, 'api_tracker'):
+                    # Stats globales finales
+                    global_stats = self.sync_service.api_tracker.get_global_stats()
+                    if global_stats:
+                        self.logger.info(f"🌍 SESSION TOTAL: {global_stats.get('total_api_calls', 0)} API calls")
+                        self.logger.info(f"📊 SUCCESS RATE: {global_stats.get('global_success_rate', 0):.1f}%")
+                        self.logger.info(f"⏱️  RUNTIME: {global_stats.get('runtime_hours', 0):.1f} hours")
+                        self.logger.info(f"⚡ AVG RATE: {global_stats.get('calls_per_second', 0):.2f} calls/second")
+                    
+                    # Top 5 endpoints
+                    top_apis = self.sync_service.api_tracker.get_top_apis(limit=5, sort_by='calls')
+                    if top_apis:
+                        self.logger.info("\n🏆 TOP 5 MOST USED ENDPOINTS:")
+                        for i, (api_name, stats) in enumerate(top_apis, 1):
+                            calls = stats.get('total_calls', 0)
+                            avg_duration = stats.get('avg_duration_seconds', 0)
+                            success_rate = stats.get('success_rate', 0)
+                            self.logger.info(f"  {i}. {api_name}: {calls} calls ({avg_duration:.3f}s avg, {success_rate:.1f}% success)")
+                    
+                    # Recommendations finales
+                    health_report = self.sync_service.api_tracker.get_api_health_report()
+                    if health_report.get('recommendations'):
+                        self.logger.info("\n💡 RECOMMENDATIONS:")
+                        for rec in health_report['recommendations']:
+                            self.logger.info(f"  • {rec}")
+                
+                self.logger.info("=" * 80)
+                
+            except Exception as e:
+                self.logger.error(f"Error printing final API statistics: {e}")
+
     def get_status(self) -> dict:
         """Get current application status"""
-        if not self.sync_service:
-            return {'status': 'not_initialized'}
-        
-        return {
+        base_status = {
             'status': 'running' if not self.shutdown_requested else 'shutting_down',
-            'service_status': self.sync_service.get_service_status(),
             'config_loaded': self.config is not None,
             'logger_initialized': self.logger is not None
         }
+        
+        if self.sync_service:
+            service_status = self.sync_service.get_service_status()
+            base_status['service_status'] = service_status
+            
+            # ========== AJOUTER: API statistics dans le status ==========
+            if hasattr(self.sync_service, 'get_api_statistics'):
+                try:
+                    api_stats = self.sync_service.get_api_statistics()
+                    base_status['api_statistics'] = {
+                        'total_calls': api_stats.get('global_stats', {}).get('total_api_calls', 0),
+                        'success_rate': api_stats.get('global_stats', {}).get('global_success_rate', 0),
+                        'active_endpoints': len(api_stats.get('api_tracker_stats', {})),
+                        'health_status': 'healthy' if not api_stats.get('health_report', {}).get('failing_apis') else 'degraded'
+                    }
+                except Exception as e:
+                    base_status['api_statistics'] = {'error': str(e)}
+        else:
+            base_status['service_status'] = {'status': 'not_initialized'}
+        
+        return base_status
 
 
 def parse_arguments():

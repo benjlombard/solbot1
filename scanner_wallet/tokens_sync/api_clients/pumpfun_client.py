@@ -14,7 +14,7 @@ class PumpFunClient(BaseApiClient):
     Client for Pump.fun API with specialized methods for token data retrieval
     """
     
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, api_tracker=None):
         # Pump.fun has stricter rate limits
         super().__init__(
             base_url="https://frontend-api-v3.pump.fun",
@@ -25,7 +25,8 @@ class PumpFunClient(BaseApiClient):
                 calls_per_hour=1800,
                 burst_limit=5
             ),
-            logger=logger
+            logger=logger,
+            api_tracker=api_tracker
         )
         
         # Alternative endpoints for fallback
@@ -89,17 +90,20 @@ class PumpFunClient(BaseApiClient):
                 original_base_url = self.base_url
                 self.base_url = fallback_url
                 
-                response = self.make_request(f"coins/{token_address}")
-                
-                # Restore original base URL
-                self.base_url = original_base_url
-                
-                if response.success:
-                    token_data = self._parse_pump_response(token_address, response.data)
-                    if token_data:
-                        self.logger.debug(f"✅ Found data via fallback: {fallback_url}")
-                        return token_data
-                
+                try:
+                    # Utiliser make_request au lieu de requests direct
+                    fallback_response = self.make_request(f"coins/{token_address}")
+                    
+                    if fallback_response.success:
+                        token_data = self._parse_pump_response(token_address, fallback_response.data)
+                        if token_data:
+                            self.logger.debug(f"✅ Found data via fallback: {fallback_url}")
+                            return token_data
+                            
+                finally:
+                    # Restaurer l'URL originale
+                    self.base_url = original_base_url
+                    
             except Exception as e:
                 self.logger.debug(f"Fallback endpoint {fallback_url} failed: {e}")
                 continue
@@ -135,18 +139,23 @@ class PumpFunClient(BaseApiClient):
             try:
                 self.logger.debug(f"Trying async fallback: {fallback_url}")
                 
-                async with session.get(
-                    f"{fallback_url}/coins/{token_address}",
-                    timeout=aiohttp.ClientTimeout(total=self.timeout)
-                ) as resp:
+                original_base_url = self.base_url
+                self.base_url = fallback_url
+                
+                try:
+                    # Utiliser make_async_request au lieu d'aiohttp direct
+                    fallback_response = await self.make_async_request(session, f"coins/{token_address}")
                     
-                    if resp.status == 200:
-                        data = await resp.json()
-                        token_data = self._parse_pump_response(token_address, data)
+                    if fallback_response.success:
+                        token_data = self._parse_pump_response(token_address, fallback_response.data)
                         if token_data:
                             self.logger.debug(f"✅ Found data via async fallback: {fallback_url}")
                             return token_data
-                
+                            
+                finally:
+                    # Restaurer l'URL originale
+                    self.base_url = original_base_url
+                    
             except Exception as e:
                 self.logger.debug(f"Async fallback {fallback_url} failed: {e}")
                 continue

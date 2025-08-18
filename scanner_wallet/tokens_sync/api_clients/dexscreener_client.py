@@ -14,7 +14,7 @@ class DexScreenerClient(BaseApiClient):
     Client for DexScreener API with specialized methods for token data retrieval
     """
     
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, api_tracker=None):
         super().__init__(
             base_url="https://api.dexscreener.com/latest",
             api_name="dexscreener",
@@ -24,7 +24,8 @@ class DexScreenerClient(BaseApiClient):
                 calls_per_hour=3600,
                 burst_limit=10
             ),
-            logger=logger
+            logger=logger,
+            api_tracker=api_tracker
         )
     
     def get_api_info(self) -> Dict:

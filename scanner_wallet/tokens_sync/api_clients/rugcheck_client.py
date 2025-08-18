@@ -14,7 +14,7 @@ class RugCheckClient(BaseApiClient):
     Client for RugCheck.xyz API with specialized methods for token security analysis
     """
     
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, api_tracker=None):
         # RugCheck has reasonable rate limits
         super().__init__(
             base_url="https://api.rugcheck.xyz/v1",
@@ -25,7 +25,8 @@ class RugCheckClient(BaseApiClient):
                 calls_per_hour=2400,
                 burst_limit=8
             ),
-            logger=logger
+            logger=logger,
+            api_tracker=api_tracker
         )
     
     def get_api_info(self) -> Dict:

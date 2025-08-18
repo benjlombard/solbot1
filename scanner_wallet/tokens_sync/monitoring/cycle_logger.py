@@ -303,16 +303,32 @@ class CycleLogger:
         
         self.logger.info(f"  📊 Total operations: {cycle.total_operations}")
         
-        # API calls summary
         if cycle.api_calls:
-            self.logger.info("🌐 API CALLS:")
-            self.logger.info(f"  📡 Total calls: {cycle.total_api_calls}")
+            self.logger.info("🌐 API CALLS BREAKDOWN:")
+            self.logger.info(f"  📡 Total API calls: {cycle.total_api_calls}")
             self.logger.info(f"  📈 Rate: {cycle.api_calls_per_minute:.1f} calls/min")
             
-            # Group API calls by service
-            api_groups = self._group_api_calls(cycle.api_calls)
-            for service, calls in api_groups.items():
-                self.logger.info(f"  🔸 {service}: {calls} calls")
+            # Grouper et afficher par service
+            api_groups = self._group_api_calls_detailed(cycle.api_calls)
+            for service, endpoints in api_groups.items():
+                total_service_calls = sum(endpoints.values())
+                self.logger.info(f"  🔸 {service}: {total_service_calls} calls total")
+                
+                # Afficher les top 3 endpoints de ce service
+                top_endpoints = sorted(endpoints.items(), key=lambda x: x[1], reverse=True)[:3]
+                for endpoint, calls in top_endpoints:
+                    endpoint_short = endpoint.replace(f"{service.lower()}_", "")
+                    self.logger.info(f"    └─ {endpoint_short}: {calls} calls")
+            
+            # Afficher les durées moyennes si disponibles
+            if cycle.api_durations:
+                self.logger.info("  ⏱️ API Response Times:")
+                for api_name, durations in cycle.api_durations.items():
+                    if durations:
+                        avg_duration = sum(durations) / len(durations)
+                        max_duration = max(durations)
+                        api_short = api_name.replace("dexscreener_", "dex_").replace("pumpfun_", "pump_")
+                        self.logger.info(f"    └─ {api_short}: avg {avg_duration:.3f}s, max {max_duration:.3f}s")
         
         # Performance metrics
         self.logger.info("⚡ PERFORMANCE:")
@@ -334,6 +350,86 @@ class CycleLogger:
             if cycle.warnings:
                 self.logger.info(f"  ⚠️ Warnings: {len(cycle.warnings)}")
     
+
+    
+    def _group_api_calls_detailed(self, api_calls: Dict[str, int]) -> Dict[str, Dict[str, int]]:
+        """Group API calls by service with endpoint details"""
+        groups = {
+            'DexScreener': {},
+            'PumpFun': {},
+            'RugCheck': {},
+            'SolanaTracker': {},
+            'Other': {}
+        }
+        
+        for api_name, count in api_calls.items():
+            # Déterminer le service et l'endpoint
+            if api_name.startswith('dexscreener_'):
+                groups['DexScreener'][api_name] = count
+            elif api_name.startswith('pumpfun_'):
+                groups['PumpFun'][api_name] = count
+            elif api_name.startswith('rugcheck_'):
+                groups['RugCheck'][api_name] = count
+            elif api_name.startswith('solanatracker_'):
+                groups['SolanaTracker'][api_name] = count
+            else:
+                groups['Other'][api_name] = count
+        
+        # Retourner seulement les groupes qui ont des appels
+        return {service: endpoints for service, endpoints in groups.items() if endpoints}
+
+
+    # ========== NOUVELLE MÉTHODE: Pour obtenir un rapport API détaillé ==========
+    def get_api_usage_report(self, cycles: int = 10) -> Dict:
+        """Get detailed API usage report for the last N cycles"""
+        if not self.cycle_history:
+            return {}
+        
+        recent_cycles = self.cycle_history[-cycles:] if len(self.cycle_history) >= cycles else self.cycle_history
+        
+        # Agréger tous les appels API
+        all_api_calls = {}
+        all_durations = {}
+        
+        for cycle in recent_cycles:
+            for api_name, count in cycle.api_calls.items():
+                all_api_calls[api_name] = all_api_calls.get(api_name, 0) + count
+            
+            for api_name, durations in cycle.api_durations.items():
+                if api_name not in all_durations:
+                    all_durations[api_name] = []
+                all_durations[api_name].extend(durations)
+        
+        # Calculer les statistiques
+        api_stats = {}
+        for api_name, total_calls in all_api_calls.items():
+            durations = all_durations.get(api_name, [])
+            
+            api_stats[api_name] = {
+                'total_calls': total_calls,
+                'avg_calls_per_cycle': total_calls / len(recent_cycles),
+                'avg_duration': sum(durations) / len(durations) if durations else 0,
+                'min_duration': min(durations) if durations else 0,
+                'max_duration': max(durations) if durations else 0
+            }
+        
+        return {
+            'cycles_analyzed': len(recent_cycles),
+            'total_api_calls': sum(all_api_calls.values()),
+            'unique_endpoints': len(all_api_calls),
+            'api_statistics': api_stats,
+            'top_endpoints_by_calls': sorted(
+                [(name, stats['total_calls']) for name, stats in api_stats.items()], 
+                key=lambda x: x[1], 
+                reverse=True
+            )[:10],
+            'slowest_endpoints': sorted(
+                [(name, stats['avg_duration']) for name, stats in api_stats.items() if stats['avg_duration'] > 0], 
+                key=lambda x: x[1], 
+                reverse=True
+            )[:5]
+        }
+
     def _log_cumulative_summary(self):
         """Log cumulative statistics summary"""
         cumul = self.cumulative_stats

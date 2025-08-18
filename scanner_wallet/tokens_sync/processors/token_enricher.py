@@ -601,7 +601,8 @@ def create_token_enricher(
     rugcheck_client: RugCheckClient,
     solana_tracker_client: Optional[SolanaTrackerClient] = None,
     config=None,
-    logger: Optional[logging.Logger] = None
+    logger: Optional[logging.Logger] = None,
+    api_tracker=None
 ) -> TokenEnricher:
     """
     Factory function to create a configured token enricher
@@ -613,10 +614,23 @@ def create_token_enricher(
         solana_tracker_client: Optional SolanaTracker API client
         config: Configuration object
         logger: Optional logger instance
+        api_tracker: Optional API tracker for monitoring
         
     Returns:
         Configured TokenEnricher instance
     """
+
+    if api_tracker:
+        # Vérifier si les clients ont déjà api_tracker
+        if not hasattr(dex_client, 'api_tracker') or dex_client.api_tracker is None:
+            dex_client.api_tracker = api_tracker
+        if not hasattr(pump_client, 'api_tracker') or pump_client.api_tracker is None:
+            pump_client.api_tracker = api_tracker
+        if not hasattr(rugcheck_client, 'api_tracker') or rugcheck_client.api_tracker is None:
+            rugcheck_client.api_tracker = api_tracker
+        if solana_tracker_client and (not hasattr(solana_tracker_client, 'api_tracker') or solana_tracker_client.api_tracker is None):
+            solana_tracker_client.api_tracker = api_tracker
+            
     return TokenEnricher(
         dex_client=dex_client,
         pump_client=pump_client,
