@@ -128,40 +128,93 @@ class SyncService:
         cycle_id = self._start_sync_cycle()
         
         # Log seulement si pas déjà loggé
-        if not self._cycle_started:
+        if cycle_id != getattr(self, '_last_logged_cycle_id', None):
             self.logger.info(f"🔄 CYCLE {self.cycle_count} STARTED - ID: {cycle_id}")
-            self._cycle_started = True
+            self._last_logged_cycle_id = cycle_id
         
-        try:
-            # 1. Process new tokens from queue
-            new_tokens_processed = self._process_new_tokens()
-            self.cycle_logger.record_operation('new_tokens', new_tokens_processed)
-            
-            # 2. Update existing token prices
-            prices_updated = self._update_existing_prices()
-            self.cycle_logger.record_operation('updated_tokens', prices_updated)
-            
-            # 3. Historization améliorée
-            historized_count = self._run_historization_improved()
-            self.cycle_logger.record_operation('historized_tokens', historized_count)
-            
-            # 4. Periodic tasks (every N cycles)
+        Voici la version complète corrigée de _run_sync_cycle dans sync_service.py :
+pythondef _run_sync_cycle(self):
+    """Run one complete synchronization cycle"""
+    self.cycle_count += 1
+    cycle_id = self._start_sync_cycle()
+    
+    # Log seulement une fois par cycle unique
+    if cycle_id != getattr(self, '_last_logged_cycle_id', None):
+        self.logger.info(f"🔄 CYCLE {self.cycle_count} STARTED - ID: {cycle_id}")
+        self._last_logged_cycle_id = cycle_id
+    
+    try:
+        # 1. Process new tokens from queue
+        self.logger.debug("📥 Processing new tokens from queue...")
+        new_tokens_processed = self._process_new_tokens()
+        self.cycle_logger.record_operation('new_tokens', new_tokens_processed)
+        
+        if new_tokens_processed > 0:
+            self.logger.info(f"➕ Processed {new_tokens_processed} new tokens")
+        
+        # 2. Update existing token prices
+        self.logger.debug("🔄 Updating existing token prices...")
+        prices_updated = self._update_existing_prices()
+        self.cycle_logger.record_operation('updated_tokens', prices_updated)
+        
+        if prices_updated > 0:
+            self.logger.info(f"🔄 Updated {prices_updated} token prices")
+        
+        # 3. Historization améliorée
+        self.logger.debug("📈 Running historization...")
+        historized_count = self._run_historization_improved()
+        self.cycle_logger.record_operation('historized_tokens', historized_count)
+        
+        if historized_count > 0:
+            self.logger.info(f"📈 Historized {historized_count} tokens")
+        
+        # 4. Periodic tasks (every N cycles)
+        if self.cycle_count % 5 == 0:
+            self.logger.debug("⚙️ Running periodic tasks...")
             self._run_periodic_tasks()
-            
-            # Update statistics
-            self.stats['processed_tokens'] += new_tokens_processed + prices_updated
-            
+        
+        # Update statistics
+        total_processed = new_tokens_processed + prices_updated
+        self.stats['processed_tokens'] += total_processed
+        self.stats['successful_updates'] += total_processed  # Assuming all processed are successful for now
+        
+        # Log cycle completion
+        if total_processed > 0 or historized_count > 0:
             self.logger.info(
                 f"✅ CYCLE {self.cycle_count} COMPLETED: "
                 f"{new_tokens_processed} new, {prices_updated} updated, {historized_count} historized"
             )
-            
-        except Exception as e:
-            self.logger.error(f"Error in sync cycle {cycle_id}: {e}", exc_info=True)
-            self.cycle_logger.record_error(str(e))
-        finally:
+        else:
+            self.logger.debug(f"✅ CYCLE {self.cycle_count} COMPLETED: No tokens to process")
+        
+        # Record API calls from this cycle
+        if hasattr(self.api_tracker, 'get_stats'):
+            api_stats = self.api_tracker.get_stats()
+            for api_name, stats in api_stats.items():
+                if stats.get('calls_1m', 0) > 0:
+                    self.cycle_logger.record_api_call(
+                        api_name, 
+                        stats.get('calls_1m', 0),
+                        stats.get('avg_duration_1m', 0)
+                    )
+        
+    except KeyboardInterrupt:
+        self.logger.info("🛑 Keyboard interrupt received during cycle")
+        raise
+    except Exception as e:
+        self.logger.error(f"❌ Error in sync cycle {cycle_id}: {e}", exc_info=True)
+        self.cycle_logger.record_error(str(e))
+        self.stats['failed_updates'] += 1
+        
+        # Don't re-raise to allow service to continue
+        # but log the error for investigation
+        
+    finally:
+        # Always end the cycle properly
+        try:
             self._end_sync_cycle(cycle_id)
-            self._cycle_started = False  # Reset flag
+        except Exception as e:
+            self.logger.error(f"Error ending sync cycle {cycle_id}: {e}")
     
     def _process_new_tokens(self) -> int:
         """Process new tokens from the queue"""

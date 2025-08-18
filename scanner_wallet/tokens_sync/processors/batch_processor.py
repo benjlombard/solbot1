@@ -123,7 +123,7 @@ class BatchProcessor:
                 # Try individual requests for missing tokens
                 fallback_start = time.time()
                 individual_results = await self._fetch_individual_tokens(session, list(missing_tokens))
-                allback_duration = time.time() - fallback_start
+                fallback_duration = time.time() - fallback_start
             
                 self.logger.info(f"🔍 Individual fallback completed in {fallback_duration:.2f}s, found {len(individual_results)} tokens")
                 tokens_data.update(individual_results)
