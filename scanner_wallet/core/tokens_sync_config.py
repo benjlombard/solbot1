@@ -343,7 +343,7 @@ class TokenSyncConfig:
         return TokenSyncDatabaseConfig(
             name=os.getenv('TOKENS_SYNC_DB_NAME', 'solana_wallet_monitor.db'),
             path=os.getenv('TOKENS_SYNC_DB_PATH'),
-            base_dir=os.getenv('TOKENS_SYNC_DB_BASE_DIR', 'database/data'),
+            base_dir=os.getenv('TOKENS_SYNC_DB_BASE_DIR', 'database'),
             timeout=float(os.getenv('TOKENS_SYNC_DB_TIMEOUT', '30.0')),
             backup_enabled=self._get_bool_env('TOKENS_SYNC_DB_BACKUP_ENABLED', True),
             backup_interval_hours=int(os.getenv('TOKENS_SYNC_DB_BACKUP_INTERVAL_HOURS', '12')),
