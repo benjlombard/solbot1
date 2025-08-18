@@ -11,7 +11,8 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
 from ..database.connection import DatabaseConnection
-from ..database.token_repository import TokenRepository, QueueRepository
+from ..database.token_repository import TokenRepository
+from ..database.queue_repository import QueueRepository
 from ..database.history_repository import HistoryRepository
 from ..api_clients.dexscreener_client import DexScreenerClient
 from ..processors.batch_processor import BatchProcessor
@@ -175,7 +176,7 @@ class SyncService:
         
         # Get pending tokens from queue
         pending_tokens = self.queue_repo.get_pending_tokens(
-            self.config.batching.batch_sizes.get('dexscreener', 60)
+            self.config.processing.batch_size_new_tokens
         )
         
         if not pending_tokens:
@@ -220,7 +221,7 @@ class SyncService:
             # Obtenir les tokens qui ont besoin d'historisation
             tokens_to_historize = self.token_repo.get_tokens_needing_historization(
                 interval_seconds=historization_interval,
-                limit=min(50, self.config.batching.batch_sizes.get('historization', 50))
+                limit=min(50, self.config.processing.batch_size_historization)
             )
             
             if not tokens_to_historize:
@@ -275,7 +276,7 @@ class SyncService:
         
         try:
             tokens_missing_timestamps = self.token_repo.get_tokens_missing_creation_timestamp(
-                limit=min(50, self.config.batching.batch_sizes.get('dexscreener', 60))
+                limit=min(50, self.config.apis.dexscreener_batch_size)
             )
             
             if not tokens_missing_timestamps:
@@ -350,7 +351,7 @@ class SyncService:
     
     def _wait_for_next_cycle(self):
         """Wait for the next sync cycle"""
-        interval = self.config.monitoring.enrichment_interval_seconds
+        interval = self.config.processing.enrichment_interval_seconds
         self.logger.debug(f"⏳ Waiting {interval} seconds until next cycle...")
         
         # Print statistics periodically

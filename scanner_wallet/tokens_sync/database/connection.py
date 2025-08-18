@@ -26,7 +26,56 @@ class DatabaseConnection:
         
         # Ensure database directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Initialize schema if database is new or tables are missing
+        self.initialize_schema()
     
+    def initialize_schema(self):
+        """
+        Initializes the database schema by executing SQL scripts
+        from the schema directory.
+        """
+        try:
+            with self.get_connection_context() as conn:
+                cursor = conn.cursor()
+                # Check if tables exist
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tokens'")
+                if cursor.fetchone():
+                    self.logger.debug("Database schema already exists.")
+                    return
+
+                self.logger.info("Initializing new database schema...")
+                
+                # Correctly locate the schema directory
+                schema_dir = Path(__file__).parent.parent.parent / "database" / "schema"
+                
+                if not schema_dir.exists():
+                    self.logger.error(f"Schema directory not found at {schema_dir}")
+                    raise DatabaseConnectionError(f"Schema directory not found: {schema_dir}")
+
+                sql_files = sorted(list(schema_dir.glob('*.sql')))
+                
+                for sql_file in sql_files:
+                    try:
+                        with open(sql_file, 'r', encoding='utf-8') as f:
+                            sql_script = f.read()
+                            # Execute script, handling multiple statements
+                            for statement in sql_script.split(';'):
+                                if statement.strip():
+                                    cursor.execute(statement)
+                            self.logger.debug(f"Executed schema file: {sql_file.name}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to execute schema file {sql_file.name}: {e}")
+                        raise
+                
+                conn.commit()
+                self.logger.info("✅ Database schema initialized successfully.")
+
+        except Exception as e:
+            self.logger.error(f"Failed to initialize database schema: {e}", exc_info=True)
+            # We don't re-raise here to allow the application to continue
+            # if the database is already set up, but we log it as a critical error.
+
     def get_connection(self, retries: int = 5, delay: float = 0.1) -> sqlite3.Connection:
         """
         Get a database connection with retry logic and optimizations

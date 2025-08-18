@@ -9,16 +9,17 @@ import signal
 import logging
 import argparse
 import asyncio
+import time
 from pathlib import Path
 from typing import Optional
 
 # Add project root to path
-project_root = Path(__file__).parent.absolute()
+project_root = Path(__file__).parent.parent.absolute()
 sys.path.insert(0, str(project_root))
 
 # Import configuration and logging from the existing core modules
 try:
-    from core.config import get_config
+    from core.tokens_sync_config import get_tokens_sync_config
     from core.logger import get_logger, SolanaWalletLogger
 except ImportError as e:
     print(f"❌ Error importing core modules: {e}")
@@ -71,7 +72,7 @@ class TokenSyncApplication:
         """
         try:
             # 1. Load configuration
-            self.config = get_config()
+            self.config = get_tokens_sync_config()
             
             # Apply any config overrides
             if self.config_override:
@@ -107,26 +108,30 @@ class TokenSyncApplication:
     
     def _apply_config_overrides(self):
         """Apply configuration overrides"""
-        for key, value in self.config_override.items():
-            if hasattr(self.config, key):
-                setattr(self.config, key, value)
-                if self.logger:
-                    self.logger.info(f"🔧 Config override: {key} = {value}")
+        if 'sync_interval' in self.config_override:
+            self.config.processing.enrichment_interval_seconds = self.config_override['sync_interval']
+            if self.logger:
+                self.logger.info(f"🔧 Config override: processing.enrichment_interval_seconds = {self.config_override['sync_interval']}")
+
+        if 'batch_size' in self.config_override:
+            self.config.apis.dexscreener_batch_size = self.config_override['batch_size']
+            if self.logger:
+                self.logger.info(f"🔧 Config override: apis.dexscreener_batch_size = {self.config_override['batch_size']}")
     
     def _setup_logging(self) -> logging.Logger:
         """Setup specialized logging for the sync service"""
         # Use environment variables for sync service specific logging
-        sync_log_file = os.getenv('SYNC_SERVICE_LOG_FILE', 'token_sync_service.log')
-        sync_log_level = os.getenv('SYNC_SERVICE_LOG_LEVEL', self.config.logging.level.value)
-        sync_log_max_size = int(os.getenv('SYNC_SERVICE_LOG_MAX_SIZE_MB', '100'))
-        sync_log_backup_count = int(os.getenv('SYNC_SERVICE_LOG_BACKUP_COUNT', '10'))
+        sync_log_file = os.getenv('SYNC_SERVICE_LOG_FILE', self.config.logging.log_file)
+        sync_log_level = os.getenv('SYNC_SERVICE_LOG_LEVEL', self.config.logging.level)
+        sync_log_max_size = int(os.getenv('SYNC_SERVICE_LOG_MAX_SIZE_MB', self.config.logging.max_file_size_mb))
+        sync_log_backup_count = int(os.getenv('SYNC_SERVICE_LOG_BACKUP_COUNT', self.config.logging.backup_count))
         
         # Create specialized logger
         sync_logger = SolanaWalletLogger(
             log_level=sync_log_level,
-            log_file=str(Path(self.config.logging.base_dir) / sync_log_file),
+            log_file=str(Path(self.config.logging.log_dir) / sync_log_file),
             console_output=self.config.logging.console_output,
-            json_output=self.config.logging.json_output,
+            json_output=self.config.logging.json_format,
             max_file_size=sync_log_max_size * 1024 * 1024,
             backup_count=sync_log_backup_count,
             max_age_days=self.config.logging.max_age_days,
@@ -139,12 +144,12 @@ class TokenSyncApplication:
         logger.info("=" * 80)
         logger.info("🚀 TOKEN SYNCHRONIZATION SERVICE STARTING")
         logger.info("=" * 80)
-        logger.info(f"📝 Log file: {Path(self.config.logging.base_dir) / sync_log_file}")
+        logger.info(f"📝 Log file: {Path(self.config.logging.log_dir) / sync_log_file}")
         logger.info(f"📋 Log level: {sync_log_level}")
         logger.info(f"📊 Database: {self.config.database.get_full_path()}")
-        logger.info(f"🔄 Sync interval: {self.config.monitoring.enrichment_interval_seconds}s")
-        logger.info(f"📈 Price update interval: {self.config.monitoring.price_update_interval_seconds}s")
-        logger.info(f"🎯 Batch size: {self.config.batching.batch_sizes.get('dexscreener', 30)}")
+        logger.info(f"🔄 Sync interval: {self.config.processing.enrichment_interval_seconds}s")
+        logger.info(f"📈 Price update interval: {self.config.processing.price_update_interval_seconds}s")
+        logger.info(f"🎯 Batch size: {self.config.apis.dexscreener_batch_size}")
         
         return logger
     
@@ -222,8 +227,8 @@ class TokenSyncApplication:
             # Get new tokens from transactions that aren't in the queue yet
             if hasattr(self.sync_service, 'token_repo'):
                 new_tokens = self.sync_service.token_repo.get_new_tokens_from_transactions(
-                    retry_failed_after_days=self.config.monitoring.retry_failed_after_days,
-                    max_failed_attempts=self.config.monitoring.max_failed_attempts
+                    retry_failed_after_days=self.config.processing.retry_failed_after_hours / 24,
+                    max_failed_attempts=self.config.processing.max_failed_attempts
                 )
                 
                 # CORRECTION: Limiter et prioriser

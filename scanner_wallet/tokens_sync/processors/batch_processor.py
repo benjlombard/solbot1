@@ -105,7 +105,7 @@ class BatchProcessor:
             tokens_data = await self.dex_client.get_tokens_batch_async(
                 session=session,
                 token_addresses=token_addresses,
-                batch_size=self.config.batching.batch_sizes['dexscreener']
+                batch_size=self.config.apis.dexscreener_batch_size
             )
             
             # Handle missing tokens with individual fallback

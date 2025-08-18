@@ -77,13 +77,13 @@ class HistorizationProcessor:
         
         # Processing configuration
         self.historization_config = {
-            'default_interval_hours': getattr(config.monitoring, 'historization_interval_seconds', 3600) // 3600,
+            'default_interval_hours': config.processing.historization_interval_seconds // 3600,
             'priority_interval_hours': 1,  # High-activity tokens
-            'batch_size': getattr(config.batching.batch_sizes, 'historization', 100),
-            'max_concurrent_batches': 3,
-            'retention_days': getattr(config.monitoring, 'history_retention_days', 30),
-            'analysis_enabled': True,
-            'trend_analysis_enabled': True
+            'batch_size': config.processing.batch_size_historization,
+            'max_concurrent_batches': config.historization.max_concurrent_historizations,
+            'retention_days': config.historization.retention_days,
+            'analysis_enabled': config.historization.analysis_enabled,
+            'trend_analysis_enabled': config.historization.trend_analysis_enabled
         }
         
         # Processing state
@@ -153,7 +153,7 @@ class HistorizationProcessor:
                 self._schedule_tokens_for_historization()
                 
                 # Process batches
-                await self._process_historization_batches()
+                asyncio.run(self._process_historization_batches())
                 
                 # Cleanup old data periodically
                 if self.stats['total_snapshots_created'] % 1000 == 0:
