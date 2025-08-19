@@ -72,7 +72,7 @@ class SyncService:
         except ImportError:
             self.logger.warning("⚠️ Historization processor not available")
         
-        self.last_processed_created_at: Optional[str] = None  # au lieu de block_time
+        self.last_processed_created_at: Optional[str] = None
         self.initial_population_done: bool = False
 
         # Statistics
@@ -359,41 +359,427 @@ class SyncService:
             self.logger.error(f"Error in initial population: {e}")
             return 0
 
+    def debug_next_cycle(self):
+        """
+        Active les logs de debug pour le prochain cycle uniquement
+        """
+        # Augmenter temporairement le niveau de logs
+        original_level = self.logger.level
+        self.logger.setLevel(logging.DEBUG)
+        
+        try:
+            # Faire un diagnostic complet
+            diagnosis = self.diagnose_token_discovery()
+            
+            self.logger.info("=== 🔍 DIAGNOSTIC TOKEN DISCOVERY ===")
+            for key, value in diagnosis.items():
+                self.logger.info(f"{key}: {value}")
+            
+            # Exécuter un cycle avec logs détaillés
+            self.logger.info("=== 🔍 EXECUTING DEBUG CYCLE ===")
+            self._run_sync_cycle()
+            
+        finally:
+            # Restaurer le niveau de logs original
+            self.logger.setLevel(original_level)
+
+    def diagnose_token_discovery(self) -> Dict[str, Any]:
+        """
+        Fonction de diagnostic complète pour comprendre pourquoi les nouveaux tokens 
+        ne sont pas découverts - VERSION CORRIGÉE AVEC GESTION DES FORMATS
+        """
+        diagnosis = {}
+        
+        try:
+            with self.db_connection.get_connection_context() as conn:
+                cursor = conn.cursor()
+                
+                # 1. État de la queue
+                cursor.execute("SELECT COUNT(*) FROM token_processing_queue WHERE status = 'pending'")
+                pending_count = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM token_processing_queue")
+                total_queue_count = cursor.fetchone()[0]
+                
+                diagnosis['queue_status'] = {
+                    'pending': pending_count,
+                    'total': total_queue_count,
+                    'is_empty': pending_count == 0
+                }
+                
+                # 2. Transactions récentes
+                cursor.execute("""
+                    SELECT COUNT(*) FROM transactions 
+                    WHERE created_at > (strftime('%s', 'now') - 3600)
+                """)
+                recent_transactions_1h = cursor.fetchone()[0]
+                
+                cursor.execute("""
+                    SELECT COUNT(*) FROM transactions 
+                    WHERE created_at > (strftime('%s', 'now') - 86400)
+                """)
+                recent_transactions_24h = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT MAX(created_at) FROM transactions")
+                latest_transaction_unix = cursor.fetchone()[0]
+                
+                # Convertir le timestamp Unix en date lisible
+                latest_transaction_readable = None
+                if latest_transaction_unix:
+                    try:
+                        latest_transaction_readable = datetime.fromtimestamp(latest_transaction_unix).isoformat()
+                    except:
+                        latest_transaction_readable = "Error converting timestamp"
+                
+                diagnosis['transactions_status'] = {
+                    'recent_transactions_1h': recent_transactions_1h,
+                    'recent_transactions_24h': recent_transactions_24h,
+                    'latest_transaction_unix': latest_transaction_unix,
+                    'latest_transaction_readable': latest_transaction_readable,
+                    'last_processed_created_at': self.last_processed_created_at
+                }
+                
+                # 3. Gestion des timestamps pour comparaisons
+                if self.last_processed_created_at:
+                    try:
+                        # Convertir le format datetime en timestamp Unix
+                        dt = datetime.fromisoformat(self.last_processed_created_at.replace('Z', ''))
+                        since_timestamp_unix = int(dt.timestamp())
+                        
+                        diagnosis['timestamp_conversion'] = {
+                            'last_processed_datetime': self.last_processed_created_at,
+                            'last_processed_unix': since_timestamp_unix,
+                            'conversion_success': True
+                        }
+                        
+                        # Utiliser le timestamp Unix pour les requêtes sur transactions
+                        cursor.execute("""
+                            SELECT COUNT(DISTINCT token_mint) FROM transactions 
+                            WHERE created_at > ? AND token_mint IS NOT NULL AND token_mint != ''
+                        """, (since_timestamp_unix,))
+                        distinct_tokens_since = cursor.fetchone()[0]
+                        
+                        diagnosis['distinct_tokens_since_last'] = distinct_tokens_since
+                        
+                    except Exception as e:
+                        diagnosis['timestamp_conversion'] = {
+                            'error': str(e),
+                            'conversion_success': False
+                        }
+                        
+                        # Fallback: utiliser les dernières 24h
+                        cursor.execute("""
+                            SELECT COUNT(DISTINCT token_mint) FROM transactions 
+                            WHERE created_at > (strftime('%s', 'now') - 86400) 
+                            AND token_mint IS NOT NULL AND token_mint != ''
+                        """)
+                        distinct_tokens_since = cursor.fetchone()[0]
+                        diagnosis['distinct_tokens_since_last'] = distinct_tokens_since
+                else:
+                    # Pas de timestamp de référence, utiliser les dernières 24h
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT token_mint) FROM transactions 
+                        WHERE created_at > (strftime('%s', 'now') - 86400) 
+                        AND token_mint IS NOT NULL AND token_mint != ''
+                    """)
+                    distinct_tokens_since = cursor.fetchone()[0]
+                    diagnosis['distinct_tokens_since_last'] = distinct_tokens_since
+                    diagnosis['timestamp_conversion'] = {
+                        'note': 'No last_processed_created_at, using last 24h',
+                        'conversion_success': True
+                    }
+                
+                # 4. Vérifier quelques exemples de token_mint récents
+                if self.last_processed_created_at:
+                    try:
+                        dt = datetime.fromisoformat(self.last_processed_created_at.replace('Z', ''))
+                        since_timestamp_unix = int(dt.timestamp())
+                        
+                        cursor.execute("""
+                            SELECT DISTINCT token_mint, MAX(created_at) as latest_created_at
+                            FROM transactions 
+                            WHERE created_at > ? AND token_mint IS NOT NULL AND token_mint != ''
+                            GROUP BY token_mint
+                            ORDER BY latest_created_at DESC
+                            LIMIT 5
+                        """, (since_timestamp_unix,))
+                    except:
+                        # Fallback si conversion échoue
+                        cursor.execute("""
+                            SELECT DISTINCT token_mint, MAX(created_at) as latest_created_at
+                            FROM transactions 
+                            WHERE created_at > (strftime('%s', 'now') - 86400) 
+                            AND token_mint IS NOT NULL AND token_mint != ''
+                            GROUP BY token_mint
+                            ORDER BY latest_created_at DESC
+                            LIMIT 5
+                        """)
+                else:
+                    cursor.execute("""
+                        SELECT DISTINCT token_mint, MAX(created_at) as latest_created_at
+                        FROM transactions 
+                        WHERE created_at > (strftime('%s', 'now') - 86400) 
+                        AND token_mint IS NOT NULL AND token_mint != ''
+                        GROUP BY token_mint
+                        ORDER BY latest_created_at DESC
+                        LIMIT 5
+                    """)
+                
+                recent_token_examples = cursor.fetchall()
+                diagnosis['recent_token_examples'] = []
+                
+                for row in recent_token_examples:
+                    token_mint = row[0]
+                    latest_created_at_unix = row[1]
+                    
+                    # Convertir en date lisible
+                    try:
+                        latest_created_at_readable = datetime.fromtimestamp(latest_created_at_unix).isoformat()
+                    except:
+                        latest_created_at_readable = "Error converting"
+                    
+                    example_data = {
+                        'token_mint': token_mint,
+                        'latest_created_at_unix': latest_created_at_unix,
+                        'latest_created_at_readable': latest_created_at_readable
+                    }
+                    
+                    # Vérifier si ce token existe déjà dans la table tokens
+                    cursor.execute("""
+                        SELECT address, no_data_available, failed_attempts, created_at as token_created_at
+                        FROM tokens WHERE address = ?
+                    """, (token_mint,))
+                    
+                    existing_token = cursor.fetchone()
+                    if existing_token:
+                        example_data['exists_in_tokens'] = True
+                        example_data['no_data_available'] = existing_token[1]
+                        example_data['failed_attempts'] = existing_token[2]
+                        example_data['token_created_at'] = existing_token[3]
+                    else:
+                        example_data['exists_in_tokens'] = False
+                    
+                    # Vérifier si ce token est dans la queue
+                    cursor.execute("""
+                        SELECT status, created_at as queue_created_at FROM token_processing_queue 
+                        WHERE token_address = ?
+                    """, (token_mint,))
+                    
+                    queue_entry = cursor.fetchone()
+                    if queue_entry:
+                        example_data['in_queue'] = True
+                        example_data['queue_status'] = queue_entry[0]
+                        example_data['queue_created_at'] = queue_entry[1]
+                    else:
+                        example_data['in_queue'] = False
+                    
+                    diagnosis['recent_token_examples'].append(example_data)
+                
+                # 5. État de l'initialisation
+                diagnosis['service_state'] = {
+                    'initial_population_done': self.initial_population_done,
+                    'last_processed_created_at': self.last_processed_created_at,
+                    'cycle_count': self.cycle_count,
+                    'running': self.running
+                }
+                
+                # 6. Configuration
+                diagnosis['config'] = {
+                    'batch_size_new_tokens': self.config.processing.batch_size_new_tokens,
+                    'initial_population_limit': getattr(self.config.processing, 'initial_population_limit', 1000),
+                    'max_failed_attempts': self.config.processing.max_failed_attempts,
+                    'retry_failed_after_hours': getattr(self.config.processing, 'retry_failed_after_hours', 168)
+                }
+                
+                # 7. Statistiques des tokens existants
+                cursor.execute("SELECT COUNT(*) FROM tokens")
+                total_tokens = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM tokens WHERE no_data_available = 1")
+                flagged_tokens = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM tokens WHERE failed_attempts > 0")
+                failed_tokens = cursor.fetchone()[0]
+                
+                diagnosis['tokens_statistics'] = {
+                    'total_tokens': total_tokens,
+                    'flagged_no_data': flagged_tokens,
+                    'with_failed_attempts': failed_tokens
+                }
+                
+                # 8. Test de la requête get_new_tokens_since_timestamp
+                if self.last_processed_created_at:
+                    try:
+                        self.logger.info("🔍 DIAGNOSTIC: Testing get_new_tokens_since_timestamp...")
+                        
+                        test_tokens, test_most_recent = self.token_repo.get_new_tokens_since_timestamp(
+                            since_created_at=self.last_processed_created_at,
+                            limit=5  # Petit test
+                        )
+                        
+                        diagnosis['get_new_tokens_test'] = {
+                            'success': True,
+                            'tokens_found': len(test_tokens),
+                            'most_recent_returned': test_most_recent,
+                            'sample_tokens': list(test_tokens)[:3] if test_tokens else []
+                        }
+                        
+                    except Exception as e:
+                        diagnosis['get_new_tokens_test'] = {
+                            'success': False,
+                            'error': str(e)
+                        }
+                
+                # 9. Analyse des filtres appliqués
+                if self.last_processed_created_at:
+                    try:
+                        dt = datetime.fromisoformat(self.last_processed_created_at.replace('Z', ''))
+                        since_timestamp_unix = int(dt.timestamp())
+                        
+                        # Tokens dans transactions mais exclus par les filtres
+                        cursor.execute("""
+                            SELECT COUNT(DISTINCT t.token_mint) 
+                            FROM transactions t
+                            WHERE t.created_at > ? 
+                            AND t.token_mint IS NOT NULL 
+                            AND t.token_mint != ''
+                            AND t.token_mint IN (
+                                SELECT address FROM tokens 
+                                WHERE no_data_available = 1 
+                                AND (no_data_last_check > datetime('now', '-7 days') OR failed_attempts >= 2)
+                            )
+                        """, (since_timestamp_unix,))
+                        
+                        filtered_out_count = cursor.fetchone()[0]
+                        
+                        diagnosis['filtering_analysis'] = {
+                            'tokens_filtered_out_by_no_data_flag': filtered_out_count
+                        }
+                        
+                    except Exception as e:
+                        diagnosis['filtering_analysis'] = {
+                            'error': str(e)
+                        }
+                
+            return diagnosis
+            
+        except Exception as e:
+            self.logger.error(f"Error in token discovery diagnosis: {e}", exc_info=True)
+            return {'error': str(e), 'timestamp': datetime.now().isoformat()}
+
     def _add_tokens_since_last_timestamp(self) -> int:
-        """Ajouter les tokens depuis le dernier timestamp traité"""
+        """Ajouter les tokens depuis le dernier timestamp traité - VERSION CORRIGÉE"""
         try:
             if not self.last_processed_created_at:
-                self.logger.warning("No last processed created_at, skipping new tokens search")
+                self.logger.warning("🔍 DEBUG: No last processed created_at, skipping new tokens search")
                 return 0
             
+            self.logger.info(f"🔍 DEBUG: Searching for new tokens since last_processed_created_at='{self.last_processed_created_at}' (datetime format)")
+            
+            # CORRECTION: Convertir le format datetime en timestamp Unix pour les requêtes sur transactions
+            try:
+                dt = datetime.fromisoformat(self.last_processed_created_at.replace('Z', ''))
+                last_timestamp_unix = int(dt.timestamp())
+                self.logger.info(f"🔍 DEBUG: Converted to unix timestamp: {last_timestamp_unix}")
+            except Exception as e:
+                self.logger.error(f"Error converting datetime to unix: {e}")
+                return 0
+                
+            # Vérifier d'abord s'il y a des nouvelles transactions dans la table
+            with self.db_connection.get_connection_context() as conn:
+                cursor = conn.cursor()
+                
+                # CORRECTION: Utiliser le timestamp Unix pour les requêtes sur transactions
+                cursor.execute("""
+                    SELECT COUNT(*) FROM transactions 
+                    WHERE created_at > ?
+                """, (last_timestamp_unix,))  # Unix timestamp au lieu de datetime string
+                
+                new_transactions_count = cursor.fetchone()[0]
+                self.logger.info(f"🔍 DEBUG: Found {new_transactions_count} transactions since unix timestamp {last_timestamp_unix}")
+                
+                # Compter les tokens mint distincts dans ces nouvelles transactions
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT token_mint) FROM transactions 
+                    WHERE created_at > ? AND token_mint IS NOT NULL AND token_mint != ''
+                """, (last_timestamp_unix,))
+                
+                distinct_tokens_in_new_transactions = cursor.fetchone()[0]
+                self.logger.info(f"🔍 DEBUG: Found {distinct_tokens_in_new_transactions} distinct token_mint in new transactions")
+                
+                # AJOUT: Voir quelques exemples de tokens dans les nouvelles transactions
+                if distinct_tokens_in_new_transactions > 0:
+                    cursor.execute("""
+                        SELECT DISTINCT token_mint, created_at, datetime(created_at, 'unixepoch') as readable_date
+                        FROM transactions 
+                        WHERE created_at > ? AND token_mint IS NOT NULL AND token_mint != ''
+                        ORDER BY created_at DESC LIMIT 3
+                    """, (last_timestamp_unix,))
+                    
+                    examples = cursor.fetchall()
+                    self.logger.info("🔍 DEBUG: Examples of tokens in new transactions:")
+                    for ex in examples:
+                        self.logger.info(f"  Token: {ex[0][:8]}..., Unix: {ex[1]}, Date: {ex[2]}")
+                
+                # Vérifier combien de ces tokens existent déjà dans la table tokens
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT t.token_mint) FROM transactions t
+                    INNER JOIN tokens tk ON t.token_mint = tk.address
+                    WHERE t.created_at > ? AND t.token_mint IS NOT NULL AND t.token_mint != ''
+                """, (last_timestamp_unix,))
+                
+                existing_tokens_count = cursor.fetchone()[0]
+                self.logger.info(f"🔍 DEBUG: {existing_tokens_count} of these tokens already exist in tokens table")
+                
+                # Calculer combien de tokens sont réellement nouveaux
+                potentially_new_tokens = distinct_tokens_in_new_transactions - existing_tokens_count
+                self.logger.info(f"🔍 DEBUG: {potentially_new_tokens} tokens are potentially new")
+            
             # Chercher les nouveaux tokens depuis le dernier timestamp
+            # NOTE: get_new_tokens_since_timestamp fait la conversion datetime -> unix en interne
             token_addresses, most_recent_created_at = self.token_repo.get_new_tokens_since_timestamp(
-                since_created_at=self.last_processed_created_at,
+                since_created_at=self.last_processed_created_at,  # Format datetime (sera converti en interne)
                 limit=self.config.processing.batch_size_new_tokens
             )
             
             if token_addresses:
+                self.logger.info(f"🔍 DEBUG: get_new_tokens_since_timestamp returned {len(token_addresses)} addresses")
+                
+                # Afficher quelques exemples d'adresses trouvées
+                sample_addresses = list(token_addresses)[:3]
+                for addr in sample_addresses:
+                    self.logger.info(f"🔍 DEBUG: Example token address: {addr}")
+                
                 added_count = self.queue_repo.add_tokens_to_queue(
                     list(token_addresses),
                     source="new_transactions"
                 )
                 
+                self.logger.info(f"🔍 DEBUG: Queue add_tokens_to_queue returned: {added_count}")
+                
                 # Mettre à jour le timestamp le plus récent
                 if most_recent_created_at and most_recent_created_at > self.last_processed_created_at:
+                    old_timestamp = self.last_processed_created_at
                     self.last_processed_created_at = most_recent_created_at
                     
-                    self.logger.info(
-                        f"📥 New tokens: {added_count} added to queue, "
-                        f"updated last created_at: {most_recent_created_at}"
-                    )
+                    self.logger.info(f"📥 New tokens: {added_count} added to queue")
+                    self.logger.info(f"📅 Updated last_processed_created_at: {old_timestamp} → {most_recent_created_at}")
+                else:
+                    self.logger.warning(f"🔍 DEBUG: most_recent_created_at ({most_recent_created_at}) not newer than last_processed ({self.last_processed_created_at})")
                 
                 return added_count
             else:
-                self.logger.debug("🔍 No new tokens found since last timestamp")
+                self.logger.info("🔍 DEBUG: get_new_tokens_since_timestamp returned no addresses")
+                
+                # AJOUT: Debug supplémentaire si aucun token n'est trouvé
+                if potentially_new_tokens > 0:
+                    self.logger.warning(f"🔍 DEBUG: Expected {potentially_new_tokens} new tokens but get_new_tokens_since_timestamp found 0")
+                    self.logger.warning("🔍 DEBUG: This might indicate a filtering issue in get_new_tokens_since_timestamp")
+                
                 return 0
                 
         except Exception as e:
-            self.logger.error(f"Error adding tokens since last timestamp: {e}")
+            self.logger.error(f"Error adding tokens since last timestamp: {e}", exc_info=True)
             return 0
 
     def _update_existing_prices(self) -> int:

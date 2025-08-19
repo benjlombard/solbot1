@@ -140,25 +140,22 @@ class QueueRepository:
         metadata: Optional[Dict] = None
     ) -> int:
         """
-        Add multiple tokens to processing queue
-        
-        Args:
-            token_addresses: List of token addresses to add
-            priority: Queue priority level
-            source: Source that added these tokens
-            metadata: Optional metadata dictionary
-            
-        Returns:
-            Number of tokens actually added (excludes duplicates)
+        Add multiple tokens to processing queue - AVEC DEBUG
         """
         if not token_addresses:
+            self.logger.info("🔍 DEBUG: add_tokens_to_queue called with empty list")
             return 0
+        
+        self.logger.info(f"🔍 DEBUG: add_tokens_to_queue called with {len(token_addresses)} addresses")
         
         # Remove duplicates and validate addresses
         unique_addresses = list(set(addr.strip() for addr in token_addresses if addr and addr.strip()))
         
         if not unique_addresses:
+            self.logger.warning("🔍 DEBUG: No valid addresses after filtering")
             return 0
+        
+        self.logger.info(f"🔍 DEBUG: {len(unique_addresses)} unique valid addresses after filtering")
         
         metadata_json = None
         if metadata:
@@ -172,9 +169,10 @@ class QueueRepository:
             cursor = conn.cursor()
             
             added_count = 0
+            skipped_count = 0
             current_time = datetime.now().isoformat()
             
-            for token_address in unique_addresses:
+            for i, token_address in enumerate(unique_addresses):
                 try:
                     # Check if token is already in queue with pending/processing status
                     cursor.execute("""
@@ -183,8 +181,12 @@ class QueueRepository:
                         AND status IN ('pending', 'processing', 'retrying')
                     """, (token_address,))
                     
-                    if cursor.fetchone()[0] > 0:
-                        self.logger.debug(f"Token {token_address[:8]}... already in queue")
+                    existing_count = cursor.fetchone()[0]
+                    
+                    if existing_count > 0:
+                        if i < 3:  # Log pour les 3 premiers seulement
+                            self.logger.debug(f"🔍 DEBUG: Token {token_address[:8]}... already in queue")
+                        skipped_count += 1
                         continue
                     
                     # Insert new queue item
@@ -205,11 +207,16 @@ class QueueRepository:
                     
                     added_count += 1
                     
+                    if i < 3:  # Log pour les 3 premiers seulement
+                        self.logger.debug(f"🔍 DEBUG: Added token {token_address[:8]}... to queue")
+                    
                 except Exception as e:
                     self.logger.error(f"Error adding token {token_address} to queue: {e}")
                     continue
             
             conn.commit()
+            
+            self.logger.info(f"🔍 DEBUG: Queue operation result: {added_count} added, {skipped_count} skipped")
             
             if added_count > 0:
                 self.logger.info(f"📋 Added {added_count} tokens to processing queue")
@@ -331,7 +338,7 @@ class QueueRepository:
             
             cursor.execute("SELECT COUNT(*) FROM token_processing_queue")
             return cursor.fetchone()[0]
-            
+
     @db_retry(max_retries=3, delay=0.3)
     def update_token_status(
         self, 

@@ -498,6 +498,12 @@ Examples:
     )
     
     parser.add_argument(
+        '--debug-tokens',
+        action='store_true',
+        help='Run token discovery diagnostic and exit'
+    )
+
+    parser.add_argument(
         '--sync-interval',
         type=int,
         help='Override sync interval in seconds'
@@ -570,6 +576,14 @@ def main():
         print(f"🔧 Log level override: {args.log_level}")
         os.environ['SYNC_SERVICE_LOG_LEVEL'] = args.log_level
     
+    if args.debug_tokens:
+        print("🔍 Running token discovery diagnostic...")
+        app = TokenSyncApplication()
+        if app.initialize():
+            diagnosis = app.sync_service.diagnose_token_discovery()
+            for key, value in diagnosis.items():
+                print(f"{key}: {value}")
+
     if args.sync_interval:
         print(f"🔧 Sync interval override: {args.sync_interval}s")
         config_override['sync_interval'] = args.sync_interval

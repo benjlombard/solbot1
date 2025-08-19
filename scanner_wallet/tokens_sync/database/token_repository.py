@@ -47,6 +47,7 @@ class TokenRepository:
             result = cursor.fetchone()
             return result[0] if result and result[0] else None
     
+    #n'est plus utilisé pourra être supprimé plus tard
     @db_retry(max_retries=3, delay=0.3)
     def get_new_tokens_from_transactions(
         self, 
@@ -368,16 +369,20 @@ class TokenRepository:
         max_failed_attempts: int = 2
     ) -> Tuple[Set[str], Optional[str]]:
         """
-        Get new token addresses from transactions since a specific block_time
-        
-        Returns:
-            Tuple of (token_addresses_set, most_recent_block_time)
+        Get new token addresses from transactions since a specific created_at
+        AVEC LOGS DÉTAILLÉS POUR DEBUG
         """
         with self.db.get_connection_context() as conn:
             cursor = conn.cursor()
             
             params = [retry_failed_after_days, max_failed_attempts]
             
+            # LOG: Paramètres d'entrée
+            self.logger.info(f"🔍 INFO: Searching for new tokens since created_at='{since_created_at}', limit={limit}")
+            self.logger.info(f"🔍 INFO: retry_failed_after_days={retry_failed_after_days}, max_failed_attempts={max_failed_attempts}")
+            self.logger.info(f"🔍 INFO: since_created_at='{since_created_at}' (format datetime)")
+
+            # Requête de base
             query = """
             SELECT DISTINCT t.token_mint, MAX(t.created_at) as max_created_at
             FROM transactions t
@@ -393,25 +398,57 @@ class TokenRepository:
             """
             
             if since_created_at:
-                query += " AND t.created_at > ?"  # Changer de block_time vers created_at
-                params.append(since_created_at)
-    
+                from datetime import datetime
+                
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(since_created_at.replace('Z', ''))
+                    since_timestamp_unix = int(dt.timestamp())
+                    
+                    self.logger.info(f"🔍 DEBUG: Converted '{since_created_at}' to timestamp {since_timestamp_unix}")
+                    
+                    query += " AND t.created_at > ?"
+                    params.append(since_timestamp_unix)
+                
+                except Exception as e:
+                    self.logger.error(f"Error converting timestamp: {e}")
+                    return set(), since_created_at
+
             query += " GROUP BY t.token_mint ORDER BY max_created_at DESC"
             
             if limit:
                 query += " LIMIT ?"
                 params.append(limit)
             
+            # LOG: Requête complète
+            self.logger.info(f"🔍 DEBUG: Executing query:")
+            self.logger.info(f"🔍 DEBUG: {query}")
+            self.logger.info(f"🔍 DEBUG: With parameters: {params}")
+            
             cursor.execute(query, tuple(params))
             results = cursor.fetchall()
             
+            # LOG: Résultats de la requête
+            self.logger.info(f"🔍 DEBUG: Query returned {len(results)} results")
+            
             if not results:
+                self.logger.info(f"🔍 DEBUG: No new tokens found since '{since_created_at}'")
                 return set(), since_created_at
+
+            # LOG: Afficher les premiers résultats
+            for i, row in enumerate(results[:5]):  # Afficher les 5 premiers
+                self.logger.info(f"🔍 DEBUG: Result {i+1}: token={row[0][:10]}..., created_at={row[1]}")
+            
+            if len(results) > 5:
+                self.logger.info(f"🔍 DEBUG: ... and {len(results) - 5} more results")
             
             token_addresses = {row[0] for row in results}
+            most_recent_timestamp_unix = max(row[1] for row in results if row[1] is not None)
+            most_recent_created_at = datetime.fromtimestamp(most_recent_timestamp_unix).strftime('%Y-%m-%d %H:%M:%S')
             
+            self.logger.info(f"🔍 DEBUG: Most recent unix timestamp: {most_recent_timestamp_unix}")
+            self.logger.info(f"🔍 DEBUG: Converted to datetime: {most_recent_created_at}")
             
-            most_recent_created_at = max(row[1] for row in results if row[1] is not None)
             return token_addresses, most_recent_created_at
 
     @db_retry(max_retries=3, delay=0.3)
@@ -423,7 +460,7 @@ class TokenRepository:
             Tuple of (token_addresses_set, most_recent_created_at)  # ❌ Docstring incorrecte
         """
         return self.get_new_tokens_since_timestamp(
-            since_created_at=None,  # ❌ Tu avais since_block_time=None
+            since_created_at=None,
             limit=limit
         )
 
