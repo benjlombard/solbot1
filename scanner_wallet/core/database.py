@@ -374,7 +374,7 @@ class DatabaseManager:
         ''')
 
         # Table pour la file d'attente de traitement des tokens
-         cursor.execute('''
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS token_processing_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token_address TEXT NOT NULL,

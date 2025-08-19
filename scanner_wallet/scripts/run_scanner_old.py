@@ -61,8 +61,15 @@ def main():
         logger.error(f"❌ Critical error during database initialization: {e}")
         sys.exit(1)
 
-    # Create and start the monitor. The monitor now loads wallets from the database.
-    monitor = SolanaWalletMonitor()
+    # Get wallet addresses from config
+    wallet_addresses = getattr(getattr(config, 'wallet', {}), 'addresses', [])
+    if not wallet_addresses:
+        logger.warning("⚠️ No wallet addresses found in the configuration. The monitor will start with an empty set.")
+        logger.warning("Please run `python scripts/init_wallets.py` or add wallets to your config.")
+        return
+
+    # Create and start the monitor
+    monitor = SolanaWalletMonitor(wallet_addresses=wallet_addresses)
     
     # Graceful shutdown handler
     def shutdown_handler(signum, frame):
@@ -79,8 +86,7 @@ def main():
         logger.error("❌ Failed to start monitoring")
         sys.exit(1)
 
-    logger.info(f"✅ Solana Wallet Monitor is now running.")
-    logger.info("It will dynamically load and refresh wallets from the database.")
+    logger.info(f"✅ Solana Wallet Monitor is now running for {len(wallet_addresses)} wallet(s).")
     logger.info("Press Ctrl+C to stop the service.")
 
     try:

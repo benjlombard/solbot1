@@ -136,7 +136,7 @@ class SolanaWalletMonitor:
     Coordinates scanning, priority management, balance tracking, and transaction analysis
     """
     
-    def __init__(self):
+    def __init__(self, wallet_addresses: Optional[List[str]] = None):
         # Core components
         try:
             self.config = get_config()
@@ -165,33 +165,57 @@ class SolanaWalletMonitor:
         self.scan_queue: queue.Queue = queue.Queue()
         self.results_queue: queue.Queue = queue.Queue()
         
-        # Initial wallet loading from database
-        self._load_initial_wallets_from_db()
-
+        #ancienne config
+        # Initialize wallets by combining wallets from the DB and the config file
+        # db_wallets = list(self.priority_manager.get_wallet_priorities().keys())
+        # config_wallets = wallet_addresses if wallet_addresses else []
+        # unique_wallets = set(db_wallets + config_wallets)
+        
+        #nouvelle config : 
+        unique_wallets = set(wallet_addresses) if wallet_addresses else set()
+        if unique_wallets:
+            self.add_wallets(list(unique_wallets))
+        
+        self.sync_active_wallets()
+        
         # Signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         
         logger.info("🧠 Solana Wallet Monitor initialized")
+    
 
-    def _load_initial_wallets_from_db(self):
-        """Load initially active wallets from the database."""
-        logger.info("💾 Loading initial wallets from database...")
+    def sync_active_wallets(self):  # ← AJOUTER ICI
+        """Synchronise les wallets actifs avec la DB"""
+        if not self.wallets or not self.db_manager:
+            return
+            
         try:
             with self.db_manager.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT wallet_address FROM wallet_priorities WHERE is_active = 1")
-                wallets = [row[0] for row in cursor.fetchall()]
                 
-                if wallets:
-                    logger.info(f"Found {len(wallets)} active wallets in DB.")
-                    self.add_wallets(wallets)
-                else:
-                    logger.warning("⚠️ No active wallets found in the database. The monitor will start with an empty set.")
+                # 1. Marquer TOUS les wallets comme inactifs
+                cursor.execute("UPDATE wallet_priorities SET is_active = 0")
+                
+                # 2. Marquer les wallets du .env comme actifs (créer si nécessaire)
+                for wallet in self.wallets:
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO wallet_priorities 
+                        (wallet_address, priority_score, is_active, last_scan_time, total_scans, created_at)
+                        VALUES (?, 
+                            COALESCE((SELECT priority_score FROM wallet_priorities WHERE wallet_address = ?), 1.0),
+                            1,
+                            COALESCE((SELECT last_scan_time FROM wallet_priorities WHERE wallet_address = ?), 0),
+                            COALESCE((SELECT total_scans FROM wallet_priorities WHERE wallet_address = ?), 0),
+                            COALESCE((SELECT created_at FROM wallet_priorities WHERE wallet_address = ?), datetime('now'))
+                        )
+                    """, (wallet, wallet, wallet, wallet, wallet))
+                
+                conn.commit()
+                logger.info(f"✅ Synchronized {len(self.wallets)} active wallets with database")
+                
         except Exception as e:
-            logger.error(f"❌ Critical error loading wallets from database: {e}")
-            # In case of a DB error, we start with an empty set.
-            self.wallets = set()
+            logger.error(f"❌ Error synchronizing active wallets: {e}")
 
     def add_wallets(self, wallet_addresses: List[str]) -> Dict[str, bool]:
         """Add wallets to monitoring"""
@@ -233,8 +257,6 @@ class SolanaWalletMonitor:
                 with self._lock:
                     if address in self.wallets:
                         self.wallets.discard(address)
-                        # Also remove from priority manager
-                        self.priority_manager.remove_wallet(address)
                         logger.info(f"✅ Removed wallet: {address}")
                         results[address] = True
                     else:
@@ -249,49 +271,7 @@ class SolanaWalletMonitor:
             self.stats.active_wallets = len(self.wallets)
         
         return results
-
-    def _wallet_refresh_loop(self):
-        """Periodically refreshes the wallet list from the database."""
-        # Make this configurable, e.g., from config.monitoring.wallet_refresh_interval
-        refresh_interval = getattr(self.config.monitoring, 'wallet_refresh_interval_seconds', 300)
-        logger.info(f"🔄 Wallet refresh loop started. Interval: {refresh_interval} seconds.")
-        
-        while self._running and not self._shutdown_event.is_set():
-            try:
-                # Wait for the interval, but check for shutdown signal periodically
-                for _ in range(refresh_interval):
-                    if not self._running or self._shutdown_event.is_set():
-                        return
-                    time.sleep(1)
-
-                logger.debug("Running periodic wallet refresh check...")
-                
-                # Get current active wallets from DB
-                with self.db_manager.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT wallet_address FROM wallet_priorities WHERE is_active = 1")
-                    db_wallets = {row[0] for row in cursor.fetchall()}
-                
-                with self._lock:
-                    current_wallets = self.wallets.copy()
-
-                # Find wallets to add and remove
-                wallets_to_add = list(db_wallets - current_wallets)
-                wallets_to_remove = list(current_wallets - db_wallets)
-
-                if wallets_to_add:
-                    logger.info(f"➕ Found {len(wallets_to_add)} new active wallets to monitor: {wallets_to_add}")
-                    self.add_wallets(wallets_to_add)
-                
-                if wallets_to_remove:
-                    logger.info(f"➖ Found {len(wallets_to_remove)} wallets to deactivate: {wallets_to_remove}")
-                    self.remove_wallets(wallets_to_remove)
-
-            except Exception as e:
-                logger.error(f"❌ Error in wallet refresh loop: {e}", exc_info=True)
-                # Avoid busy-looping on error
-                time.sleep(60)
-
+    
     def start_monitoring(self) -> bool:
         """Start the monitoring system"""
         try:
@@ -301,7 +281,8 @@ class SolanaWalletMonitor:
                     return False
                 
                 if not self.wallets:
-                    logger.warning("⚠️ No wallets to monitor. System will start and wait for active wallets to be added to the DB.")
+                    logger.warning("⚠️ No wallets to monitor")
+                    return False
                 
                 self._running = True
                 self._shutdown_event.clear()
@@ -322,17 +303,9 @@ class SolanaWalletMonitor:
                 daemon=True
             )
             self._stats_thread.start()
-
-            # Start the new wallet refresh thread
-            self._wallet_refresh_thread = threading.Thread(
-                target=self._wallet_refresh_loop,
-                name="WalletRefresher",
-                daemon=True
-            )
-            self._wallet_refresh_thread.start()
             
             logger.info("🚀 Wallet monitoring started")
-            logger.info(f"📊 Monitoring {len(self.wallets)} wallets initially.")
+            logger.info(f"📊 Monitoring {len(self.wallets)} wallets")
             return True
             
         except Exception as e:
@@ -357,9 +330,6 @@ class SolanaWalletMonitor:
             
             if self._stats_thread and self._stats_thread.is_alive():
                 self._stats_thread.join(timeout=2.0)
-
-            if hasattr(self, '_wallet_refresh_thread') and self._wallet_refresh_thread and self._wallet_refresh_thread.is_alive():
-                self._wallet_refresh_thread.join(timeout=2.0)
             
             logger.info("🛑 Wallet monitoring stopped")
             return True
@@ -598,10 +568,10 @@ class SolanaWalletMonitor:
                     ))
                     
                     # Add new token to the processing queue
-                    # cursor.execute("""
-                    #     INSERT OR IGNORE INTO token_processing_queue (token_address, source_wallet_address)
-                    #     VALUES (?, ?)
-                    # """, (discovery.token_mint, wallet_address))
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO token_processing_queue (token_address, source_wallet_address)
+                        VALUES (?, ?)
+                    """, (discovery.token_mint, wallet_address))
                     
                 logger.debug(f"Committing scan results for {wallet_address} to database.")
                 conn.commit()
