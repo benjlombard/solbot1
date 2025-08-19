@@ -112,11 +112,11 @@ class BatchProcessor:
             tokens_data = await self._fetch_tokens_data_optimized(token_addresses)
             
             # 2. Process database operations WITHOUT queue updates
-            successful_count = await self._process_database_operations(
+            successful_count, historized_count, stubs_count = await self._process_database_operations(
                 token_addresses, tokens_data, update_queue=False  # IMPORTANT: FALSE pour price updates
             )
             
-            # 3. Update statistics
+            # 3. Update statistics - CORRECTION: utiliser seulement successful_count
             processing_time = time.time() - start_time
             self._update_stats(len(token_addresses), successful_count, processing_time)
             

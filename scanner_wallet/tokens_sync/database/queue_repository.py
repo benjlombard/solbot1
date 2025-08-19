@@ -310,6 +310,29 @@ class QueueRepository:
                 raise e
     
     @db_retry(max_retries=3, delay=0.3)
+    def is_queue_empty(self) -> bool:
+        """Check if the processing queue is empty (no pending, processing, or retrying items)"""
+        with self.db.get_connection_context() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT COUNT(*) FROM token_processing_queue 
+                WHERE status IN ('pending', 'processing', 'retrying')
+            """)
+            
+            active_count = cursor.fetchone()[0]
+            return active_count == 0
+    
+    @db_retry(max_retries=3, delay=0.3)
+    def get_total_queue_size(self) -> int:
+        """Get total number of items in queue (all statuses)"""
+        with self.db.get_connection_context() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT COUNT(*) FROM token_processing_queue")
+            return cursor.fetchone()[0]
+            
+    @db_retry(max_retries=3, delay=0.3)
     def update_token_status(
         self, 
         token_address: str, 

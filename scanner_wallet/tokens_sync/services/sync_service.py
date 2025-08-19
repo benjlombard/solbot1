@@ -298,7 +298,25 @@ class SyncService:
         try:
             # Population initiale si pas encore faite
             if not self.initial_population_done:
-                return self._do_initial_population()
+                # Vérifier d'abord si la queue contient déjà des tokens actifs
+                if not self.queue_repo.is_queue_empty():
+                    # La queue contient déjà des tokens actifs, pas besoin de population initiale
+                    total_items = self.queue_repo.get_total_queue_size()
+                    self.logger.info(f"🔍 Queue already contains active items ({total_items} total), skipping initial population")
+                    self.initial_population_done = True
+                    
+                    # Récupérer le timestamp le plus récent des tokens existants
+                    self.last_processed_created_at = self.token_repo.get_most_recent_token_timestamp()
+                    if self.last_processed_created_at:
+                        self.logger.info(f"📅 Using existing most recent timestamp: {self.last_processed_created_at}")
+                    else:
+                        self.logger.warning("⚠️ No recent timestamp found in tokens table")
+                    
+                    return 0
+                else:
+                    # La queue est vide, faire la population initiale
+                    self.logger.info("🔄 Queue is empty, proceeding with initial population")
+                    return self._do_initial_population()
             
             # Sinon, rechercher les nouveaux tokens depuis le dernier timestamp
             return self._add_tokens_since_last_timestamp()
@@ -312,7 +330,7 @@ class SyncService:
         try:
             limit = self.config.processing.initial_population_limit
             
-            self.logger.info(f"🚀 Starting initial population with {limit} tokens")
+            self.logger.info(f"🚀 Starting initial population with {limit} tokens (queue is empty)")
             
             token_addresses, most_recent_created_at = self.token_repo.get_initial_population_tokens(limit)
             
