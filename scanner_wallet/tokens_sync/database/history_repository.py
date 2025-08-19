@@ -53,25 +53,31 @@ class HistoryRepository:
 
                 price_usd, market_cap, volume_24h, last_update, is_dead, is_rugged = token_info
                 
-                # VALIDATION 2: Skip dead or rugged tokens
+                # DEBUG: Log les valeurs pour comprendre pourquoi ça échoue
+                self.logger.debug(f"📊 Token data: price={price_usd}, mc={market_cap}, vol={volume_24h}, last_update={last_update}, dead={is_dead}, rugged={is_rugged}")
+                
+                # VALIDATION 2: Skip dead or rugged tokens - MAIS ASSOUPLIR POUR NOUVEAUX TOKENS
                 if is_dead or is_rugged:
                     self.logger.debug(f"Token {token_address[:8]}... is dead or rugged, skipping snapshot")
                     return False
                 
-                # VALIDATION 3: Vérifier que les données sont suffisamment récentes
+                # VALIDATION 3: ASSOUPLIR LA VÉRIFICATION D'ÂGE POUR NOUVEAUX TOKENS
                 current_timestamp = int(time.time())
                 if not last_update:
-                    self.logger.debug(f"Token {token_address[:8]}... has no recent data")
-                    return False
+                    self.logger.debug(f"Token {token_address[:8]}... has no recent data, but allowing for new token")
+                    # Pour les nouveaux tokens, on permet même sans last_update
+                else:
+                    # Vérifier que la dernière mise à jour n'est pas trop ancienne (24h max)
+                    max_data_age = getattr(self.config, 'max_data_age_for_snapshot_seconds', 86400)
+                    data_age = current_timestamp - last_update
+                    self.logger.debug(f"📅 Data age: {data_age}s (max allowed: {max_data_age}s)")
+                    
+                    if data_age > max_data_age:
+                        self.logger.debug(f"Token {token_address[:8]}... data too old ({data_age}s)")
+                        return False
                 
-                # Vérifier que la dernière mise à jour n'est pas trop ancienne (24h max)
-                max_data_age = getattr(self.config, 'max_data_age_for_snapshot_seconds', 86400)
-                if current_timestamp - last_update > max_data_age:
-                    self.logger.debug(f"Token {token_address[:8]}... data too old ({current_timestamp - last_update}s)")
-                    return False
-                
-                # VALIDATION 4: Vérifier qu'il n'y a pas déjà un snapshot récent
-                min_interval = getattr(self.config, 'min_snapshot_interval_seconds', 3600)  # 1 heure par défaut
+                # VALIDATION 4: ASSOUPLIR L'INTERVALLE POUR NOUVEAUX TOKENS
+                min_interval = getattr(self.config, 'min_snapshot_interval_seconds', 600)  # RÉDUIT À 10 minutes
                 cursor.execute("""
                     SELECT snapshot_timestamp FROM tokens_history 
                     WHERE token_address = ? 
@@ -82,9 +88,12 @@ class HistoryRepository:
                 last_snapshot = cursor.fetchone()
                 if last_snapshot:
                     time_since_last = current_timestamp - last_snapshot[0]
+                    self.logger.debug(f"⏰ Time since last snapshot: {time_since_last}s (min interval: {min_interval}s)")
                     if time_since_last < min_interval:
                         self.logger.debug(f"Token {token_address[:8]}... snapshot too recent ({time_since_last}s ago)")
                         return False
+                else:
+                    self.logger.debug(f"📈 No previous snapshot found for {token_address[:8]}... - creating first snapshot")
                 
                 # Get previous snapshot ID for linking
                 cursor.execute("""
@@ -108,10 +117,12 @@ class HistoryRepository:
                 else:
                     snapshot_data = self._convert_token_data_to_snapshot(token_data)
                 
-                # VALIDATION 5: Valider les données avant insertion
+                # VALIDATION 5: ASSOUPLIR LA VALIDATION DES DONNÉES
                 if not self._validate_snapshot_data(snapshot_data):
                     self.logger.warning(f"Invalid snapshot data for {token_address}")
                     return False
+                
+                self.logger.debug(f"✅ All validations passed for {token_address[:8]}... - proceeding with snapshot creation")
                 
                 # Calculate deltas from previous snapshot
                 deltas = self._calculate_deltas(snapshot_data, historical_data)
@@ -123,7 +134,6 @@ class HistoryRepository:
                 liquidity_mc_ratio = (snapshot_data['liquidity_usd'] / snapshot_data['market_cap']) if snapshot_data['market_cap'] > 0 else 0.0
                 volume_mc_ratio = (snapshot_data['volume_24h'] / snapshot_data['market_cap']) if snapshot_data['market_cap'] > 0 else 0.0
                 
-                # Insert historical snapshot
                 # Insert historical snapshot
                 cursor.execute("""
                     INSERT INTO tokens_history (
@@ -214,54 +224,40 @@ class HistoryRepository:
                 return True
                 
         except Exception as e:
-            self.logger.error(f"❌ Error creating snapshot for {token_address}: {e}")
+            self.logger.error(f"❌ Error creating snapshot for {token_address}: {e}", exc_info=True)
             return False
 
     def _validate_snapshot_data(self, snapshot_data: Dict) -> bool:
-        """Validate snapshot data before insertion"""
+        """Validate snapshot data before insertion - VERSION ASSOUPLIE"""
         try:
             # Vérifications basiques de type et valeur
-            if not isinstance(snapshot_data.get('price_usd', 0), (int, float)) or snapshot_data.get('price_usd', 0) < 0:
-                self.logger.debug("Invalid price_usd")
+            price_usd = snapshot_data.get('price_usd', 0)
+            market_cap = snapshot_data.get('market_cap', 0)
+            volume_24h = snapshot_data.get('volume_24h', 0)
+            liquidity_usd = snapshot_data.get('liquidity_usd', 0)
+            holder_count = snapshot_data.get('holder_count', 0)
+            
+            self.logger.debug(f"🔍 Validating snapshot data: price={price_usd}, mc={market_cap}, vol={volume_24h}, liq={liquidity_usd}, holders={holder_count}")
+            
+            # Types valides
+            for field, value in [('price_usd', price_usd), ('market_cap', market_cap), ('volume_24h', volume_24h), ('liquidity_usd', liquidity_usd)]:
+                if not isinstance(value, (int, float)):
+                    self.logger.debug(f"❌ Invalid type for {field}: {type(value)}")
+                    return False
+                if value < 0:
+                    self.logger.debug(f"❌ Negative value for {field}: {value}")
+                    return False
+            
+            if not isinstance(holder_count, int) or holder_count < 0:
+                self.logger.debug(f"❌ Invalid holder_count: {holder_count}")
                 return False
             
-            if not isinstance(snapshot_data.get('market_cap', 0), (int, float)) or snapshot_data.get('market_cap', 0) < 0:
-                self.logger.debug("Invalid market_cap")
-                return False
-            
-            if not isinstance(snapshot_data.get('volume_24h', 0), (int, float)) or snapshot_data.get('volume_24h', 0) < 0:
-                self.logger.debug("Invalid volume_24h")
-                return False
-            
-            if not isinstance(snapshot_data.get('liquidity_usd', 0), (int, float)) or snapshot_data.get('liquidity_usd', 0) < 0:
-                self.logger.debug("Invalid liquidity_usd")
-                return False
-            
-            if not isinstance(snapshot_data.get('holder_count', 0), int) or snapshot_data.get('holder_count', 0) < 0:
-                self.logger.debug("Invalid holder_count")
-                return False
-            
-            # Vérifications de cohérence
-            if snapshot_data.get('market_cap', 0) == 0 and snapshot_data.get('price_usd', 0) > 0:
-                self.logger.debug("Inconsistent: price > 0 but market_cap = 0")
-                return False
-            
-            # Vérifier que au moins une métrique importante est présente
-            has_meaningful_data = (
-                snapshot_data.get('price_usd', 0) > 0 or
-                snapshot_data.get('market_cap', 0) > 0 or
-                snapshot_data.get('volume_24h', 0) > 0 or
-                snapshot_data.get('liquidity_usd', 0) > 0
-            )
-            
-            if not has_meaningful_data:
-                self.logger.debug("No meaningful data to snapshot")
-                return False
-            
+            # ASSOUPLIR: Accepter même si toutes les métriques sont à 0 (pour les nouveaux tokens)
+            self.logger.debug("✅ Snapshot data validation passed (relaxed mode)")
             return True
             
         except Exception as e:
-            self.logger.debug(f"Error validating snapshot data: {e}")
+            self.logger.debug(f"❌ Error validating snapshot data: {e}")
             return False
 
     def _get_current_token_data(self, token_address: str) -> Optional[Dict]:

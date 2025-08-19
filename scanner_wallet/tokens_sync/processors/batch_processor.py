@@ -1,12 +1,12 @@
 """
-Batch Processor - Version Corrigée
-PROBLÈME IDENTIFIÉ : Confusion entre tokens de queue et price updates
+Batch Processor - Version Corrigée - SUPPRESSION HISTORISATION FORCÉE
+PROBLÈME RÉSOLU : Supprimer la double historisation
 """
 import asyncio
 import aiohttp
 import time
 import logging
-from typing import List, Dict, Set, Optional, Tuple
+from typing import List, Dict, Set, Optional, Tuple, Any
 from datetime import datetime
 
 from ..models.token_data import TokenData, BatchResult
@@ -56,7 +56,7 @@ class BatchProcessor:
             Number of successfully processed tokens
         """
         if not token_addresses:
-            return 0
+            return 0, 0, 0
         
         start_time = time.time()
         self.logger.info(f"🔄 Processing {len(token_addresses)} NEW tokens from QUEUE")
@@ -66,7 +66,7 @@ class BatchProcessor:
             tokens_data = await self._fetch_tokens_data_optimized(token_addresses)
             
             # 2. Process database operations WITH queue updates
-            successful_count = await self._process_database_operations(
+            successful_count, historized_count, stubs_count = await self._process_database_operations(
                 token_addresses, tokens_data, update_queue=True  # IMPORTANT: TRUE pour la queue
             )
             
@@ -76,10 +76,10 @@ class BatchProcessor:
             
             self.logger.info(
                 f"✅ NEW tokens processing completed: {successful_count}/{len(token_addresses)} "
-                f"successful in {processing_time:.2f}s"
+                f"successful in {processing_time:.2f}s ({historized_count} historized, {stubs_count} stubs)"
             )
             
-            return successful_count
+            return successful_count, historized_count, stubs_count
             
         except Exception as e:
             self.logger.error(f"❌ Error processing NEW tokens from queue: {e}", exc_info=True)
@@ -273,8 +273,11 @@ class BatchProcessor:
         
         self.logger.debug(f"💾 Database operations completed in {db_duration:.2f}s")
 
-        # Count successful operations
+        # Count successful operations and track details
         successful_count = 0
+        historized_count = 0
+        stubs_count = 0
+        
         for i, result in enumerate(db_results):
             token_addr = token_addresses[i]
             
@@ -286,8 +289,16 @@ class BatchProcessor:
                         self.queue_repo.update_token_status(token_addr, success=False, error_message=str(result))
                     except Exception as e:
                         self.logger.error(f"❌ Queue update failed for {token_addr[:8]}...: {e}")
-            elif result:
+            elif isinstance(result, dict) and result.get('success'):
                 successful_count += 1
+                
+                # Track historizations
+                if result.get('historized'):
+                    historized_count += 1
+                
+                # Track stubs
+                if result.get('is_stub'):
+                    stubs_count += 1
             else:
                 self.logger.warning(f"💾 Database operation returned False for {token_addr[:8]}...")
                 # Update queue only if this is a queue-managed token
@@ -297,24 +308,36 @@ class BatchProcessor:
                     except Exception as e:
                         self.logger.error(f"❌ Queue update failed for {token_addr[:8]}...: {e}")
         
-        self.logger.debug(f"💾 Database operations: {successful_count}/{len(token_addresses)} successful")
-        return successful_count
+        # Store counts for cycle logger if available
+        if hasattr(self, '_current_cycle_stats'):
+            self._current_cycle_stats = {
+                'successful_count': successful_count,
+                'historized_count': historized_count,
+                'stubs_count': stubs_count
+            }
+        
+        self.logger.debug(f"💾 Database operations: {successful_count}/{len(token_addresses)} successful, {historized_count} historized, {stubs_count} stubs")
+        return successful_count, historized_count, stubs_count
     
     def _upsert_token_with_conditional_queue_update(
-    self, 
-    token_address: str, 
-    token_data: TokenData, 
-    update_queue: bool
-) -> bool:
+        self, 
+        token_address: str, 
+        token_data: TokenData, 
+        update_queue: bool
+    ) -> Dict[str, Any]:
         """
         Upsert token and conditionally update queue status
         Note: Historization is now handled automatically in token_repo.upsert_token()
+        
+        Returns:
+            Dict with operation results
         """
         try:
             # L'historisation est maintenant gérée automatiquement dans upsert_token:
             # - AVANT mise à jour pour les tokens existants (capture l'état précédent)
             # - APRÈS insertion pour les nouveaux tokens (capture l'état initial)
-            success = self.token_repo.upsert_token(token_data)
+            result = self.token_repo.upsert_token(token_data)
+            success = result['success']
             
             # Update queue status ONLY if this token came from the queue
             if update_queue:
@@ -339,7 +362,7 @@ class BatchProcessor:
                 operation_type = "queue token" if update_queue else "price update"
                 self.logger.debug(f"✅ Successfully processed {token_address[:8]}... ({operation_type}) with auto-historization")
             
-            return success
+            return result
             
         except Exception as e:
             self.logger.error(f"❌ Error upserting token {token_address[:8]}...: {e}")
@@ -348,15 +371,18 @@ class BatchProcessor:
                     self.queue_repo.update_token_status(token_address, success=False, error_message=str(e))
                 except Exception as queue_error:
                     self.logger.error(f"❌ Queue update error for {token_address[:8]}...: {queue_error}")
-            return False
+            return {'success': False, 'historized': False, 'is_new_token': False, 'is_stub': False}
     
     def _handle_missing_token_with_conditional_queue_update(
         self, 
         token_address: str, 
         update_queue: bool
-    ) -> bool:
+    ) -> Dict[str, Any]:
         """
         Handle missing token and conditionally update queue status
+        
+        Returns:
+            Dict with operation results
         """
         try:
             # Check if token exists
@@ -389,13 +415,14 @@ class BatchProcessor:
                 else:
                     self.logger.debug(f"📝 Marked existing token as no data: {token_address[:8]}... (price update)")
                 
-                return success
+                return {'success': success, 'historized': False, 'is_new_token': False, 'is_stub': False}
             else:
                 # Token doesn't exist, create stub
-                success = self.token_repo.create_token_stub(
+                result = self.token_repo.create_token_stub(
                     token_address,
                     max_attempts=self.config.processing.max_failed_attempts
                 )
+                success = result['success']
                 
                 if update_queue:
                     if success:
@@ -416,7 +443,7 @@ class BatchProcessor:
                 else:
                     self.logger.debug(f"📝 Created stub for {token_address[:8]}... (price update)")
                 
-                return success
+                return result
                 
         except Exception as e:
             self.logger.error(f"❌ Exception handling missing token {token_address[:8]}...: {e}")
@@ -425,7 +452,7 @@ class BatchProcessor:
                     self.queue_repo.update_token_status(token_address, success=False, error_message=str(e))
                 except Exception as queue_error:
                     self.logger.error(f"❌ Queue update error for {token_address[:8]}...: {queue_error}")
-            return False
+            return {'success': False, 'historized': False, 'is_new_token': False, 'is_stub': False}
     
     def _update_stats(self, total_tokens: int, successful_tokens: int, processing_time: float):
         """Update processing statistics"""

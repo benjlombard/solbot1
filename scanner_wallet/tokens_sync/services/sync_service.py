@@ -147,11 +147,20 @@ class SyncService:
         try:
             # 1. Process new tokens from queue
             self.logger.debug("📥 Processing new tokens from queue...")
-            new_tokens_processed = self._process_new_tokens()
+            new_tokens_result = self._process_new_tokens()
+            new_tokens_processed = new_tokens_result['successful']
+            historized_count = new_tokens_result['historized']
+            stubs_count = new_tokens_result['stubs']
+
             self.cycle_logger.record_operation('new_tokens', new_tokens_processed)
-            
+
+            if historized_count > 0:
+                self.cycle_logger.record_operation('historized_tokens', historized_count)
+            if stubs_count > 0:
+                self.cycle_logger.record_operation('stubs_created', stubs_count)
+
             if new_tokens_processed > 0:
-                self.logger.info(f"➕ Processed {new_tokens_processed} new tokens")
+                self.logger.info(f"➕ Processed {new_tokens_processed} new tokens ({historized_count} historized, {stubs_count} stubs)")
             
             # 2. Update existing token prices
             self.logger.debug("🔄 Updating existing token prices...")
@@ -162,12 +171,12 @@ class SyncService:
                 self.logger.info(f"🔄 Updated {prices_updated} token prices")
             
             # 3. Historization améliorée
-            self.logger.debug("📈 Running historization...")
-            historized_count = self._run_historization_improved()
-            self.cycle_logger.record_operation('historized_tokens', historized_count)
-            
-            if historized_count > 0:
-                self.logger.info(f"📈 Historized {historized_count} tokens")
+            self.logger.debug("📈 Running periodic historization...")
+            periodic_historized = self._run_historization_improved()
+            if periodic_historized > 0:
+                # Ajouter au compteur existant
+                self.cycle_logger.add_operation_count('historized_tokens', periodic_historized)
+                self.logger.info(f"📈 Additional periodic historization: {periodic_historized} tokens")
             
             # 4. Periodic tasks (every N cycles)
             if self.cycle_count % 5 == 0:
@@ -176,14 +185,17 @@ class SyncService:
             
             # Update statistics
             total_processed = new_tokens_processed + prices_updated
+            total_historized = historized_count + periodic_historized
+            
             self.stats['processed_tokens'] += total_processed
             self.stats['successful_updates'] += total_processed  # Assuming all processed are successful for now
             
             # Log cycle completion
-            if total_processed > 0 or historized_count > 0:
+            if total_processed > 0 or total_historized > 0 or stubs_count > 0:
                 self.logger.info(
                     f"✅ CYCLE {self.cycle_count} COMPLETED: "
-                    f"{new_tokens_processed} new, {prices_updated} updated, {historized_count} historized"
+                    f"{new_tokens_processed} new, {prices_updated} updated, "
+                    f"{total_historized} historized, {stubs_count} stubs"
                 )
             else:
                 self.logger.debug(f"✅ CYCLE {self.cycle_count} COMPLETED: No tokens to process")
@@ -232,39 +244,16 @@ class SyncService:
         
         self.logger.info(f"📊 Processing {len(pending_tokens)} new tokens")
 
-        successful_count = asyncio.run(self.batch_processor.process_new_tokens_from_queue(pending_tokens))
+        successful_count, historized_count, stubs_count = asyncio.run(
+            self.batch_processor.process_new_tokens_from_queue(pending_tokens)
+        )
 
-        # AJOUT TEMPORAIRE : Forcer l'historisation des nouveaux tokens
-        if successful_count > 0:
-            self.logger.info(f"🔍 DEBUG: Forcing historization for processed tokens...")
-            try:
-                # Obtenir les tokens récemment insérés
-                recent_tokens = []
-                with self.db_connection.get_connection_context() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT address FROM tokens 
-                        WHERE created_at > datetime('now', '-5 minutes')
-                        LIMIT 20
-                    """)
-                    recent_tokens = [row[0] for row in cursor.fetchall()]
-                
-                if recent_tokens:
-                    self.logger.info(f"🔍 DEBUG: Found {len(recent_tokens)} recent tokens to historize")
-                    historized = 0
-                    for token_addr in recent_tokens:
-                        if self.history_repo.create_snapshot(token_addr):
-                            historized += 1
-                            self.logger.debug(f"✅ Historized {token_addr[:8]}...")
-                        else:
-                            self.logger.debug(f"❌ Failed to historize {token_addr[:8]}...")
-                    
-                    self.logger.info(f"🔍 DEBUG: Manual historization result: {historized}/{len(recent_tokens)}")
-                
-            except Exception as e:
-                self.logger.error(f"Error in manual historization: {e}")
-        
-        return successful_count
+        return {
+            'successful': successful_count,
+            'historized': historized_count,
+            'stubs': stubs_count
+        }
+
     
     def _update_existing_prices(self) -> int:
         """Update existing token prices"""

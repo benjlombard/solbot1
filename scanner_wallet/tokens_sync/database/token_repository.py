@@ -172,7 +172,14 @@ class TokenRepository:
             # Clean data first
             token_data = token_data.clean_symbol_name()
             current_timestamp = int(time.time())
-            
+
+            result = {
+                'success': False,
+                'historized': False,
+                'is_new_token': False,
+                'is_stub': False
+            }
+
             with self.db.get_connection_context() as conn:
                 cursor = conn.cursor()
                 
@@ -194,6 +201,8 @@ class TokenRepository:
                     self.logger.debug(f"📈 Creating snapshot BEFORE update for {token_data.address[:8]}...")
                     snapshot_success = self.history_repo.create_snapshot(token_data.address)
                     self.logger.debug(f"📈 Snapshot before update: {'✅ Success' if snapshot_success else '❌ Failed'}")
+                    result['historized'] = snapshot_success
+
                     update_start = time.time()
                     # Update existing token
                     query = """
@@ -276,6 +285,7 @@ class TokenRepository:
 
                 else:
                     # Insert new token
+                    result['is_new_token'] = True
                     insert_start = time.time()
                     query = """
                     INSERT INTO tokens (
@@ -326,19 +336,28 @@ class TokenRepository:
                     rows_affected = cursor.rowcount
                     self.logger.debug(f"💾 Insert query for {token_data.address[:8]}... completed in {insert_duration:.3f}s, rows affected: {rows_affected}")
                     
-                    # Historize after insert
+                    # CORRECTION CRITIQUE : Commit AVANT l'historisation pour nouveaux tokens
+                    conn.commit()
+                    self.logger.debug(f"💾 Database committed for {token_data.address[:8]}... before historization")
+                    
+                    # Historize after insert - maintenant le token existe dans la DB
                     self.logger.debug(f"📈 Creating snapshot AFTER insert for {token_data.address[:8]}...")
                     snapshot_success = self.history_repo.create_snapshot(token_data.address)
                     self.logger.debug(f"📈 Snapshot after insert: {'✅ Success' if snapshot_success else '❌ Failed'}")
+                    result['historized'] = snapshot_success
 
-                conn.commit()
+                # Commit final pour les updates (déjà fait pour les inserts)
+                if token_exists:
+                    conn.commit()
+                
                 commit_duration = time.time() - (update_start if token_exists else insert_start)
                 self.logger.debug(f"✅ Upsert completed for {token_data.address[:8]}... total time: {commit_duration:.3f}s")
-                return True
+                result['success'] = True
+                return result
                 
         except Exception as e:
             self.logger.error(f"Error upserting token {token_data.address}: {e}")
-            return False
+            return {'success': False, 'historized': False, 'is_new_token': False, 'is_stub': False}
     
     @db_retry(max_retries=3, delay=0.3)
     def mark_token_no_data(self, token_address: str, max_attempts: int, increment_attempts: bool = True) -> bool:
@@ -402,6 +421,7 @@ class TokenRepository:
             
             # Check if token already exists
             if self.token_exists(token_address):
+                mark_result = self.mark_token_no_data(token_address, max_attempts=max_attempts)
                 return self.mark_token_no_data(token_address, max_attempts=max_attempts)
             
             with self.db.get_connection_context() as conn:
@@ -430,16 +450,17 @@ class TokenRepository:
                     
                     conn.commit()
                     self.logger.debug(f"✅ Created stub entry for {token_address[:8]}...")
-                    return True
+                    return {'success': True, 'is_stub': True}
                     
                 except sqlite3.IntegrityError as e:
                     # Token existe déjà, marquer comme no_data au lieu d'échouer
                     self.logger.debug(f"Token {token_address[:8]}... already exists, marking as no_data")
-                    return self.mark_token_no_data(token_address)
+                    mark_result = self.mark_token_no_data(token_address)
+                    return {'success': mark_result, 'is_stub': False}
                     
         except Exception as e:
             self.logger.error(f"Error creating token stub {token_address}: {e}")
-            return False
+            return {'success': False, 'is_stub': False}
     
     @db_retry(max_retries=3, delay=0.3)
     def update_creation_timestamp(self, token_address: str, timestamp: int) -> bool:

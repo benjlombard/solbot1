@@ -28,6 +28,7 @@ class CycleMetrics:
     creation_timestamps: int = 0
     dead_tokens_marked: int = 0
     pumpfun_updated: int = 0
+    stubs_created: int = 0
     
     # API call tracking
     api_calls: Dict[str, int] = field(default_factory=dict)
@@ -53,8 +54,7 @@ class CycleMetrics:
     def total_operations(self) -> int:
         """Total number of operations performed"""
         return (
-            self.new_tokens + self.updated_tokens + self.historized_tokens +
-            self.creation_timestamps + self.dead_tokens_marked + self.pumpfun_updated
+            self.new_tokens + self.updated_tokens + self.historized_tokens + self.creation_timestamps + self.dead_tokens_marked + self.pumpfun_updated +self.stubs_created
         )
     
     @property
@@ -93,6 +93,7 @@ class CycleMetrics:
                 'creation_timestamps': self.creation_timestamps,
                 'dead_tokens_marked': self.dead_tokens_marked,
                 'pumpfun_updated': self.pumpfun_updated,
+                'stubs_created': self.stubs_created,
                 'total_operations': self.total_operations
             },
             'api_metrics': {
@@ -200,9 +201,25 @@ class CycleLogger:
             self.current_cycle.dead_tokens_marked = count
         elif operation_type == 'pumpfun_updated':
             self.current_cycle.pumpfun_updated = count
+        elif operation_type == 'stubs_created':  # NOUVEAU
+            self.current_cycle.stubs_created = count
         else:
             # For unknown operation types, log as debug
             self.logger.debug(f"Unknown operation type: {operation_type} = {count}")
+
+
+    def add_operation_count(self, operation_type: str, count: int):
+        """Add to existing operation count (for incremental counting)"""
+        if not self.current_cycle:
+            return
+        
+        if operation_type == 'historized_tokens':
+            self.current_cycle.historized_tokens += count
+        elif operation_type == 'stubs_created':
+            self.current_cycle.stubs_created += count
+        else:
+            # For other types, just use record_operation
+            self.record_operation(operation_type, count)
 
     def _log_api_breakdown(self):
         """Log detailed API breakdown for the cycle"""
@@ -354,6 +371,9 @@ class CycleLogger:
         self.logger.info(f"  🔄 Updated tokens: {cycle.updated_tokens}")
         self.logger.info(f"  📈 Historized: {cycle.historized_tokens}")
         
+        if cycle.stubs_created > 0:
+            self.logger.info(f"  📝 Stubs created (no API data): {cycle.stubs_created}")
+
         if cycle.creation_timestamps > 0:
             self.logger.info(f"  ⏰ Creation timestamps: {cycle.creation_timestamps}")
         if cycle.dead_tokens_marked > 0:
