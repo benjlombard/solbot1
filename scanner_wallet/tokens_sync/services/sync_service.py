@@ -38,13 +38,14 @@ class SyncService:
         )
         
         # Initialize repositories
-        self.token_repo = TokenRepository(self.db_connection, self.logger)
-        self.queue_repo = QueueRepository(self.db_connection, self.logger)
         self.history_repo = HistoryRepository(self.db_connection, self.config, self.logger)
+        self.queue_repo = QueueRepository(self.db_connection, self.logger)
+        self.token_repo = TokenRepository(self.db_connection, self.history_repo, self.logger)
         self.api_tracker = ApiTracker(
             db_connection=self.db_connection, 
             logger=self.logger
         )
+
         self.cycle_logger = CycleLogger(logger=self.logger)
         # Initialize API clients
         self.dex_client = DexScreenerClient(logger=self.logger, api_tracker=self.api_tracker)
@@ -70,10 +71,6 @@ class SyncService:
             self.logger.debug("✅ Historization processor initialized")
         except ImportError:
             self.logger.warning("⚠️ Historization processor not available")
-        
-        # Initialize monitoring
-        #self.api_tracker = ApiTracker(db_connection=self.db_connection, logger=self.logger)
-        #self.cycle_logger = CycleLogger(logger=self.logger)
         
         # Statistics
         self.stats = {
@@ -234,9 +231,40 @@ class SyncService:
             return 0
         
         self.logger.info(f"📊 Processing {len(pending_tokens)} new tokens")
+
+        successful_count = asyncio.run(self.batch_processor.process_new_tokens_from_queue(pending_tokens))
+
+        # AJOUT TEMPORAIRE : Forcer l'historisation des nouveaux tokens
+        if successful_count > 0:
+            self.logger.info(f"🔍 DEBUG: Forcing historization for processed tokens...")
+            try:
+                # Obtenir les tokens récemment insérés
+                recent_tokens = []
+                with self.db_connection.get_connection_context() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT address FROM tokens 
+                        WHERE created_at > datetime('now', '-5 minutes')
+                        LIMIT 20
+                    """)
+                    recent_tokens = [row[0] for row in cursor.fetchall()]
+                
+                if recent_tokens:
+                    self.logger.info(f"🔍 DEBUG: Found {len(recent_tokens)} recent tokens to historize")
+                    historized = 0
+                    for token_addr in recent_tokens:
+                        if self.history_repo.create_snapshot(token_addr):
+                            historized += 1
+                            self.logger.debug(f"✅ Historized {token_addr[:8]}...")
+                        else:
+                            self.logger.debug(f"❌ Failed to historize {token_addr[:8]}...")
+                    
+                    self.logger.info(f"🔍 DEBUG: Manual historization result: {historized}/{len(recent_tokens)}")
+                
+            except Exception as e:
+                self.logger.error(f"Error in manual historization: {e}")
         
-        # Process tokens in batch
-        return asyncio.run(self.batch_processor.process_new_tokens_from_queue(pending_tokens))
+        return successful_count
     
     def _update_existing_prices(self) -> int:
         """Update existing token prices"""

@@ -31,6 +31,8 @@ class HistoryRepository:
         Returns:
             True if snapshot created successfully
         """
+        self.logger.debug(f"📈 Starting snapshot creation for {token_address[:8]}...")
+
         try:
             with self.db.get_connection_context() as conn:
                 cursor = conn.cursor()
@@ -47,6 +49,8 @@ class HistoryRepository:
                     self.logger.debug(f"Token {token_address[:8]}... not found in database")
                     return False
                 
+                self.logger.debug(f"📈 Token {token_address[:8]}... found, proceeding with snapshot...")
+
                 price_usd, market_cap, volume_24h, last_update, is_dead, is_rugged = token_info
                 
                 # VALIDATION 2: Skip dead or rugged tokens

@@ -191,7 +191,9 @@ class TokenRepository:
                 
                 if token_exists:
                     # Historize before update
-                    self.history_repo.create_snapshot(token_data.address)
+                    self.logger.debug(f"📈 Creating snapshot BEFORE update for {token_data.address[:8]}...")
+                    snapshot_success = self.history_repo.create_snapshot(token_data.address)
+                    self.logger.debug(f"📈 Snapshot before update: {'✅ Success' if snapshot_success else '❌ Failed'}")
                     update_start = time.time()
                     # Update existing token
                     query = """
@@ -325,7 +327,9 @@ class TokenRepository:
                     self.logger.debug(f"💾 Insert query for {token_data.address[:8]}... completed in {insert_duration:.3f}s, rows affected: {rows_affected}")
                     
                     # Historize after insert
-                    self.history_repo.create_snapshot(token_data.address)
+                    self.logger.debug(f"📈 Creating snapshot AFTER insert for {token_data.address[:8]}...")
+                    snapshot_success = self.history_repo.create_snapshot(token_data.address)
+                    self.logger.debug(f"📈 Snapshot after insert: {'✅ Success' if snapshot_success else '❌ Failed'}")
 
                 conn.commit()
                 commit_duration = time.time() - (update_start if token_exists else insert_start)
