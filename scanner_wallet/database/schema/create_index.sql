@@ -74,6 +74,19 @@ CREATE INDEX IF NOT EXISTS idx_transactions_wallet_token ON transactions(wallet_
 CREATE INDEX IF NOT EXISTS idx_tokens_metadata_source ON tokens(metadata_source, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transactions_detection_delay ON transactions(detection_delay, created_at DESC);
 
+-- Ajouter ces index pour améliorer les performances
+CREATE INDEX IF NOT EXISTS idx_tokens_last_price_update 
+ON tokens(last_price_update, is_dead, no_data_available);
+
+CREATE INDEX IF NOT EXISTS idx_tokens_last_historized 
+ON tokens(last_historized_at, is_dead, is_rugged);
+
+CREATE INDEX IF NOT EXISTS idx_transactions_created_token 
+ON transactions(created_at, token_mint);
+
+CREATE INDEX IF NOT EXISTS idx_tokens_priority_fields 
+ON tokens(volume_24h, price_change_24h, holder_count, market_cap);
+
 -- Vérifier que les index ont été créés
 .indexes tokens
 .indexes transactions
