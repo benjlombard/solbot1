@@ -27,7 +27,7 @@ try:
     
 except ImportError:
     # Fallback si le système de config n'est pas disponible
-    DEFAULT_DB_PATH = os.getenv('STREAMLIT_DB_PATH', 'database/data/solana_wallet.db')
+    DEFAULT_DB_PATH = os.getenv('STREAMLIT_DB_PATH', 'database/data/solana_wallet_monitor.db')
     print("⚠️ Système de configuration non disponible, utilisation du fallback")
 
 # Auto-refresh toutes les 30 secondes

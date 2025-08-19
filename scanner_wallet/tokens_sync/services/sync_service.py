@@ -298,11 +298,12 @@ class SyncService:
         try:
             # Population initiale si pas encore faite
             if not self.initial_population_done:
-                # Vérifier d'abord si la queue contient déjà des tokens actifs
-                if not self.queue_repo.is_queue_empty():
-                    # La queue contient déjà des tokens actifs, pas besoin de population initiale
-                    total_items = self.queue_repo.get_total_queue_size()
-                    self.logger.info(f"🔍 Queue already contains active items ({total_items} total), skipping initial population")
+                # ✅ CORRECTION: Vérifier l'existence d'historique plutôt que l'état actuel
+                total_queue_size = self.queue_repo.get_total_queue_size()
+                
+                if total_queue_size > 0:
+                    # La queue a déjà été utilisée (peu importe le statut des items)
+                    self.logger.info(f"🔍 Queue history found ({total_queue_size} items), skipping initial population")
                     self.initial_population_done = True
                     
                     # Récupérer le timestamp le plus récent des tokens existants
@@ -314,11 +315,11 @@ class SyncService:
                     
                     return 0
                 else:
-                    # La queue est vide, faire la population initiale
-                    self.logger.info("🔄 Queue is empty, proceeding with initial population")
+                    # Queue vraiment vide, première utilisation
+                    self.logger.info("🔄 Empty queue detected, proceeding with initial population")
                     return self._do_initial_population()
             
-            # Sinon, rechercher les nouveaux tokens depuis le dernier timestamp
+            # Mode normal: rechercher les nouveaux tokens depuis le dernier timestamp
             return self._add_tokens_since_last_timestamp()
             
         except Exception as e:
