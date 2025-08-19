@@ -12,36 +12,41 @@ import sys
 import os
 from pathlib import Path
 
-# Ajouter la racine du projet au path pour accéder aux modules de config
-project_root = Path(__file__).parent.parent.parent.absolute()  # Remonter de 2 niveaux depuis pages/
-sys.path.insert(0, str(project_root))
 
-# Import du système de configuration
 try:
-    from core.config import get_config
+    from config import get_streamlit_config, StreamlitEnvironment
     
-    # Charger la configuration
-    config = get_config()
-    DEFAULT_DB_PATH = config.database.get_full_path()
+    streamlit_config = get_streamlit_config()
+    DEFAULT_DB_PATH = streamlit_config.database.get_db_path("historic")
     
-    # Afficher un indicateur de succès
-    st.success(f"✅ Configuration chargée - DB: {config.database.name}")
+    st.set_page_config(
+        page_title="📜 Analyse Historique",
+        page_icon="📜",
+        layout=streamlit_config.ui.layout,
+    )
+    
+    if streamlit_config.features.debug_mode:
+        st.success(f"✅ Configuration chargée - DB: {streamlit_config.database.historic_detail}")
     
 except ImportError:
-    # Fallback si le système de config n'est pas disponible
-    DEFAULT_DB_PATH = os.getenv('TRADING_OPPORTUNITIES_DB_PATH', 'database/data/solana_wallet.db')
-    st.warning("⚠️ Système de configuration non disponible, utilisation du fallback")
+    DEFAULT_DB_PATH = os.getenv('DETAIL_HISTORIC_DB_PATH', '../database/data/solana_wallet_monitor.db')
+    st.warning("⚠️ Système de configuration non disponible")
+    
+    st.set_page_config(
+        page_title="📜 Analyse Historique",
+        page_icon="📜",
+        layout="wide",
+    )
 except Exception as e:
-    DEFAULT_DB_PATH = 'database/data/solana_wallet.db'
+    DEFAULT_DB_PATH = '../database/data/solana_wallet_monitor.db'
     st.error(f"❌ Erreur chargement config: {e}")
-
-# Configuration de la page
-st.set_page_config(
-    page_title="📜 Analyse Historique",
-    page_icon="📜",
-    layout="wide",
-)
-
+    
+    st.set_page_config(
+        page_title="📜 Analyse Historique",
+        page_icon="📜",
+        layout="wide",
+    )
+    
 # CSS personnalisé
 st.markdown("""
 <style>

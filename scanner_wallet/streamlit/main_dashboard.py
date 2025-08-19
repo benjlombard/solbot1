@@ -17,21 +17,61 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.absolute()
 sys.path.insert(0, str(project_root))
 
-# Import du système de configuration
+# Import de la configuration Streamlit dédiée
 try:
-    from core.config import get_config
+    from config import get_streamlit_config, StreamlitEnvironment
     
-    # Charger la configuration
-    config = get_config()
-    DEFAULT_DB_PATH = config.database.get_full_path()
+    # Charger la configuration Streamlit
+    streamlit_config = get_streamlit_config()
     
-except ImportError:
-    # Fallback si le système de config n'est pas disponible
+    # Configuration de la page avec les paramètres de la config
+    st.set_page_config(**streamlit_config.get_page_config())
+    
+    # Afficher le statut de configuration
+    if streamlit_config.features.debug_mode:
+        st.sidebar.success(f"✅ Config Streamlit chargée ({streamlit_config.environment.value})")
+        
+        with st.sidebar.expander("🔧 Configuration Details", expanded=False):
+            st.text(streamlit_config.get_summary())
+            
+            if streamlit_config.get_warnings():
+                st.warning("⚠️ Avertissements détectés")
+                for warning in streamlit_config.get_warnings():
+                    st.write(f"• {warning}")
+    
+    # Utiliser la configuration
+    DEFAULT_DB_PATH = streamlit_config.database.get_db_path("main")
+    REFRESH_INTERVAL = streamlit_config.ui.refresh_interval
+    MAX_TOKENS_DISPLAY = streamlit_config.ui.max_tokens_display
+    
+except ImportError as e:
+    # Fallback si le système de config Streamlit n'est pas disponible
+    st.error(f"❌ Erreur import config Streamlit: {e}")
+    
+    # Utiliser les valeurs d'environnement directement
     DEFAULT_DB_PATH = os.getenv('STREAMLIT_DB_PATH', 'database/data/solana_wallet_monitor.db')
-    print("⚠️ Système de configuration non disponible, utilisation du fallback")
+    REFRESH_INTERVAL = int(os.getenv('STREAMLIT_REFRESH_INTERVAL', 30))
+    MAX_TOKENS_DISPLAY = int(os.getenv('STREAMLIT_MAX_TOKENS_DISPLAY', 100))
+    
+    st.set_page_config(
+        page_title="Token Analysis Dashboard",
+        page_icon="🪙",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
 
 # Auto-refresh toutes les 30 secondes
 st_autorefresh(interval=30 * 1000, key="refresh")
+
+# Fonction de connexion DB simplifiée
+@st.cache_resource
+def get_database_connection():
+    """Connexion à la base de données via la config"""
+    if 'streamlit_config' in locals():
+        return streamlit_config.get_db_connection("main")
+    else:
+        # Fallback
+        return sqlite3.connect(DEFAULT_DB_PATH)
 
 # Streamlit page configuration
 st.set_page_config(
@@ -123,14 +163,22 @@ st.markdown(scroll_js, unsafe_allow_html=True)
 
 
 class TokenAnalyzer:
-    def __init__(self, db_path):
-        self.db_path = db_path
+    def __init__(self, use_config=True):
+        if use_config and 'streamlit_config' in locals():
+            self.config = streamlit_config
+            self.db_path = self.config.database.get_db_path("main")
+        else:
+            self.config = None
+            self.db_path = DEFAULT_DB_PATH
         self.conn = None
 
     def connect(self):
-        """Database connection"""
+        """Connexion à la base de données"""
         try:
-            self.conn = sqlite3.connect(self.db_path)
+            if self.config:
+                self.conn = self.config.get_db_connection("main")
+            else:
+                self.conn = sqlite3.connect(self.db_path)
             return True
         except Exception as e:
             st.error(f"Database connection error: {e}")
@@ -140,6 +188,8 @@ class TokenAnalyzer:
         """Retrieves an overview of all tokens with key indicators and market data"""
         if not self.conn:
             return pd.DataFrame()
+
+        limit = MAX_TOKENS_DISPLAY if not self.config else self.config.ui.max_tokens_display
 
         query = """
         WITH token_stats AS (
@@ -213,9 +263,10 @@ class TokenAnalyzer:
             (avg_buyer_priority_rounded * 50) +
             (CASE WHEN discovery_delay_hours <= 2 THEN 30 WHEN discovery_delay_hours <= 6 THEN 20 ELSE 0 END)
             DESC
+        LIMIT ?
         """
 
-        result_df = pd.read_sql_query(query, self.conn)
+        result_df = pd.read_sql_query(query, self.conn, params=[limit])
     
         # LOGS POUR DÉBUGGER
         if hasattr(st, 'sidebar'):
@@ -957,23 +1008,19 @@ def main():
     st.title("🪙 Vue d'ensemble des Tokens")
     st.markdown("*Analyse et détection des opportunités sur l'ensemble des tokens.*")
 
-    # Sidebar configuration
-    st.sidebar.header("Configuration")
-    db_path = st.sidebar.text_input(
-        "Database path",
-        value=DEFAULT_DB_PATH,  # Utiliser la valeur depuis la config
-        help="SQLite file containing the data"
-    )
+    # Afficher les infos de configuration si en mode debug
+    if 'streamlit_config' in locals() and streamlit_config.features.debug_mode:
+        with st.expander("🔧 Configuration Active", expanded=False):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.info(f"📊 DB: `{streamlit_config.database.main_dashboard}`")
+            with col2:
+                st.info(f"⏰ Refresh: {streamlit_config.ui.refresh_interval}s")
+            with col3:
+                st.info(f"📈 Max tokens: {streamlit_config.ui.max_tokens_display}")
 
-    if 'config' in globals():
-        st.sidebar.success(f"✅ Configuration chargée")
-        st.sidebar.info(f"📊 DB: {config.database.name}")
-        st.sidebar.info(f"📁 Dir: {config.database.base_dir}/{config.database.data_subdir}")
-    else:
-        st.sidebar.warning("⚠️ Configuration fallback")
-
-    # Initialize analyzer
-    analyzer = TokenAnalyzer(db_path)
+    # Initialiser l'analyzeur avec la configuration
+    analyzer = TokenAnalyzer(use_config=True)
 
     if not analyzer.connect():
         st.stop()

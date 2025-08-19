@@ -13,25 +13,43 @@ import sys
 import os
 from pathlib import Path
 
-# Ajouter la racine du projet au path pour accéder aux modules de config
-project_root = Path(__file__).parent.parent.parent.absolute()  # Remonter de 2 niveaux depuis pages/
-sys.path.insert(0, str(project_root))
 
-# Import du système de configuration
 try:
-    from core.config import get_config
+    from config import get_streamlit_config, StreamlitEnvironment
     
-    # Charger la configuration
-    config = get_config()
-    DEFAULT_DB_PATH = config.database.get_full_path()
+    streamlit_config = get_streamlit_config()
+    DEFAULT_DB_PATH = streamlit_config.database.get_db_path("monitoring")
+    
+    st.set_page_config(
+        page_title="📊 Monitoring Temps Réel",
+        page_icon="📊",
+        layout=streamlit_config.ui.layout,
+        initial_sidebar_state=streamlit_config.ui.initial_sidebar_state
+    )
+    
+    if streamlit_config.features.debug_mode:
+        st.success(f"✅ Configuration chargée - DB: {streamlit_config.database.monitoring_realtime}")
     
 except ImportError:
-    # Fallback si le système de config n'est pas disponible
-    DEFAULT_DB_PATH = os.getenv('REALTIME_MONITORING_DB_PATH', 'database/data/solana_wallet.db')
-    st.warning("⚠️ Système de configuration non disponible, utilisation du fallback")
+    DEFAULT_DB_PATH = os.getenv('MONITORING_REALTIME_DB_PATH', '../database/data/solana_wallet_monitor.db')
+    st.warning("⚠️ Système de configuration non disponible")
+    
+    st.set_page_config(
+        page_title="📊 Monitoring Temps Réel",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
 except Exception as e:
-    DEFAULT_DB_PATH = 'database/data/solana_wallet.db'
+    DEFAULT_DB_PATH = '../database/data/solana_wallet_monitor.db'
     st.error(f"❌ Erreur chargement config: {e}")
+    
+    st.set_page_config(
+        page_title="📊 Monitoring Temps Réel",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
 
 # Configuration globale
 CONFIG = {
@@ -45,13 +63,6 @@ CONFIG = {
     }
 }
 
-# Configuration Streamlit
-st.set_page_config(
-    page_title="📊 Monitoring Temps Réel",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # CSS pour améliorer l'apparence
 st.markdown("""
@@ -123,16 +134,17 @@ def get_db_connection():
     """Connexion à la base de données avec st.connection (thread-safe)"""
     try:
         db_path = CONFIG.get('db_path', DEFAULT_DB_PATH)
-        # Utiliser st.connection pour SQLite
-        conn = st.connection(
-            "metrics_db",
-            type="sql", 
-            url=f"sqlite:///{db_path}",
-            autocommit=True
-        )
+        conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
+        
+        # Configuration SQLite optimisée pour lecture
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL") 
+        conn.execute("PRAGMA cache_size=10000")
+        conn.execute("PRAGMA temp_store=memory")
+        
         return conn
     except Exception as e:
-        st.error(f"❌ Erreur connexion DB avec st.connection: {e}")
+        st.error(f"❌ Erreur connexion DB: {e}")
         return None
 
 @st.cache_data(ttl=60)
@@ -146,37 +158,37 @@ def get_system_metrics(window_minutes):
         cutoff_timestamp = int(time.time()) - (window_minutes * 60)
         
         # Nouveaux tokens
-        df_new_tokens = conn.query(
-            "SELECT COUNT(*) as count FROM tokens WHERE created_at > datetime(:cutoff, 'unixepoch')",
-            params={"cutoff": cutoff_timestamp}
+        df_new_tokens = pd.read_sql_query(
+            "SELECT COUNT(*) as count FROM tokens WHERE created_at > datetime(?, 'unixepoch')",
+            conn, params=[cutoff_timestamp]
         )
         new_tokens = int(df_new_tokens['count'].iloc[0]) if not df_new_tokens.empty else 0
         
         # Nouvelles transactions
-        df_new_transactions = conn.query("""
+        df_new_transactions = pd.read_sql_query("""
             SELECT COUNT(*) as count FROM transactions 
-            WHERE created_at > datetime(:cutoff, 'unixepoch')
-            OR datetime(created_at, 'unixepoch') > datetime(:cutoff, 'unixepoch')
-        """, params={"cutoff": cutoff_timestamp})
+            WHERE created_at > datetime(?, 'unixepoch')
+            OR datetime(created_at, 'unixepoch') > datetime(?, 'unixepoch')
+        """, conn, params=[cutoff_timestamp, cutoff_timestamp])
         new_transactions = int(df_new_transactions['count'].iloc[0]) if not df_new_transactions.empty else 0
         
         # Token updates
-        df_token_updates = conn.query("""
+        df_token_updates = pd.read_sql_query("""
             SELECT COUNT(*) as count FROM tokens 
-            WHERE updated_at > datetime(:cutoff, 'unixepoch')
-            AND (created_at != updated_at OR created_at <= datetime(:cutoff, 'unixepoch'))
-        """, params={"cutoff": cutoff_timestamp})
+            WHERE updated_at > datetime(?, 'unixepoch')
+            AND (created_at != updated_at OR created_at <= datetime(?, 'unixepoch'))
+        """, conn, params=[cutoff_timestamp, cutoff_timestamp])
         token_updates = int(df_token_updates['count'].iloc[0]) if not df_token_updates.empty else 0
         
         # History snapshots
-        df_snapshots = conn.query("""
+        df_snapshots = pd.read_sql_query("""
             SELECT COUNT(*) as count FROM tokens_history 
-            WHERE created_at > datetime(:cutoff, 'unixepoch')
-        """, params={"cutoff": cutoff_timestamp})
+            WHERE created_at > datetime(?, 'unixepoch')
+        """, conn, params=[cutoff_timestamp])
         history_snapshots = int(df_snapshots['count'].iloc[0]) if not df_snapshots.empty else 0
         
         # Métriques de transactions détaillées
-        df_tx_metrics = conn.query("""
+        df_tx_metrics = pd.read_sql_query("""
             SELECT 
                 COUNT(DISTINCT wallet_address) as unique_wallets,
                 COUNT(CASE WHEN transaction_type = 'TransactionType.BUY' THEN 1 END) as buys,
@@ -184,9 +196,9 @@ def get_system_metrics(window_minutes):
                 COALESCE(SUM(amount), 0) as total_volume,
                 COALESCE(AVG(detection_delay), 0) as avg_delay
             FROM transactions 
-            WHERE created_at > datetime(:cutoff, 'unixepoch')
-            OR datetime(created_at, 'unixepoch') > datetime(:cutoff, 'unixepoch')
-        """, params={"cutoff": cutoff_timestamp})
+            WHERE created_at > datetime(?, 'unixepoch')
+            OR datetime(created_at, 'unixepoch') > datetime(?, 'unixepoch')
+        """, conn, params=[cutoff_timestamp, cutoff_timestamp])
         
         if not df_tx_metrics.empty:
             tx_row = df_tx_metrics.iloc[0]
@@ -224,50 +236,50 @@ def get_system_health():
     
     try:
         # Total tokens
-        df_total = conn.query("SELECT COUNT(*) as count FROM tokens")
+        df_total = pd.read_sql_query("SELECT COUNT(*) as count FROM tokens", conn)
         total_tokens = int(df_total['count'].iloc[0]) if not df_total.empty else 0
         
         # Tokens avec données complètes
-        df_complete = conn.query("""
+        df_complete = pd.read_sql_query("""
             SELECT COUNT(*) as count FROM tokens 
             WHERE symbol IS NOT NULL 
             AND name IS NOT NULL 
             AND price_usd > 0 
             AND market_cap > 0
             AND is_dead = 0
-        """)
+        """, conn)
         tokens_with_complete_data = int(df_complete['count'].iloc[0]) if not df_complete.empty else 0
         
         # Tokens morts
-        df_dead = conn.query("SELECT COUNT(*) as count FROM tokens WHERE is_dead = 1")
+        df_dead = pd.read_sql_query("SELECT COUNT(*) as count FROM tokens WHERE is_dead = 1", conn)
         tokens_dead = int(df_dead['count'].iloc[0]) if not df_dead.empty else 0
         
         # Tokens flaggés sans données
-        df_flagged = conn.query("SELECT COUNT(*) as count FROM tokens WHERE no_data_available = 1")
+        df_flagged = pd.read_sql_query("SELECT COUNT(*) as count FROM tokens WHERE no_data_available = 1", conn)
         tokens_flagged_no_data = int(df_flagged['count'].iloc[0]) if not df_flagged.empty else 0
         
         # Tokens ruggés
-        df_rugged = conn.query("SELECT COUNT(*) as count FROM tokens WHERE is_rugged = 1")
+        df_rugged = pd.read_sql_query("SELECT COUNT(*) as count FROM tokens WHERE is_rugged = 1", conn)
         tokens_rugged = int(df_rugged['count'].iloc[0]) if not df_rugged.empty else 0
         
         # Tokens récemment mis à jour (5 minutes)
-        df_recent = conn.query("""
+        df_recent = pd.read_sql_query("""
             SELECT COUNT(*) as count FROM tokens 
             WHERE updated_at > datetime('now', '-5 minutes')
             AND no_data_available != 1 
             AND (symbol NOT LIKE 'UNK%' OR symbol IS NULL)
             AND (is_rugged = 0)
-        """)
+        """, conn)
         tokens_recently_updated = int(df_recent['count'].iloc[0]) if not df_recent.empty else 0
         
         # Tokens obsolètes (>5 minutes)
-        df_outdated = conn.query("""
+        df_outdated = pd.read_sql_query("""
             SELECT COUNT(*) as count FROM tokens 
             WHERE updated_at < datetime('now', '-5 minutes')
             AND no_data_available != 1 
             AND (symbol NOT LIKE 'UNK%' OR symbol IS NULL)
             AND (is_rugged = 0)
-        """)
+        """, conn)
         tokens_outdated = int(df_outdated['count'].iloc[0]) if not df_outdated.empty else 0
         
         # Calculs des taux
@@ -310,14 +322,13 @@ def get_api_metrics_summary(window_minutes):
         cutoff_timestamp = int(time.time()) - (window_minutes * 60)
         
         # Requête corrigée avec paramètres nommés
-        df_api = conn.query("""
+        df_api = pd.read_sql_query("""
             SELECT 
                 COUNT(*) as total_calls,
                 AVG(duration_ms) as avg_duration,
                 SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as success_rate
             FROM api_metrics 
-            WHERE call_timestamp > :cutoff_timestamp
-        """, params={"cutoff_timestamp": cutoff_timestamp})
+            WHERE call_timestamp > :cutoff_timestamp""", conn, params=[cutoff_timestamp])
         
         if not df_api.empty:
             row = df_api.iloc[0]
@@ -360,7 +371,7 @@ def get_system_metrics_timeline(window_minutes):
         # Créer des intervalles de temps
         interval_seconds = max(60, window_minutes * 60 // 20)  # 20 points maximum
         
-        df_timeline = conn.query("""
+        df_timeline = pd.read_sql_query("""
             WITH time_series AS (
                 SELECT 
                     ? + (value * ?) as timestamp_bucket
@@ -397,7 +408,7 @@ def get_system_metrics_timeline(window_minutes):
             LEFT JOIN token_counts tc ON ts.timestamp_bucket = tc.bucket
             LEFT JOIN transaction_counts txc ON ts.timestamp_bucket = txc.bucket
             ORDER BY ts.timestamp_bucket
-        """, params=[
+        """, conn, params=[
             cutoff_timestamp, interval_seconds, cutoff_timestamp, interval_seconds, int(time.time()),
             interval_seconds, interval_seconds, cutoff_timestamp,
             interval_seconds, interval_seconds, cutoff_timestamp, cutoff_timestamp
@@ -424,7 +435,7 @@ def get_api_metrics_timeline(window_minutes):
         cutoff_timestamp = int(time.time()) - (window_minutes * 60)
         
         # Timeline des appels API
-        df_timeline = conn.query("""
+        df_timeline = pd.read_sql_query("""
             SELECT 
                 datetime(call_timestamp, 'unixepoch') as datetime,
                 COUNT(*) as total_calls,
@@ -434,10 +445,10 @@ def get_api_metrics_timeline(window_minutes):
             WHERE call_timestamp > ?
             GROUP BY datetime(call_timestamp, 'unixepoch', 'start of hour')
             ORDER BY datetime
-        """, params=[cutoff_timestamp])
-        
+        """, conn, params=[cutoff_timestamp])
+
         # Breakdown par API
-        df_breakdown = conn.query("""
+        df_breakdown = pd.read_sql_query("""
             SELECT 
                 api_name,
                 COUNT(*) as total_calls,
@@ -448,7 +459,7 @@ def get_api_metrics_timeline(window_minutes):
             WHERE call_timestamp > ?
             GROUP BY api_name
             ORDER BY total_calls DESC
-        """, params=[cutoff_timestamp])
+        """, conn, params=[cutoff_timestamp])
         
         return df_timeline, df_breakdown
         
@@ -466,33 +477,33 @@ def get_time_window_metrics_for_timestamp(window_seconds, timestamp):
         cutoff_timestamp = timestamp - window_seconds
         
         # Nouveaux tokens
-        df_tokens = conn.query(
+        df_tokens = pd.read_sql_query(
             "SELECT COUNT(*) as count FROM tokens WHERE created_at > datetime(?, 'unixepoch')",
-            params=[cutoff_timestamp]
+            conn, params=[cutoff_timestamp]
         )
         new_tokens = df_tokens['count'].iloc[0] if not df_tokens.empty else 0
         
         # Nouvelles transactions
-        df_transactions = conn.query("""
+        df_transactions = pd.read_sql_query("""
             SELECT COUNT(*) as count FROM transactions 
             WHERE created_at > datetime(?, 'unixepoch')
             OR datetime(created_at, 'unixepoch') > datetime(?, 'unixepoch')
-        """, params=[cutoff_timestamp, cutoff_timestamp])
+        """, conn, params=[cutoff_timestamp, cutoff_timestamp])
         new_transactions = df_transactions['count'].iloc[0] if not df_transactions.empty else 0
         
         # Token updates
-        df_updates = conn.query("""
+        df_updates = pd.read_sql_query("""
             SELECT COUNT(*) as count FROM tokens 
             WHERE updated_at > datetime(?, 'unixepoch')
             AND (created_at != updated_at OR created_at <= datetime(?, 'unixepoch'))
-        """, params=[cutoff_timestamp, cutoff_timestamp])
+        """, conn, params=[cutoff_timestamp, cutoff_timestamp])
         token_updates = df_updates['count'].iloc[0] if not df_updates.empty else 0
         
         # History snapshots
-        df_snapshots = conn.query("""
+        df_snapshots = pd.read_sql_query("""
             SELECT COUNT(*) as count FROM tokens_history 
             WHERE created_at > datetime(?, 'unixepoch')
-        """, params=[cutoff_timestamp])
+        """, conn, params=[cutoff_timestamp])
         history_snapshots = df_snapshots['count'].iloc[0] if not df_snapshots.empty else 0
         
         return {
@@ -585,10 +596,10 @@ def create_system_health_timeline_chart(df, health):
     # Créer un graphique en donut pour la santé
     labels = ['Healthy', 'Dead', 'No Data', 'Outdated']
     values = [
-        health.tokens_with_complete_data,
-        health.tokens_dead,
-        health.tokens_flagged_no_data,
-        health.tokens_outdated
+        health['tokens_with_complete_data'],
+        health['tokens_dead'],
+        health['tokens_flagged_no_data'],
+        health['tokens_outdated']
     ]
     
     fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.3)])
@@ -711,12 +722,12 @@ def create_system_health_chart(health):
         'Recently Updated', 'Outdated', 'Rugged'
     ]
     values = [
-        health.tokens_with_complete_data,
-        health.tokens_dead,
-        health.tokens_no_data_available,
-        health.tokens_recently_updated,
-        health.tokens_outdated,
-        health.tokens_rugged
+        health['tokens_with_complete_data'],
+        health['tokens_dead'],
+        health['tokens_no_data_available'],
+        health['tokens_recently_updated'],
+        health['tokens_outdated'],
+        health['tokens_rugged']
     ]
 
     colors = ['green', 'red', 'orange', 'blue', 'purple', 'yellow']
@@ -731,6 +742,27 @@ def main():
     
     # Header
     st.title("🚀 Token System Metrics Dashboard")
+    # DEBUG: Vérifier le chemin et les tables
+    # st.sidebar.write("**🔍 DEBUG Info:**")
+    # st.sidebar.write(f"DB Path utilisé: {CONFIG['db_path']}")
+    # st.sidebar.write(f"Fichier existe: {'✅' if Path(CONFIG['db_path']).exists() else '❌'}")
+    
+    # try:
+    #     conn = get_db_connection()
+    #     if conn:
+    #         # Test avec une requête simple
+    #         test_df = pd.read_sql_query("SELECT COUNT(*) as count FROM tokens", conn)
+    #         st.sidebar.write(f"Total tokens: {test_df['count'].iloc[0] if not test_df.empty else 'Erreur'}")
+            
+    #         # Lister quelques tables pour confirmer
+    #         tables_df = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table' LIMIT 5;", conn)
+    #         st.sidebar.write("**📋 Quelques tables:**")
+    #         for table in tables_df['name'].tolist():
+    #             st.sidebar.write(f"• {table}")
+    #     else:
+    #         st.sidebar.error("❌ Connexion DB échouée")
+    # except Exception as e:
+    #     st.sidebar.error(f"❌ Erreur debug: {e}")
 
     if 'config' in globals():
         st.success(f"✅ Configuration chargée - DB: {config.database.name}")
@@ -777,7 +809,7 @@ def main():
         conn = get_db_connection()
         if conn:
             # Test simple de la connexion
-            test_df = conn.query("SELECT 1 as test")
+            test_df = pd.read_sql_query("SELECT 1 as test", conn)
             if not test_df.empty and test_df['test'].iloc[0] == 1:
                 st.sidebar.success("✅ Database Connected")
                 
@@ -952,11 +984,11 @@ def main():
     
     with col1:
         # Métriques de santé
-        st.metric("📋 Total Tokens", f"{health.total_tokens:,}")
-        st.metric("✅ Data Completeness", f"{health.data_completeness_rate:.1f}%")
-        st.metric("🔄 Data Freshness", f"{health.freshness_rate:.1f}%")
-        st.metric("💀 Dead Tokens", f"{health.tokens_dead:,}")
-        st.metric("🚫 Flagged No-Data", f"{health.tokens_flagged_no_data:,}")
+        st.metric("📋 Total Tokens", f"{health['total_tokens']:,}")
+        st.metric("✅ Data Completeness", f"{health['data_completeness_rate']:.1f}%")
+        st.metric("🔄 Data Freshness", f"{health['freshness_rate']:.1f}%")
+        st.metric("💀 Dead Tokens", f"{health['tokens_dead']:,}")
+        st.metric("🚫 Flagged No-Data", f"{health['tokens_flagged_no_data']:,}")
     
     with col2:
         fig_health = create_system_health_chart(health)

@@ -7,37 +7,39 @@ from datetime import datetime
 import os
 from pathlib import Path
 
-# Ajouter la racine du projet au path pour accéder aux modules de config
-project_root = Path(__file__).parent.parent.parent.absolute()  # Remonter de 2 niveaux depuis pages/
-sys.path.insert(0, str(project_root))
 
-# Import du système de configuration
+
 try:
-    from core.config import get_config
+    from config import get_streamlit_config, StreamlitEnvironment
     
-    # Charger la configuration
-    config = get_config()
-    DEFAULT_DB_PATH = config.database.get_full_path()
+    # Charger la configuration Streamlit
+    streamlit_config = get_streamlit_config()
+    DEFAULT_DB_PATH = streamlit_config.database.get_db_path("performance")
     
-    # Afficher un indicateur de succès
-    st.success(f"✅ Configuration chargée - DB: {config.database.name}")
+    # Configuration de la page avec les paramètres de la config
+    st.set_page_config(
+        page_title="💰 Performance des Wallets",
+        page_icon="🏆",
+        layout=streamlit_config.ui.layout,
+    )
     
-except ImportError:
-    # Fallback si le système de config n'est pas disponible
-    DEFAULT_DB_PATH = os.getenv('TRADING_OPPORTUNITIES_DB_PATH', 'database/data/solana_wallet.db')
-    st.warning("⚠️ Système de configuration non disponible, utilisation du fallback")
-except Exception as e:
-    DEFAULT_DB_PATH = 'database/data/solana_wallet.db'
-    st.error(f"❌ Erreur chargement config: {e}")
+    # Afficher le statut de configuration si en mode debug
+    if streamlit_config.features.debug_mode:
+        st.success(f"✅ Config Streamlit chargée - DB: {streamlit_config.database.performance_wallets}")
+        
+except ImportError as e:
+    # Fallback si le système de config Streamlit n'est pas disponible
+    st.error(f"❌ Erreur import config Streamlit: {e}")
+    DEFAULT_DB_PATH = os.getenv('PERFORMANCE_WALLET_DB_PATH', '../database/data/solana_wallet_monitor.db')
+    
+    st.set_page_config(
+        page_title="💰 Performance des Wallets",
+        page_icon="🏆",
+        layout="wide",
+    )
 
-# Configuration de la page
-st.set_page_config(
-    page_title="💰 Performance des Wallets",
-    page_icon="🏆",
-    layout="wide",
-)
-
-DB_PATH = "solana_wallet_monitor.db"
+# Utiliser le chemin de la configuration ou le fallback
+DB_PATH = DEFAULT_DB_PATH
 
 @st.cache_data(ttl=60)
 def get_performance_data():
