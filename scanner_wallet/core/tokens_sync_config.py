@@ -231,9 +231,15 @@ class TokenSyncMonitoringConfig:
     calculate_trends: bool = True
     export_metrics: bool = False
     metrics_export_interval_hours: int = 24
+    
+    # CORRECTION: Add missing attributes that sync_service.py expects
     price_update_interval_seconds: int = 300  # 5 minutes par défaut
     max_failed_attempts: int = 3
     price_update_limit: int = 100
+    
+    # Additional monitoring configuration for historization
+    historization_interval_seconds: int = 3600  # 1 hour default
+    rate_limit_delay: float = 0.2  # seconds between API calls
 
 @dataclass
 class TokenSyncLoggingConfig:

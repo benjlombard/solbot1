@@ -247,11 +247,17 @@ class SyncService:
         """Update existing token prices"""
         self.logger.debug("🔄 Updating existing token prices...")
         
+        # CORRECTION: Fix configuration attribute access
+        # Use monitoring.price_update_limit instead of processing.price_update_limit
+        price_update_limit = getattr(self.config.monitoring, 'price_update_limit', 100)
+        price_update_interval = getattr(self.config.monitoring, 'price_update_interval_seconds', 600)
+        max_failed_attempts = getattr(self.config.monitoring, 'max_failed_attempts', 3)
+        
         # Get tokens needing updates
         tokens_to_update = self.token_repo.get_tokens_needing_price_update(
-            interval_seconds=self.config.monitoring.price_update_interval_seconds,
-            max_failed_attempts=self.config.monitoring.max_failed_attempts,
-            limit=self.config.monitoring.price_update_limit
+            interval_seconds=price_update_interval,
+            max_failed_attempts=max_failed_attempts,
+            limit=price_update_limit
         )
         
         if not tokens_to_update:
@@ -266,9 +272,10 @@ class SyncService:
     def _run_historization_improved(self) -> int:
         """Run token historization with better logic"""
         try:
-            # Historisation basée sur le temps plutôt que sur le numéro de cycle
+            # CORRECTION: Fix configuration attribute access for historization
+            # Use processing.historization_interval_seconds which exists in the config
             historization_interval = getattr(
-                self.config.monitoring, 
+                self.config.processing, 
                 'historization_interval_seconds', 
                 3600  # Default 1 heure
             )
@@ -346,8 +353,9 @@ class SyncService:
                         if self.token_repo.update_creation_timestamp(token_address, timestamp):
                             updated_count += 1
                     
-                    # Rate limiting
-                    time.sleep(self.config.monitoring.rate_limit_delay)
+                    # CORRECTION: Fix rate limiting delay access
+                    rate_limit_delay = getattr(self.config.processing, 'rate_limit_delay', 0.2)
+                    time.sleep(rate_limit_delay)
                     
                 except Exception as e:
                     self.logger.error(f"Error updating timestamp for {token_address}: {e}")
