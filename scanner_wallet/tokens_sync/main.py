@@ -6,6 +6,7 @@ Main entry point for the modular token synchronization service.
 import sys
 import os
 import signal
+import threading
 import logging
 import argparse
 import asyncio
@@ -41,7 +42,9 @@ class TokenSyncApplication:
         self.logger = None
         self.sync_service = None
         self.config_override = config_override or {}
-        
+        self.running = False
+        self.stats_thread = None
+        self.stats_thread_running = False
         self.shutdown_requested = False
     
     def initialize(self) -> bool:
@@ -182,6 +185,9 @@ class TokenSyncApplication:
         """
         if not self.initialize():
             return 1
+
+        self.running = True
+        self.shutdown_requested = False
         
         try:
             self.logger.info("🎯 Starting token synchronization service...")
@@ -190,6 +196,9 @@ class TokenSyncApplication:
             self._populate_initial_queue()
             
             self._setup_signal_handlers()
+
+            if self.config_override.get('show_api_stats'):
+                self._setup_periodic_stats_display()
 
             # Start the main sync service
             self.sync_service.start()
@@ -210,6 +219,25 @@ class TokenSyncApplication:
         finally:
             self._cleanup()
     
+    def _setup_periodic_stats_display(self):
+        """Setup affichage périodique des stats API"""
+        interval = self.config_override.get('api_stats_interval', 60)
+        
+        def periodic_stats_thread():
+            while self.running and not self.shutdown_requested:
+                try:
+                    time.sleep(interval)
+                    if self.running and not self.shutdown_requested:
+                        self.logger.info("📊 === PERIODIC API STATISTICS ===")
+                        self._print_detailed_api_statistics()
+                except Exception as e:
+                    self.logger.error(f"Error in periodic stats: {e}")
+                    break
+        
+        self.stats_thread = threading.Thread(target=periodic_stats_thread, daemon=True)
+        self.stats_thread.start()
+        self.logger.info(f"📊 Periodic API stats enabled (every {interval}s)")
+
     def _populate_initial_queue(self):
         """Populate the processing queue with initial tokens if needed"""
         try:
@@ -239,6 +267,12 @@ class TokenSyncApplication:
     def _cleanup(self):
         """Cleanup resources before shutdown"""
         try:
+            # Arrêter le thread de stats si il existe
+            if self.stats_thread_running:
+                self.stats_thread_running = False
+                if self.stats_thread and self.stats_thread.is_alive():
+                    self.stats_thread.join(timeout=2.0)
+            
             if self.sync_service:
                 self.logger.info("🧹 Cleaning up sync service...")
                 # Additional cleanup if needed
@@ -248,108 +282,153 @@ class TokenSyncApplication:
         except Exception as e:
             self.logger.error(f"❌ Error during cleanup: {e}")
     
-        def _setup_signal_handlers(self):
-            """Setup signal handlers pour afficher les stats"""
-            import signal
+    def _setup_signal_handlers(self):
+        """Setup signal handlers pour afficher les stats"""
+        import signal
+        
+        def signal_handler(signum, frame):
+            if signum == signal.SIGINT:
+                self.logger.info("🛑 Interrupt signal received")
+                self._print_final_api_statistics()
+                self.shutdown_requested = True
+                if self.sync_service:
+                    self.sync_service.stop()
+                sys.exit(0)
+        
+        try:
+            # SIGINT fonctionne sur tous les OS
+            signal.signal(signal.SIGINT, signal_handler)
+            self.logger.debug("📡 Signal handlers configured (Ctrl+C for graceful shutdown)")
             
-            def signal_handler(signum, frame):
-                if signum == signal.SIGUSR1:  # Signal personnalisé pour stats
+            # Pour Unix/Linux, ajouter SIGUSR1 si disponible
+            if hasattr(signal, 'SIGUSR1'):
+                def stats_signal_handler(signum, frame):
                     self._print_detailed_api_statistics()
-                elif signum == signal.SIGINT:
-                    self.logger.info("🛑 Interrupt signal received")
-                    self._print_final_api_statistics()
-                    sys.exit(0)
+                
+                signal.signal(signal.SIGUSR1, stats_signal_handler)
+                self.logger.debug("📊 SIGUSR1 handler configured (kill -USR1 <pid> for API stats)")
+            else:
+                # Sur Windows, créer un thread de monitoring alternatif
+                self._setup_windows_stats_monitoring()
+                
+        except Exception as e:
+            self.logger.debug(f"Could not setup signal handlers: {e}")
+
+    def _setup_windows_stats_monitoring(self):
+        """Setup alternative stats monitoring pour Windows"""
+        def stats_monitoring_thread():
+            """Thread qui vérifie périodiquement un fichier de commande"""
+            stats_file = "show_api_stats.trigger"
             
-            try:
-                signal.signal(signal.SIGUSR1, signal_handler)
-                signal.signal(signal.SIGINT, signal_handler)
-                self.logger.debug("📡 Signal handlers configured (send SIGUSR1 for API stats)")
-            except Exception as e:
-                self.logger.debug(f"Could not setup signal handlers: {e}")
+            while self.stats_thread_running:
+                try:
+                    # Vérifier si le fichier trigger existe
+                    if os.path.exists(stats_file):
+                        self.logger.info("📊 Stats trigger file detected!")
+                        self._print_detailed_api_statistics()
+                        
+                        # Supprimer le fichier trigger
+                        try:
+                            os.remove(stats_file)
+                        except Exception:
+                            pass
+                    
+                    time.sleep(5)  # Vérifier toutes les 5 secondes
+                    
+                except Exception as e:
+                    self.logger.debug(f"Error in stats monitoring thread: {e}")
+                    time.sleep(10)
+        
+        # Démarrer le thread de monitoring
+        self.stats_thread_running = True
+        self.stats_thread = threading.Thread(target=stats_monitoring_thread, daemon=True)
+        self.stats_thread.start()
+        
+        self.logger.info("💡 Windows detected: Create 'show_api_stats.trigger' file to display API stats")
+
+    def _print_detailed_api_statistics(self):
+        """Afficher des statistiques API détaillées"""
+        try:
+            if hasattr(self.sync_service, 'get_api_statistics'):
+                self.logger.info("=" * 80)
+                self.logger.info("📊 DETAILED API STATISTICS ON DEMAND")
+                self.logger.info("=" * 80)
+                
+                api_stats = self.sync_service.get_api_statistics()
+                
+                # Stats globales
+                global_stats = api_stats.get('global_stats', {})
+                if global_stats:
+                    self.logger.info(f"🌍 Total API calls: {global_stats.get('total_api_calls', 0)}")
+                    self.logger.info(f"📊 Global success rate: {global_stats.get('global_success_rate', 0):.1f}%")
+                    self.logger.info(f"⏱️ Runtime: {global_stats.get('runtime_hours', 0):.1f} hours")
+                    self.logger.info(f"⚡ Current rate: {global_stats.get('current_rate_1m', 0)} calls/min")
+                
+                # Top APIs
+                top_apis = api_stats.get('top_apis_by_calls', [])
+                if top_apis:
+                    self.logger.info("\n🔝 TOP APIs BY CALLS:")
+                    for i, (api_name, stats) in enumerate(top_apis[:10], 1):
+                        self.logger.info(
+                            f"  {i:2d}. {api_name}: {stats.get('total_calls', 0)} calls "
+                            f"(avg: {stats.get('avg_duration_seconds', 0):.3f}s, "
+                            f"success: {stats.get('success_rate', 0):.1f}%)"
+                        )
+                
+                # Health report
+                health_report = api_stats.get('health_report', {})
+                if health_report.get('failing_apis'):
+                    self.logger.warning(f"\n⚠️  FAILING APIS: {len(health_report['failing_apis'])}")
+                    for api_info in health_report['failing_apis']:
+                        self.logger.warning(f"  ❌ {api_info['name']}: {api_info['consecutive_failures']} failures")
+                
+                if health_report.get('degraded_apis'):
+                    self.logger.warning(f"\n🐌 DEGRADED APIS: {len(health_report['degraded_apis'])}")
+                    for api_info in health_report['degraded_apis']:
+                        self.logger.warning(f"  ⚠️  {api_info['name']}: {api_info['success_rate']:.1f}% success")
+                
+                self.logger.info("=" * 80)
+                
+        except Exception as e:
+            self.logger.error(f"Error printing detailed API statistics: {e}")
     
-        def _print_detailed_api_statistics(self):
-            """Afficher des statistiques API détaillées"""
-            try:
-                if hasattr(self.sync_service, 'get_api_statistics'):
-                    self.logger.info("=" * 80)
-                    self.logger.info("📊 DETAILED API STATISTICS ON DEMAND")
-                    self.logger.info("=" * 80)
-                    
-                    api_stats = self.sync_service.get_api_statistics()
-                    
-                    # Stats globales
-                    global_stats = api_stats.get('global_stats', {})
-                    if global_stats:
-                        self.logger.info(f"🌍 Total API calls: {global_stats.get('total_api_calls', 0)}")
-                        self.logger.info(f"📊 Global success rate: {global_stats.get('global_success_rate', 0):.1f}%")
-                        self.logger.info(f"⏱️ Runtime: {global_stats.get('runtime_hours', 0):.1f} hours")
-                        self.logger.info(f"⚡ Current rate: {global_stats.get('current_rate_1m', 0)} calls/min")
-                    
-                    # Top APIs
-                    top_apis = api_stats.get('top_apis_by_calls', [])
-                    if top_apis:
-                        self.logger.info("\n🔝 TOP APIs BY CALLS:")
-                        for i, (api_name, stats) in enumerate(top_apis[:10], 1):
-                            self.logger.info(
-                                f"  {i:2d}. {api_name}: {stats.get('total_calls', 0)} calls "
-                                f"(avg: {stats.get('avg_duration_seconds', 0):.3f}s, "
-                                f"success: {stats.get('success_rate', 0):.1f}%)"
-                            )
-                    
-                    # Health report
-                    health_report = api_stats.get('health_report', {})
-                    if health_report.get('failing_apis'):
-                        self.logger.warning(f"\n⚠️  FAILING APIS: {len(health_report['failing_apis'])}")
-                        for api_info in health_report['failing_apis']:
-                            self.logger.warning(f"  ❌ {api_info['name']}: {api_info['consecutive_failures']} failures")
-                    
-                    if health_report.get('degraded_apis'):
-                        self.logger.warning(f"\n🐌 DEGRADED APIS: {len(health_report['degraded_apis'])}")
-                        for api_info in health_report['degraded_apis']:
-                            self.logger.warning(f"  ⚠️  {api_info['name']}: {api_info['success_rate']:.1f}% success")
-                    
-                    self.logger.info("=" * 80)
-                    
-            except Exception as e:
-                self.logger.error(f"Error printing detailed API statistics: {e}")
-    
-        def _print_final_api_statistics(self):
-            """Afficher les statistiques API finales au shutdown"""
-            try:
-                self.logger.info("=" * 80)
-                self.logger.info("📊 FINAL API STATISTICS SUMMARY")
-                self.logger.info("=" * 80)
+    def _print_final_api_statistics(self):
+        """Afficher les statistiques API finales au shutdown"""
+        try:
+            self.logger.info("=" * 80)
+            self.logger.info("📊 FINAL API STATISTICS SUMMARY")
+            self.logger.info("=" * 80)
+            
+            if hasattr(self.sync_service, 'api_tracker'):
+                # Stats globales finales
+                global_stats = self.sync_service.api_tracker.get_global_stats()
+                if global_stats:
+                    self.logger.info(f"🌍 SESSION TOTAL: {global_stats.get('total_api_calls', 0)} API calls")
+                    self.logger.info(f"📊 SUCCESS RATE: {global_stats.get('global_success_rate', 0):.1f}%")
+                    self.logger.info(f"⏱️  RUNTIME: {global_stats.get('runtime_hours', 0):.1f} hours")
+                    self.logger.info(f"⚡ AVG RATE: {global_stats.get('calls_per_second', 0):.2f} calls/second")
                 
-                if hasattr(self.sync_service, 'api_tracker'):
-                    # Stats globales finales
-                    global_stats = self.sync_service.api_tracker.get_global_stats()
-                    if global_stats:
-                        self.logger.info(f"🌍 SESSION TOTAL: {global_stats.get('total_api_calls', 0)} API calls")
-                        self.logger.info(f"📊 SUCCESS RATE: {global_stats.get('global_success_rate', 0):.1f}%")
-                        self.logger.info(f"⏱️  RUNTIME: {global_stats.get('runtime_hours', 0):.1f} hours")
-                        self.logger.info(f"⚡ AVG RATE: {global_stats.get('calls_per_second', 0):.2f} calls/second")
-                    
-                    # Top 5 endpoints
-                    top_apis = self.sync_service.api_tracker.get_top_apis(limit=5, sort_by='calls')
-                    if top_apis:
-                        self.logger.info("\n🏆 TOP 5 MOST USED ENDPOINTS:")
-                        for i, (api_name, stats) in enumerate(top_apis, 1):
-                            calls = stats.get('total_calls', 0)
-                            avg_duration = stats.get('avg_duration_seconds', 0)
-                            success_rate = stats.get('success_rate', 0)
-                            self.logger.info(f"  {i}. {api_name}: {calls} calls ({avg_duration:.3f}s avg, {success_rate:.1f}% success)")
-                    
-                    # Recommendations finales
-                    health_report = self.sync_service.api_tracker.get_api_health_report()
-                    if health_report.get('recommendations'):
-                        self.logger.info("\n💡 RECOMMENDATIONS:")
-                        for rec in health_report['recommendations']:
-                            self.logger.info(f"  • {rec}")
+                # Top 5 endpoints
+                top_apis = self.sync_service.api_tracker.get_top_apis(limit=5, sort_by='calls')
+                if top_apis:
+                    self.logger.info("\n🏆 TOP 5 MOST USED ENDPOINTS:")
+                    for i, (api_name, stats) in enumerate(top_apis, 1):
+                        calls = stats.get('total_calls', 0)
+                        avg_duration = stats.get('avg_duration_seconds', 0)
+                        success_rate = stats.get('success_rate', 0)
+                        self.logger.info(f"  {i}. {api_name}: {calls} calls ({avg_duration:.3f}s avg, {success_rate:.1f}% success)")
                 
-                self.logger.info("=" * 80)
-                
-            except Exception as e:
-                self.logger.error(f"Error printing final API statistics: {e}")
+                # Recommendations finales
+                health_report = self.sync_service.api_tracker.get_api_health_report()
+                if health_report.get('recommendations'):
+                    self.logger.info("\n💡 RECOMMENDATIONS:")
+                    for rec in health_report['recommendations']:
+                        self.logger.info(f"  • {rec}")
+            
+            self.logger.info("=" * 80)
+            
+        except Exception as e:
+            self.logger.error(f"Error printing final API statistics: {e}")
 
     def get_status(self) -> dict:
         """Get current application status"""
@@ -393,6 +472,8 @@ Examples:
   %(prog)s --sync-interval 30       # Run with 30 second sync interval
   %(prog)s --batch-size 50          # Run with batch size of 50
   %(prog)s --dry-run                # Test configuration without starting service
+  %(prog)s --show-api-stats         # Show API stats every 60 seconds
+  %(prog)s --api-stats-interval 30  # Show API stats every 30 seconds
         """
     )
     
@@ -425,6 +506,25 @@ Examples:
         action='version',
         version='Token Sync Service 1.0.0'
     )
+
+    parser.add_argument(
+        '--show-api-stats',
+        action='store_true',
+        help='Enable periodic API statistics display'
+    )
+    
+    parser.add_argument(
+        '--api-stats-interval',
+        type=int,
+        default=60,
+        help='Interval in seconds for API stats display (default: 60)'
+    )
+    
+    parser.add_argument(
+        '--api-stats-now',
+        action='store_true',
+        help='Show current API statistics and exit'
+    )
     
     return parser.parse_args()
 
@@ -437,6 +537,18 @@ def main():
     # Parse command line arguments
     args = parse_arguments()
     
+    if args.api_stats_now:
+        print("📊 Displaying current API statistics...")
+        try:
+            # Lire les stats depuis un fichier de status ou la DB
+            app = TokenSyncApplication()
+            if app.initialize():
+                app._print_detailed_api_statistics()
+            return 0
+        except Exception as e:
+            print(f"❌ Error getting API stats: {e}")
+            return 1
+
     # Prepare configuration overrides
     config_override = {}
     
@@ -452,6 +564,11 @@ def main():
         print(f"🔧 Batch size override: {args.batch_size}")
         config_override['batch_size'] = args.batch_size
     
+    if args.show_api_stats:
+        print(f"📊 API stats will be shown every {args.api_stats_interval} seconds")
+        config_override['show_api_stats'] = True
+        config_override['api_stats_interval'] = args.api_stats_interval
+
     # Create and run application
     app = TokenSyncApplication(config_override=config_override)
     
