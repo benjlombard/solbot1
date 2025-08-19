@@ -160,19 +160,10 @@ class BaseApiClient(ABC):
                 api_name=self.api_name
             )
     
-    def make_request(self,endpoint: str,method: str = "GET",params: Optional[Dict] = None,data: Optional[Dict] = None,max_retries: int = 3) -> ApiResponse:
+    def make_request(self, endpoint: str, method: str = "GET", params: Optional[Dict] = None, 
+                data: Optional[Dict] = None, max_retries: int = 3) -> ApiResponse:
         """
         Make HTTP request with retry logic, rate limiting, and API tracking
-        
-        Args:
-            endpoint: API endpoint
-            method: HTTP method
-            params: Query parameters
-            data: Request body data
-            max_retries: Maximum retry attempts
-            
-        Returns:
-            ApiResponse object
         """
         url = self._build_url(endpoint)
         
@@ -204,9 +195,9 @@ class BaseApiClient(ABC):
                 # Handle response
                 api_response = self._handle_response(response, duration)
                 
-                # ========== API TRACKER INTEGRATION ==========
+                # ========== CORRECTION: API TRACKER INTEGRATION ==========
                 # Enregistrer l'appel dans l'API tracker pour le monitoring
-                if self.api_tracker:
+                if hasattr(self, 'api_tracker') and self.api_tracker:
                     try:
                         self.api_tracker.record_call(
                             api_name=endpoint_name,
@@ -230,7 +221,7 @@ class BaseApiClient(ABC):
                 self.logger.warning(error_msg)
                 
                 # Enregistrer le timeout dans l'API tracker
-                if self.api_tracker:
+                if hasattr(self, 'api_tracker') and self.api_tracker:
                     try:
                         self.api_tracker.record_call(
                             api_name=endpoint_name,
@@ -255,7 +246,7 @@ class BaseApiClient(ABC):
                 self.logger.warning(error_msg)
                 
                 # Enregistrer l'erreur dans l'API tracker
-                if self.api_tracker:
+                if hasattr(self, 'api_tracker') and self.api_tracker:
                     try:
                         duration_estimate = time.time() - start_time if 'start_time' in locals() else 0.0
                         self.api_tracker.record_call(
@@ -284,7 +275,7 @@ class BaseApiClient(ABC):
         final_error = f"All {max_retries} attempts failed"
         
         # Enregistrer l'échec final dans l'API tracker
-        if self.api_tracker:
+        if hasattr(self, 'api_tracker') and self.api_tracker:
             try:
                 self.api_tracker.record_call(
                     api_name=endpoint_name,
@@ -301,6 +292,7 @@ class BaseApiClient(ABC):
             error_message=final_error,
             api_name=self.api_name
         )
+
     
     def _should_retry(self, response: ApiResponse, attempt: int, max_retries: int) -> bool:
         """Determine if request should be retried based on response"""
@@ -332,17 +324,6 @@ class BaseApiClient(ABC):
 ) -> ApiResponse:
         """
         Make asynchronous HTTP request with API tracking
-        
-        Args:
-            session: aiohttp session
-            endpoint: API endpoint
-            method: HTTP method
-            params: Query parameters
-            data: Request body data
-            max_retries: Maximum retry attempts
-            
-        Returns:
-            ApiResponse object
         """
         url = self._build_url(endpoint)
         
@@ -393,9 +374,9 @@ class BaseApiClient(ABC):
                             api_name=self.api_name
                         )
                     
-                    # ========== API TRACKER INTEGRATION ==========
+                    # ========== CORRECTION: API TRACKER INTEGRATION ==========
                     # Enregistrer l'appel dans l'API tracker pour le monitoring
-                    if self.api_tracker:
+                    if hasattr(self, 'api_tracker') and self.api_tracker:
                         try:
                             self.api_tracker.record_call(
                                 api_name=endpoint_name,
@@ -419,7 +400,7 @@ class BaseApiClient(ABC):
                 self.logger.warning(error_msg)
                 
                 # Enregistrer le timeout dans l'API tracker
-                if self.api_tracker:
+                if hasattr(self, 'api_tracker') and self.api_tracker:
                     try:
                         self.api_tracker.record_call(
                             api_name=endpoint_name,
@@ -443,7 +424,7 @@ class BaseApiClient(ABC):
                 self.logger.warning(error_msg)
                 
                 # Enregistrer l'erreur dans l'API tracker
-                if self.api_tracker:
+                if hasattr(self, 'api_tracker') and self.api_tracker:
                     try:
                         duration_estimate = time.time() - start_time if 'start_time' in locals() else 0.0
                         self.api_tracker.record_call(
@@ -470,25 +451,6 @@ class BaseApiClient(ABC):
         
         # Fallback response
         final_error = f"All {max_retries} attempts failed"
-        
-        # Enregistrer l'échec final dans l'API tracker
-        if self.api_tracker:
-            try:
-                self.api_tracker.record_call(
-                    api_name=endpoint_name,
-                    duration=0.0,
-                    success=False,
-                    http_status=None,
-                    error_msg=final_error
-                )
-            except Exception:
-                pass
-        
-        return ApiResponse(
-            success=False,
-            error_message=final_error,
-            api_name=self.api_name
-        )
     
     def close(self):
         """Close the session and cleanup resources"""
