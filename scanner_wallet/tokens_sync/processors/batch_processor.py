@@ -301,16 +301,19 @@ class BatchProcessor:
         return successful_count
     
     def _upsert_token_with_conditional_queue_update(
-        self, 
-        token_address: str, 
-        token_data: TokenData, 
-        update_queue: bool
-    ) -> bool:
+    self, 
+    token_address: str, 
+    token_data: TokenData, 
+    update_queue: bool
+) -> bool:
         """
         Upsert token and conditionally update queue status
+        Note: Historization is now handled automatically in token_repo.upsert_token()
         """
         try:
-            # Upsert token to database
+            # L'historisation est maintenant gérée automatiquement dans upsert_token:
+            # - AVANT mise à jour pour les tokens existants (capture l'état précédent)
+            # - APRÈS insertion pour les nouveaux tokens (capture l'état initial)
             success = self.token_repo.upsert_token(token_data)
             
             # Update queue status ONLY if this token came from the queue
@@ -334,7 +337,7 @@ class BatchProcessor:
             
             if success:
                 operation_type = "queue token" if update_queue else "price update"
-                self.logger.debug(f"✅ Successfully processed {token_address[:8]}... ({operation_type})")
+                self.logger.debug(f"✅ Successfully processed {token_address[:8]}... ({operation_type}) with auto-historization")
             
             return success
             
