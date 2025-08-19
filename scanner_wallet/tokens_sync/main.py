@@ -425,12 +425,12 @@ class TokenSyncApplication:
                 # Top 5 endpoints
                 top_apis = self.sync_service.api_tracker.get_top_apis(limit=5, sort_by='calls')
                 if top_apis:
-                    self.logger.info("\n🏆 TOP 5 MOST USED ENDPOINTS:")
+                    self.logger.debug("\n🏆 TOP 5 MOST USED ENDPOINTS:")
                     for i, (api_name, stats) in enumerate(top_apis, 1):
                         calls = stats.get('total_calls', 0)
                         avg_duration = stats.get('avg_duration_seconds', 0)
                         success_rate = stats.get('success_rate', 0)
-                        self.logger.info(f"  {i}. {api_name}: {calls} calls ({avg_duration:.3f}s avg, {success_rate:.1f}% success)")
+                        self.logger.debug(f"  {i}. {api_name}: {calls} calls ({avg_duration:.3f}s avg, {success_rate:.1f}% success)")
                 
                 # Recommendations finales
                 health_report = self.sync_service.api_tracker.get_api_health_report()

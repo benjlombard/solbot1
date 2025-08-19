@@ -153,6 +153,11 @@ class TokenSyncProcessingConfig:
     high_volume_threshold: float = 100000.0  # $100K
     high_volatility_threshold: float = 20.0  # 20%
     
+    # AJOUT: Configuration pour le tracking des nouvelles transactions
+    initial_population_enabled: bool = True  # Pour activer/désactiver la population initiale
+    track_from_most_recent: bool = True  # Pour suivre depuis la transaction la plus récente
+
+    
     def validate(self) -> List[str]:
         """Valide la configuration et retourne les erreurs"""
         errors = []

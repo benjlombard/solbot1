@@ -240,7 +240,7 @@ class CycleLogger:
                     if client in cycle_summary['batch_vs_individual']:
                         batch_count = cycle_summary['batch_vs_individual'][client]['batch']
                         individual_count = cycle_summary['batch_vs_individual'][client]['individual']
-                        self.logger.info(f"     └─ Batch calls: {batch_count}, Individual calls: {individual_count}")
+                        self.logger.debug(f"     └─ Batch calls: {batch_count}, Individual calls: {individual_count}")
                 
                 # Individual calls summary
                 if cycle_summary['total_individual_calls'] > 0:
@@ -398,7 +398,7 @@ class CycleLogger:
                 top_endpoints = sorted(endpoints.items(), key=lambda x: x[1], reverse=True)[:3]
                 for endpoint, calls in top_endpoints:
                     endpoint_short = endpoint.replace(f"{service.lower()}_", "")
-                    self.logger.info(f"    └─ {endpoint_short}: {calls} calls")
+                    self.logger.debug(f"    └─ {endpoint_short}: {calls} calls")
             
             # Afficher les durées moyennes si disponibles
             if cycle.api_durations:
@@ -408,7 +408,7 @@ class CycleLogger:
                         avg_duration = sum(durations) / len(durations)
                         max_duration = max(durations)
                         api_short = api_name.replace("dexscreener_", "dex_").replace("pumpfun_", "pump_")
-                        self.logger.info(f"    └─ {api_short}: avg {avg_duration:.3f}s, max {max_duration:.3f}s")
+                        self.logger.debug(f"    └─ {api_short}: avg {avg_duration:.3f}s, max {max_duration:.3f}s")
         
         # Performance metrics
         self.logger.info("⚡ PERFORMANCE:")
@@ -565,7 +565,7 @@ class CycleLogger:
             # Top 3 APIs
             top_apis = sorted(cumul['total_api_calls'].items(), key=lambda x: x[1], reverse=True)[:3]
             for api_name, count in top_apis:
-                self.logger.info(f"    🔸 {api_name}: {count} calls")
+                self.logger.debug(f"    🔸 {api_name}: {count} calls")
         
         # Error summary
         if cumul['total_errors'] > 0 or cumul['total_warnings'] > 0:

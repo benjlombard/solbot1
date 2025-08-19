@@ -45,6 +45,16 @@ class TimeWindowMetrics:
     total_volume_usd: float = 0.0
     avg_detection_delay: float = 0.0
 
+    # === NOUVEAUX CHAMPS POUR LA QUEUE ===
+    queue_tokens_added: int = 0
+    queue_tokens_processing: int = 0
+    queue_tokens_completed: int = 0
+    queue_tokens_failed: int = 0
+    queue_tokens_retrying: int = 0
+    queue_processing_rate: float = 0.0  # tokens processed per hour
+    queue_success_rate: float = 0.0     # percentage
+    queue_avg_processing_time: float = 0.0  # seconds
+
 @dataclass
 class SystemHealth:
     """Santé globale du système"""
@@ -64,6 +74,19 @@ class SystemHealth:
     tokens_no_data_available: int = 0 # no_data_available = 1
     data_completeness_rate: float = 0.0
     freshness_rate: float = 0.0
+
+    # === NOUVEAUX CHAMPS POUR LA QUEUE ===
+    queue_total_items: int = 0
+    queue_pending: int = 0
+    queue_processing: int = 0
+    queue_completed: int = 0
+    queue_failed: int = 0
+    queue_retrying: int = 0
+    queue_abandoned: int = 0
+    queue_overall_success_rate: float = 0.0
+    queue_avg_processing_time_all: float = 0.0
+    queue_oldest_pending_hours: float = 0.0
+    queue_backlog_size: int = 0  # pending + retrying
 
 def setup_metrics_logger(config):
     """Configure un logger spécialisé pour les métriques"""
@@ -206,6 +229,72 @@ class TokenMetricsCollector:
                 # Approximation : 1 token update = ~3 API calls (DexScreener + Rugcheck + éventuellement Pump.fun)
                 metrics.api_calls_estimated = (metrics.token_updates * 3) + (metrics.new_tokens * 4)
                 
+                # === NOUVELLES MÉTRIQUES POUR LA QUEUE ===
+            
+                # 9. Tokens ajoutés à la queue
+                cursor.execute("""
+                    SELECT COUNT(*) FROM token_processing_queue 
+                    WHERE created_at > datetime('now', '-' || ? || ' seconds')
+                """, (window_seconds,))
+                metrics.queue_tokens_added = cursor.fetchone()[0]
+                
+                # 10. Tokens traités (passés de processing à completed/failed)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM token_processing_queue 
+                    WHERE completed_at > datetime('now', '-' || ? || ' seconds')
+                    AND status IN ('completed', 'failed')
+                """, (window_seconds,))
+                tokens_processed = cursor.fetchone()[0]
+                
+                # 11. Répartition par statut des tokens traités dans la fenêtre
+                cursor.execute("""
+                    SELECT 
+                        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+                        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+                        COUNT(CASE WHEN status = 'retrying' THEN 1 END) as retrying
+                    FROM token_processing_queue 
+                    WHERE completed_at > datetime('now', '-' || ? || ' seconds')
+                    OR (status = 'retrying' AND last_retry_at > datetime('now', '-' || ? || ' seconds'))
+                """, (window_seconds, window_seconds))
+                
+                queue_status_data = cursor.fetchone()
+                metrics.queue_tokens_completed = queue_status_data[0] or 0
+                metrics.queue_tokens_failed = queue_status_data[1] or 0
+                metrics.queue_tokens_retrying = queue_status_data[2] or 0
+                
+                # 12. Tokens actuellement en processing (démarrés dans la fenêtre)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM token_processing_queue 
+                    WHERE processing_started_at > datetime('now', '-' || ? || ' seconds')
+                    AND status = 'processing'
+                """, (window_seconds,))
+                metrics.queue_tokens_processing = cursor.fetchone()[0]
+                
+                # 13. Calcul du taux de traitement (tokens/heure)
+                if window_seconds > 0:
+                    hours = window_seconds / 3600
+                    metrics.queue_processing_rate = tokens_processed / hours if hours > 0 else 0
+                
+                # 14. Taux de succès dans la fenêtre
+                if tokens_processed > 0:
+                    metrics.queue_success_rate = (metrics.queue_tokens_completed / tokens_processed) * 100
+                
+                # 15. Temps de traitement moyen pour les tokens complétés dans la fenêtre
+                cursor.execute("""
+                    SELECT AVG(
+                        CASE 
+                            WHEN processing_started_at IS NOT NULL AND completed_at IS NOT NULL
+                            THEN (julianday(completed_at) - julianday(processing_started_at)) * 86400
+                            ELSE NULL 
+                        END
+                    ) as avg_processing_time
+                    FROM token_processing_queue
+                    WHERE completed_at > datetime('now', '-' || ? || ' seconds')
+                    AND status = 'completed'
+                """, (window_seconds,))
+
+                avg_time_result = cursor.fetchone()
+                metrics.queue_avg_processing_time = avg_time_result[0] if avg_time_result[0] else 0.0
                 self.logger.debug(f"✅ Métriques collectées pour {window_name}: {metrics.new_tokens} nouveaux tokens, {metrics.new_transactions} transactions")
                 
         except Exception as e:
@@ -448,6 +537,69 @@ class TokenMetricsCollector:
                 """)
                 health.tokens_rugged = cursor.fetchone()[0]
 
+                # === NOUVELLES MÉTRIQUES POUR LA QUEUE ===
+            
+                # Statistiques globales de la queue
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total,
+                        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
+                        COUNT(CASE WHEN status = 'processing' THEN 1 END) as processing,
+                        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+                        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+                        COUNT(CASE WHEN status = 'retrying' THEN 1 END) as retrying,
+                        COUNT(CASE WHEN status = 'abandoned' THEN 1 END) as abandoned
+                    FROM token_processing_queue
+                """)
+                
+                queue_data = cursor.fetchone()
+                health.queue_total_items = queue_data[0] or 0
+                health.queue_pending = queue_data[1] or 0
+                health.queue_processing = queue_data[2] or 0
+                health.queue_completed = queue_data[3] or 0
+                health.queue_failed = queue_data[4] or 0
+                health.queue_retrying = queue_data[5] or 0
+                health.queue_abandoned = queue_data[6] or 0
+                
+                # Taux de succès global
+                total_processed = health.queue_completed + health.queue_failed
+                if total_processed > 0:
+                    health.queue_overall_success_rate = (health.queue_completed / total_processed) * 100
+                
+                # Temps de traitement moyen global
+                cursor.execute("""
+                    SELECT AVG(
+                        CASE 
+                            WHEN processing_started_at IS NOT NULL AND completed_at IS NOT NULL
+                            THEN (julianday(completed_at) - julianday(processing_started_at)) * 86400
+                            ELSE NULL 
+                        END
+                    ) as avg_processing_time
+                    FROM token_processing_queue
+                    WHERE status = 'completed'
+                """)
+                
+                avg_time_result = cursor.fetchone()
+                health.queue_avg_processing_time_all = avg_time_result[0] if avg_time_result[0] else 0.0
+                
+                # Âge du plus ancien token en attente
+                cursor.execute("""
+                    SELECT MIN(created_at) FROM token_processing_queue
+                    WHERE status = 'pending'
+                """)
+                
+                oldest_pending = cursor.fetchone()[0]
+                if oldest_pending:
+                    try:
+                        oldest_time = datetime.fromisoformat(oldest_pending.replace('Z', '+00:00'))
+                        age = datetime.now() - oldest_time
+                        health.queue_oldest_pending_hours = age.total_seconds() / 3600
+                    except Exception:
+                        health.queue_oldest_pending_hours = 0.0
+                
+                # Taille du backlog
+                health.queue_backlog_size = health.queue_pending + health.queue_retrying
+
                 # Calcul des taux
                 if health.total_tokens > 0:
                     health.data_completeness_rate = (health.tokens_with_complete_data / health.total_tokens) * 100
@@ -606,6 +758,9 @@ class TokenMetricsCollector:
 ├─ ❓ Symboles inconnus (UNK%): {health.tokens_unknown_symbol}
 ├─ 🚫 Sans données disponibles: {health.tokens_no_data_available}
 └─ 🚨 Tokens ruggés: {health.tokens_rugged}
+├─ 📋 QUEUE (5m): +{metrics_5m.queue_tokens_added} ✅{metrics_5m.queue_tokens_completed} ❌{metrics_5m.queue_tokens_failed}
+├─ 📋 Queue backlog: {health.queue_backlog_size} | Success: {health.queue_overall_success_rate:.1f}%
+└─ ⏱️ Queue processing: {metrics_5m.queue_avg_processing_time:.1f}s avg | {metrics_5m.queue_processing_rate:.1f}/h
             """
         except Exception as e:
             self.logger.error(f"❌ Erreur métriques rapides: {e}")
@@ -633,7 +788,7 @@ class TokenMetricsCollector:
         return report
     
     def _generate_text_report(self, time_metrics: Dict, system_health: SystemHealth, 
-                             top_tokens: List[Dict], performance: Dict) -> str:
+                         top_tokens: List[Dict], performance: Dict) -> str:
         """Générer un rapport texte formaté"""
         report = []
         report.append("=" * 80)
@@ -643,30 +798,32 @@ class TokenMetricsCollector:
         report.append(f"💾 Base de données: {self.db_path}")
         report.append("")
         
-        # Métriques par fenêtre de temps
+        # Métriques par fenêtre de temps MODIFIÉES
         report.append("📊 ACTIVITÉ PAR PÉRIODE")
         report.append("-" * 50)
         
-        headers = ["Période", "Tokens", "Transactions", "Updates", "Snapshots", "Wallets", "Volume"]
-        row_format = "{:<8} {:<8} {:<12} {:<8} {:<10} {:<8} {:<12}"
+        # HEADERS MODIFIÉS pour inclure la queue
+        headers = ["Période", "Tokens", "TX", "Updates", "Snapshots", "+Queue", "✅Queue", "❌Queue"]
+        row_format = "{:<8} {:<8} {:<8} {:<8} {:<10} {:<8} {:<8} {:<8}"
         report.append(row_format.format(*headers))
         report.append("-" * 70)
         
         for window_name, metrics in time_metrics.items():
-            volume_str = f"${metrics.total_volume_usd:,.0f}" if metrics.total_volume_usd > 0 else "$0"
+            # LIGNE MODIFIÉE avec les métriques de queue
             report.append(row_format.format(
                 window_name,
                 metrics.new_tokens,
                 metrics.new_transactions,
                 metrics.token_updates,
                 metrics.history_snapshots,
-                metrics.unique_wallets,
-                volume_str
+                metrics.queue_tokens_added,
+                metrics.queue_tokens_completed,
+                metrics.queue_tokens_failed
             ))
         
         report.append("")
         
-        # Santé du système
+        # Santé du système (INCHANGÉ)
         report.append("🏥 SANTÉ DU SYSTÈME")
         report.append("-" * 30)
         report.append(f"📈 Total tokens: {system_health.total_tokens:,}")
@@ -680,7 +837,7 @@ class TokenMetricsCollector:
         report.append(f"🚫 Flaggés sans données: {system_health.tokens_flagged_no_data:,}")
         report.append(f"🚨 Tokens ruggés: {system_health.tokens_rugged:,}")
         
-        # === NOUVELLES MÉTRIQUES ===
+        # === NOUVELLES MÉTRIQUES === (INCHANGÉ)
         report.append("")
         report.append("🔄 STATUT DE MISE À JOUR (5 MINUTES)")
         report.append("-" * 40)
@@ -697,17 +854,55 @@ class TokenMetricsCollector:
         
         report.append("")
         
-        # Performance
+        # === NOUVELLE SECTION: STATUT DE LA QUEUE ===
+        report.append("📋 STATUT DE LA QUEUE")
+        report.append("-" * 30)
+        report.append(f"📊 Total items: {system_health.queue_total_items:,}")
+        report.append(f"⏳ En attente: {system_health.queue_pending:,}")
+        report.append(f"🔄 En traitement: {system_health.queue_processing:,}")
+        report.append(f"✅ Terminés: {system_health.queue_completed:,}")
+        report.append(f"❌ Échoués: {system_health.queue_failed:,}")
+        report.append(f"🔄 En retry: {system_health.queue_retrying:,}")
+        report.append(f"🗑️ Abandonnés: {system_health.queue_abandoned:,}")
+        report.append(f"📊 Taux de succès global: {system_health.queue_overall_success_rate:.1f}%")
+        report.append(f"⏱️ Temps traitement moyen: {system_health.queue_avg_processing_time_all:.1f}s")
+        report.append(f"📋 Backlog actuel: {system_health.queue_backlog_size:,}")
+        if system_health.queue_oldest_pending_hours > 0:
+            report.append(f"⏰ Plus ancien en attente: {system_health.queue_oldest_pending_hours:.1f}h")
+        
+        report.append("")
+        
+        # === NOUVELLE SECTION: PERFORMANCE DE LA QUEUE PAR PÉRIODE ===
+        report.append("⚡ PERFORMANCE QUEUE PAR PÉRIODE")
+        report.append("-" * 40)
+        
+        headers_perf = ["Période", "Rate/h", "Success%", "AvgTime", "Wallets"]
+        row_format_perf = "{:<8} {:<8} {:<8} {:<8} {:<8}"
+        report.append(row_format_perf.format(*headers_perf))
+        report.append("-" * 42)
+        
+        for window_name, metrics in time_metrics.items():
+            report.append(row_format_perf.format(
+                window_name,
+                f"{metrics.queue_processing_rate:.1f}",
+                f"{metrics.queue_success_rate:.1f}%",
+                f"{metrics.queue_avg_processing_time:.1f}s",
+                f"{metrics.unique_wallets}"
+            ))
+        
+        report.append("")
+        
+        # Performance (INCHANGÉ)
         if performance:
-            report.append("⚡ PERFORMANCE")
-            report.append("-" * 20)
+            report.append("⚡ PERFORMANCE GÉNÉRALE")
+            report.append("-" * 25)
             report.append(f"🎯 Délai détection moyen: {performance.get('detection_delay', {}).get('avg_seconds', 0):.1f}s")
             report.append(f"📡 Taux succès API: {performance.get('api_success_rate', {}).get('success_rate_pct', 0):.1f}%")
             report.append(f"📊 Snapshots 24h: {performance.get('historization', {}).get('total_snapshots', 0):,}")
             report.append(f"🔒 Score viabilité moyen: {performance.get('historization', {}).get('avg_viability_score', 0):.1f}/100")
             report.append("")
         
-        # Top tokens actifs
+        # Top tokens actifs (INCHANGÉ)
         if top_tokens:
             report.append("🔥 TOP 10 TOKENS ACTIFS (24H)")
             report.append("-" * 40)

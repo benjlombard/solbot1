@@ -360,6 +360,74 @@ class TokenRepository:
             return {'success': False, 'historized': False, 'is_new_token': False, 'is_stub': False}
     
     @db_retry(max_retries=3, delay=0.3)
+    def get_new_tokens_since_timestamp(
+        self, 
+        since_created_at: Optional[str] = None,
+        limit: Optional[int] = None,
+        retry_failed_after_days: int = 7,
+        max_failed_attempts: int = 2
+    ) -> Tuple[Set[str], Optional[str]]:
+        """
+        Get new token addresses from transactions since a specific block_time
+        
+        Returns:
+            Tuple of (token_addresses_set, most_recent_block_time)
+        """
+        with self.db.get_connection_context() as conn:
+            cursor = conn.cursor()
+            
+            params = [retry_failed_after_days, max_failed_attempts]
+            
+            query = """
+            SELECT DISTINCT t.token_mint, MAX(t.created_at) as max_created_at
+            FROM transactions t
+            LEFT JOIN tokens tk ON t.token_mint = tk.address
+            WHERE t.token_mint IS NOT NULL 
+            AND t.token_mint != ''
+            AND tk.address IS NULL
+            AND t.token_mint NOT IN (
+                SELECT address FROM tokens 
+                WHERE no_data_available = 1 
+                AND (no_data_last_check > datetime('now', '-' || ? || ' days') OR failed_attempts >= ?)
+            )
+            """
+            
+            if since_created_at:
+                query += " AND t.created_at > ?"  # Changer de block_time vers created_at
+                params.append(since_created_at)
+    
+            query += " GROUP BY t.token_mint ORDER BY max_created_at DESC"
+            
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+            
+            cursor.execute(query, tuple(params))
+            results = cursor.fetchall()
+            
+            if not results:
+                return set(), since_created_at
+            
+            token_addresses = {row[0] for row in results}
+            
+            
+            most_recent_created_at = max(row[1] for row in results if row[1] is not None)
+            return token_addresses, most_recent_created_at
+
+    @db_retry(max_retries=3, delay=0.3)
+    def get_initial_population_tokens(self, limit: int) -> Tuple[Set[str], Optional[str]]:  # ❌ Tu retournais Optional[int]
+        """
+        Get initial population of tokens and return the most recent created_at
+        
+        Returns:
+            Tuple of (token_addresses_set, most_recent_created_at)  # ❌ Docstring incorrecte
+        """
+        return self.get_new_tokens_since_timestamp(
+            since_created_at=None,  # ❌ Tu avais since_block_time=None
+            limit=limit
+        )
+
+    @db_retry(max_retries=3, delay=0.3)
     def mark_token_no_data(self, token_address: str, max_attempts: int, increment_attempts: bool = True) -> bool:
         """Mark a token as having no data available"""
         with self.db.get_connection_context() as conn:

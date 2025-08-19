@@ -72,6 +72,9 @@ class SyncService:
         except ImportError:
             self.logger.warning("⚠️ Historization processor not available")
         
+        self.last_processed_created_at: Optional[str] = None  # au lieu de block_time
+        self.initial_population_done: bool = False
+
         # Statistics
         self.stats = {
             'processed_tokens': 0,
@@ -146,11 +149,11 @@ class SyncService:
         
         try:
             # 1. Process new tokens from queue
-            self.logger.debug("📥 Processing new tokens from queue...")
             new_tokens_result = self._process_new_tokens()
             new_tokens_processed = new_tokens_result['successful']
             historized_count = new_tokens_result['historized']
             stubs_count = new_tokens_result['stubs']
+            new_tokens_added = new_tokens_result.get('new_tokens_added_to_queue', 0)
 
             self.cycle_logger.record_operation('new_tokens', new_tokens_processed)
 
@@ -191,11 +194,12 @@ class SyncService:
             self.stats['successful_updates'] += total_processed  # Assuming all processed are successful for now
             
             # Log cycle completion
-            if total_processed > 0 or total_historized > 0 or stubs_count > 0:
+            if total_processed > 0 or total_historized > 0 or stubs_count > 0 or new_tokens_added > 0:
                 self.logger.info(
                     f"✅ CYCLE {self.cycle_count} COMPLETED: "
-                    f"{new_tokens_processed} new, {prices_updated} updated, "
-                    f"{total_historized} historized, {stubs_count} stubs"
+                    f"{new_tokens_processed} processed, {prices_updated} updated, "
+                    f"{total_historized} historized, {stubs_count} stubs, "
+                    f"{new_tokens_added} new tokens added to queue"
                 )
             else:
                 self.logger.debug(f"✅ CYCLE {self.cycle_count} COMPLETED: No tokens to process")
@@ -233,28 +237,147 @@ class SyncService:
         """Process new tokens from the queue"""
         self.logger.debug("📥 Processing new tokens from queue...")
         
-        # Get pending tokens from queue
+        # # Get pending tokens from queue
+        # pending_tokens = self.queue_repo.get_pending_tokens(
+        #     self.config.processing.batch_size_new_tokens
+        # )
+        
+        # if not pending_tokens:
+        #     self.logger.debug("No new tokens in queue to process")
+        #     return 0
+        
+        # self.logger.info(f"📊 Processing {len(pending_tokens)} new tokens")
+
+        # successful_count, historized_count, stubs_count = asyncio.run(
+        #     self.batch_processor.process_new_tokens_from_queue(pending_tokens)
+        # )
+
+        # return {
+        #     'successful': successful_count,
+        #     'historized': historized_count,
+        #     'stubs': stubs_count
+        # }
+
+        # 1. D'abord traiter la queue existante
+        queue_result = self._process_tokens_from_queue()
+        
+        # 2. Ensuite ajouter de nouveaux tokens depuis les transactions
+        new_tokens_added = self._add_new_tokens_from_transactions()
+        
+        return {
+            'successful': queue_result['successful'],
+            'historized': queue_result['historized'], 
+            'stubs': queue_result['stubs'],
+            'new_tokens_added_to_queue': new_tokens_added
+        }
+
+    
+    def _process_tokens_from_queue(self) -> Dict[str, Any]:
+        """Process existing tokens from queue"""
         pending_tokens = self.queue_repo.get_pending_tokens(
             self.config.processing.batch_size_new_tokens
         )
         
         if not pending_tokens:
-            self.logger.debug("No new tokens in queue to process")
-            return 0
+            return {'successful': 0, 'historized': 0, 'stubs': 0}
         
-        self.logger.info(f"📊 Processing {len(pending_tokens)} new tokens")
-
+        self.logger.info(f"📊 Processing {len(pending_tokens)} tokens from queue")
+        
         successful_count, historized_count, stubs_count = asyncio.run(
             self.batch_processor.process_new_tokens_from_queue(pending_tokens)
         )
-
+        
         return {
             'successful': successful_count,
             'historized': historized_count,
             'stubs': stubs_count
         }
 
-    
+    def _add_new_tokens_from_transactions(self) -> int:
+        """Add new tokens from transactions to queue"""
+        try:
+            # Population initiale si pas encore faite
+            if not self.initial_population_done:
+                return self._do_initial_population()
+            
+            # Sinon, rechercher les nouveaux tokens depuis le dernier timestamp
+            return self._add_tokens_since_last_timestamp()
+            
+        except Exception as e:
+            self.logger.error(f"Error adding new tokens from transactions: {e}")
+            return 0
+
+    def _do_initial_population(self) -> int:
+        """Faire la population initiale depuis les transactions"""
+        try:
+            limit = self.config.processing.initial_population_limit
+            
+            self.logger.info(f"🚀 Starting initial population with {limit} tokens")
+            
+            token_addresses, most_recent_created_at = self.token_repo.get_initial_population_tokens(limit)
+            
+            if token_addresses:
+                added_count = self.queue_repo.add_tokens_to_queue(
+                    list(token_addresses),
+                    source="initial_population"
+                )
+                
+                # Sauvegarder le timestamp le plus récent
+                self.last_processed_created_at = most_recent_created_at
+                self.initial_population_done = True
+                
+                self.logger.info(
+                    f"✅ Initial population: {added_count} tokens added to queue, "
+                    f"last created_at: {most_recent_created_at}"
+                )
+                
+                return added_count
+            else:
+                self.initial_population_done = True
+                self.logger.info("🔍 No tokens found for initial population")
+                return 0
+                
+        except Exception as e:
+            self.logger.error(f"Error in initial population: {e}")
+            return 0
+
+    def _add_tokens_since_last_timestamp(self) -> int:
+        """Ajouter les tokens depuis le dernier timestamp traité"""
+        try:
+            if not self.last_processed_created_at:
+                self.logger.warning("No last processed created_at, skipping new tokens search")
+                return 0
+            
+            # Chercher les nouveaux tokens depuis le dernier timestamp
+            token_addresses, most_recent_created_at = self.token_repo.get_new_tokens_since_timestamp(
+                since_created_at=self.last_processed_created_at,
+                limit=self.config.processing.batch_size_new_tokens
+            )
+            
+            if token_addresses:
+                added_count = self.queue_repo.add_tokens_to_queue(
+                    list(token_addresses),
+                    source="new_transactions"
+                )
+                
+                # Mettre à jour le timestamp le plus récent
+                if most_recent_created_at and most_recent_created_at > self.last_processed_created_at:
+                    self.last_processed_created_at = most_recent_created_at
+                    
+                    self.logger.info(
+                        f"📥 New tokens: {added_count} added to queue, "
+                        f"updated last created_at: {most_recent_created_at}"
+                    )
+                
+                return added_count
+            else:
+                self.logger.debug("🔍 No new tokens found since last timestamp")
+                return 0
+                
+        except Exception as e:
+            self.logger.error(f"Error adding tokens since last timestamp: {e}")
+            return 0
+
     def _update_existing_prices(self) -> int:
         """Update existing token prices"""
         self.logger.debug("🔄 Updating existing token prices...")
