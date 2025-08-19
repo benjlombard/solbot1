@@ -184,11 +184,37 @@ class BatchProcessor:
                 # Rate limiting between batches
                 if i + max_batch_size < len(token_addresses):
                     await asyncio.sleep(0.5)  # 500ms pause between batches
+
+            # Fallback for missing tokens, inside the session block
+            found_count = len(all_tokens_data)
+            missing_count = len(token_addresses) - found_count
+            self.logger.debug(f"📊 Batch API Results: {found_count} found, {missing_count} missing")
+
+            if missing_count > 0:
+                missing_addresses = set(token_addresses) - set(all_tokens_data.keys())
+                self.logger.info(f"📡 Performing individual fallback for {len(missing_addresses)} missing tokens...")
+                
+                fallback_tasks = []
+                for addr in missing_addresses:
+                    fallback_tasks.append(self.dex_client.get_token_data_async(session, addr))
+                
+                fallback_results = await asyncio.gather(*fallback_tasks, return_exceptions=True)
+
+                fallback_found_count = 0
+                for i, result in enumerate(fallback_results):
+                    if isinstance(result, TokenData):
+                        all_tokens_data[result.address] = result
+                        fallback_found_count += 1
+                    elif isinstance(result, Exception):
+                        # Log the exception if needed
+                        pass
+                
+                self.logger.info(f"📡 Fallback completed: found {fallback_found_count}/{len(missing_addresses)} additional tokens.")
+
+        final_found_count = len(all_tokens_data)
+        final_missing_count = len(token_addresses) - final_found_count
+        self.logger.debug(f"📊 Final API Results: {final_found_count} found, {final_missing_count} missing")
         
-        found_count = len(all_tokens_data)
-        missing_count = len(token_addresses) - found_count
-        
-        self.logger.debug(f"📊 API Results: {found_count} found, {missing_count} missing")
         return all_tokens_data
     
     async def _process_database_operations(
@@ -335,7 +361,11 @@ class BatchProcessor:
             
             if token_exists:
                 # Token exists, mark as no data
-                success = self.token_repo.mark_token_no_data(token_address, increment_attempts=True)
+                success = self.token_repo.mark_token_no_data(
+                    token_address,
+                    max_attempts=self.config.processing.max_failed_attempts,
+                    increment_attempts=True
+                )
                 
                 if update_queue:
                     if success:
@@ -359,7 +389,10 @@ class BatchProcessor:
                 return success
             else:
                 # Token doesn't exist, create stub
-                success = self.token_repo.create_token_stub(token_address)
+                success = self.token_repo.create_token_stub(
+                    token_address,
+                    max_attempts=self.config.processing.max_failed_attempts
+                )
                 
                 if update_queue:
                     if success:

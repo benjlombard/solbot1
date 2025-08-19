@@ -61,6 +61,25 @@ class DexScreenerClient(BaseApiClient):
             return None
         
         return self._parse_single_token_response(token_address, response.data)
+
+    async def get_token_data_async(self, session: aiohttp.ClientSession, token_address: str) -> Optional[TokenData]:
+        """
+        Asynchronously get token data for a single token address.
+        
+        Args:
+            session: The aiohttp client session.
+            token_address: Token address to lookup.
+            
+        Returns:
+            TokenData object or None if not found.
+        """
+        response = await self.make_async_request(session, f"dex/tokens/{token_address}")
+        
+        if not response.success:
+            self.logger.debug(f"Failed to get token data for {token_address[:8]}...: {response.error_message}")
+            return None
+        
+        return self._parse_single_token_response(token_address, response.data)
     
     def get_tokens_batch(self, token_addresses: List[str], batch_size: int = 30) -> Dict[str, TokenData]:
         """

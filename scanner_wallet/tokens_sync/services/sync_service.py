@@ -147,11 +147,6 @@ class SyncService:
         self.cycle_count += 1
         cycle_id = self._start_sync_cycle()
         
-        # Log seulement une fois par cycle unique
-        if cycle_id != getattr(self, '_last_logged_cycle_id', None):
-            self.logger.info(f"🔄 CYCLE {self.cycle_count} STARTED - ID: {cycle_id}")
-            self._last_logged_cycle_id = cycle_id
-        
         try:
             # 1. Process new tokens from queue
             self.logger.debug("📥 Processing new tokens from queue...")
@@ -247,11 +242,10 @@ class SyncService:
         """Update existing token prices"""
         self.logger.debug("🔄 Updating existing token prices...")
         
-        # CORRECTION: Fix configuration attribute access
-        # Use monitoring.price_update_limit instead of processing.price_update_limit
-        price_update_limit = getattr(self.config.monitoring, 'price_update_limit', 100)
-        price_update_interval = getattr(self.config.monitoring, 'price_update_interval_seconds', 600)
-        max_failed_attempts = getattr(self.config.monitoring, 'max_failed_attempts', 1)
+        # Use the centralized configuration from processing
+        price_update_limit = self.config.processing.batch_size_price_updates
+        price_update_interval = self.config.processing.price_update_interval_seconds
+        max_failed_attempts = self.config.processing.max_failed_attempts
         
         # Get tokens needing updates
         tokens_to_update = self.token_repo.get_tokens_needing_price_update(
@@ -500,9 +494,9 @@ class SyncService:
             # Top APIs par nombre d'appels
             top_apis = self.api_tracker.get_top_apis(limit=5, sort_by='calls')
             if top_apis:
-                self.logger.info("🔝 Top APIs by calls:")
+                self.logger.debug("🔝 Top APIs by calls:")
                 for api_name, stats in top_apis:
-                    self.logger.info(
+                    self.logger.debug(
                         f"  🔗 {api_name}: {stats.get('total_calls', 0)} calls, "
                         f"avg {stats.get('avg_duration_seconds', 0):.3f}s, "
                         f"success {stats.get('success_rate', 0):.1f}%"

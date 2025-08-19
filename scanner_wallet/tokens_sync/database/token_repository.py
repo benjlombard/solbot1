@@ -10,13 +10,15 @@ import sqlite3
 
 from .connection import DatabaseConnection, db_retry
 from ..models.token_data import TokenData, QueueItem
+from .history_repository import HistoryRepository
 
 
 class TokenRepository:
     """Repository for token-related database operations"""
     
-    def __init__(self, db_connection: DatabaseConnection, logger: Optional[logging.Logger] = None):
+    def __init__(self, db_connection: DatabaseConnection, history_repo: HistoryRepository, logger: Optional[logging.Logger] = None):
         self.db = db_connection
+        self.history_repo = history_repo
         self.logger = logger or logging.getLogger(__name__)
     
     @db_retry(max_retries=3, delay=0.3)
@@ -35,12 +37,29 @@ class TokenRepository:
             cursor = conn.cursor()
             cursor.execute("SELECT 1 FROM tokens WHERE address = ? LIMIT 1", (address,))
             return cursor.fetchone() is not None
+
+    @db_retry(max_retries=3, delay=0.3)
+    def get_most_recent_token_timestamp(self) -> Optional[str]:
+        """Get the created_at timestamp of the most recently created token."""
+        with self.db.get_connection_context() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MAX(created_at) FROM tokens")
+            result = cursor.fetchone()
+            return result[0] if result and result[0] else None
     
     @db_retry(max_retries=3, delay=0.3)
-    def get_new_tokens_from_transactions(self, retry_failed_after_days: int = 7, max_failed_attempts: int = 5) -> Set[str]:
+    def get_new_tokens_from_transactions(
+        self, 
+        retry_failed_after_days: int = 7, 
+        max_failed_attempts: int = 5,
+        since_timestamp: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> Set[str]:
         """Get new token addresses from transactions table (excluding flagged tokens)"""
         with self.db.get_connection_context() as conn:
             cursor = conn.cursor()
+            
+            params = [retry_failed_after_days, max_failed_attempts]
             
             query = """
             SELECT DISTINCT t.token_mint
@@ -54,10 +73,19 @@ class TokenRepository:
                 WHERE no_data_available = 1 
                 AND (no_data_last_check > datetime('now', '-' || ? || ' days') OR failed_attempts >= ?)
             )
-            ORDER BY t.created_at DESC
             """
+
+            if since_timestamp:
+                query += " AND t.created_at > ?"
+                params.append(since_timestamp)
             
-            cursor.execute(query, (retry_failed_after_days, max_failed_attempts))
+            query += " ORDER BY t.created_at DESC"
+
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+            
+            cursor.execute(query, tuple(params))
             results = cursor.fetchall()
             
             return {row[0] for row in results}
@@ -162,6 +190,8 @@ class TokenRepository:
                     volume_mc_ratio = token_data.volume_24h / token_data.market_cap
                 
                 if token_exists:
+                    # Historize before update
+                    self.history_repo.create_snapshot(token_data.address)
                     update_start = time.time()
                     # Update existing token
                     query = """
@@ -292,8 +322,11 @@ class TokenRepository:
                     ))
                     insert_duration = time.time() - insert_start
                     rows_affected = cursor.rowcount
-                
                     self.logger.debug(f"💾 Insert query for {token_data.address[:8]}... completed in {insert_duration:.3f}s, rows affected: {rows_affected}")
+                    
+                    # Historize after insert
+                    self.history_repo.create_snapshot(token_data.address)
+
                 conn.commit()
                 commit_duration = time.time() - (update_start if token_exists else insert_start)
                 self.logger.debug(f"✅ Upsert completed for {token_data.address[:8]}... total time: {commit_duration:.3f}s")
@@ -304,7 +337,7 @@ class TokenRepository:
             return False
     
     @db_retry(max_retries=3, delay=0.3)
-    def mark_token_no_data(self, token_address: str, increment_attempts: bool = True) -> bool:
+    def mark_token_no_data(self, token_address: str, max_attempts: int, increment_attempts: bool = True) -> bool:
         """Mark a token as having no data available"""
         with self.db.get_connection_context() as conn:
             cursor = conn.cursor()
@@ -319,17 +352,24 @@ class TokenRepository:
                     WHERE address = ?
                 """, (token_address,))
                 
-                # Check if we should mark as no_data_available
+                if cursor.rowcount == 0:
+                    # If the update failed (e.g., token not found), we consider it a failure.
+                    conn.commit()
+                    return False
+
+                # Check if we should mark as no_data_available after enough attempts
                 cursor.execute("SELECT failed_attempts FROM tokens WHERE address = ?", (token_address,))
                 result = cursor.fetchone()
                 
-                if result and result[0] >= 5:  # Max failed attempts from config
+                if result and result[0] >= max_attempts:
                     cursor.execute("""
-                        UPDATE tokens 
-                        SET no_data_available = 1
-                        WHERE address = ?
+                        UPDATE tokens SET no_data_available = 1 WHERE address = ?
                     """, (token_address,))
                     self.logger.warning(f"Token {token_address[:8]}... marked as no_data_available after {result[0]} failed attempts")
+
+                conn.commit()
+                # Return True because the primary operation (incrementing attempts) was successful.
+                return True
             else:
                 # Mark directly as no_data
                 cursor.execute("""
@@ -341,12 +381,12 @@ class TokenRepository:
                     WHERE address = ?
                 """, (token_address,))
                 self.logger.warning(f"Token {token_address[:8]}... marked as no_data_available")
-            
-            conn.commit()
-            return cursor.rowcount > 0
+                update_successful = cursor.rowcount > 0
+                conn.commit()
+                return update_successful
     
     @db_retry(max_retries=3, delay=0.3)
-    def create_token_stub(self, token_address: str) -> bool:
+    def create_token_stub(self, token_address: str, max_attempts: int) -> bool:
         """Create a minimal token entry when no data is found"""
         try:
             # CORRECTION: Validation de l'adresse du token
@@ -358,7 +398,7 @@ class TokenRepository:
             
             # Check if token already exists
             if self.token_exists(token_address):
-                return self.mark_token_no_data(token_address)
+                return self.mark_token_no_data(token_address, max_attempts=max_attempts)
             
             with self.db.get_connection_context() as conn:
                 cursor = conn.cursor()

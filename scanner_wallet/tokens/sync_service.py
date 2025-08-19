@@ -289,7 +289,7 @@ class CycleLogger:
             # Top 3 APIs les plus utilisées
             top_apis = sorted(cumul['total_api_calls'].items(), key=lambda x: x[1], reverse=True)[:3]
             for api_name, count in top_apis:
-                self.logger.info(f"    🔸 {api_name}: {count} calls")
+                self.logger.debug(f"    🔸 {api_name}: {count} calls")
         
         self.logger.info("=" * 80)
     

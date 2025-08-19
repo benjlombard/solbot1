@@ -134,6 +134,7 @@ class TokenSyncProcessingConfig:
     dead_token_check_interval_seconds: int = 86400  # 24 heures
     
     # Limites de traitement
+    initial_population_limit: int = 100
     batch_size_new_tokens: int = 100
     batch_size_price_updates: int = 150
     batch_size_historization: int = 50
@@ -382,11 +383,12 @@ class TokenSyncConfig:
             price_update_interval_seconds=int(os.getenv('TOKENS_SYNC_PRICE_UPDATE_INTERVAL', '600')),
             historization_interval_seconds=int(os.getenv('TOKENS_SYNC_HISTORIZATION_INTERVAL', '3600')),
             
+            initial_population_limit=int(os.getenv('TOKENS_SYNC_INITIAL_POPULATION_LIMIT', '100')),
             batch_size_new_tokens=int(os.getenv('TOKENS_SYNC_BATCH_SIZE_NEW', '100')),
             batch_size_price_updates=int(os.getenv('TOKENS_SYNC_BATCH_SIZE_UPDATES', '150')),
             batch_size_historization=int(os.getenv('TOKENS_SYNC_BATCH_SIZE_HISTORY', '50')),
             
-            max_failed_attempts=int(os.getenv('TOKENS_SYNC_MAX_FAILED_ATTEMPTS', '5')),
+            max_failed_attempts=int(os.getenv('TOKENS_SYNC_MAX_FAILED_ATTEMPTS', '2')),
             retry_failed_after_hours=int(os.getenv('TOKENS_SYNC_RETRY_AFTER_HOURS', '24')),
             
             rate_limit_delay=float(os.getenv('TOKENS_SYNC_RATE_LIMIT_DELAY', '0.2')),

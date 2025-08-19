@@ -239,27 +239,41 @@ class TokenSyncApplication:
         self.logger.info(f"📊 Periodic API stats enabled (every {interval}s)")
 
     def _populate_initial_queue(self):
-        """Populate the processing queue with initial tokens if needed"""
+        """Populate the processing queue with initial tokens if needed."""
         try:
             self.logger.info("🔍 Checking for tokens to add to processing queue...")
-            max_initial_tokens = 500
-            # Get new tokens from transactions that aren't in the queue yet
-            if hasattr(self.sync_service, 'token_repo'):
+            if not hasattr(self.sync_service, 'token_repo'):
+                return
+
+            last_timestamp = self.sync_service.token_repo.get_most_recent_token_timestamp()
+            
+            if last_timestamp is None:
+                # Fresh start: tokens table is empty. Bootstrap with the most recent tokens.
+                self.logger.info("🚀 Fresh start detected. Bootstrapping with most recent tokens...")
+                limit = self.config.processing.initial_population_limit
                 new_tokens = self.sync_service.token_repo.get_new_tokens_from_transactions(
                     retry_failed_after_days=self.config.processing.retry_failed_after_hours / 24,
-                    max_failed_attempts=self.config.processing.max_failed_attempts
+                    max_failed_attempts=self.config.processing.max_failed_attempts,
+                    limit=limit
                 )
-                
-                # CORRECTION: Limiter et prioriser
                 if new_tokens:
-                    limited_tokens = list(new_tokens)[:max_initial_tokens]
-                    added_count = self.sync_service.add_tokens_to_queue(limited_tokens)
-                    self.logger.info(f"➕ Added {added_count}/{len(new_tokens)} tokens to queue (limited to {max_initial_tokens})")
-                    
-                    if len(new_tokens) > max_initial_tokens:
-                        self.logger.info(f"📋 {len(new_tokens) - max_initial_tokens} tokens queued for next cycles")
+                    added_count = self.sync_service.add_tokens_to_queue(list(new_tokens))
+                    self.logger.info(f"➕ Added {added_count} most recent tokens to bootstrap the queue (limit: {limit}).")
                 else:
-                    self.logger.info("📋 No new tokens found to add to queue")
+                    self.logger.info("📋 No transactions found to bootstrap queue.")
+            else:
+                # Normal restart: look for tokens newer than the last one we processed.
+                self.logger.info(f"🔄 Resuming operation. Looking for tokens newer than {last_timestamp}.")
+                new_tokens = self.sync_service.token_repo.get_new_tokens_from_transactions(
+                    retry_failed_after_days=self.config.processing.retry_failed_after_hours / 24,
+                    max_failed_attempts=self.config.processing.max_failed_attempts,
+                    since_timestamp=last_timestamp
+                )
+                if new_tokens:
+                    added_count = self.sync_service.add_tokens_to_queue(list(new_tokens))
+                    self.logger.info(f"➕ Added {added_count} new tokens to queue.")
+                else:
+                    self.logger.info("📋 No new tokens found since last run.")
             
         except Exception as e:
             self.logger.warning(f"⚠️ Error populating initial queue: {e}")
@@ -367,9 +381,9 @@ class TokenSyncApplication:
                 # Top APIs
                 top_apis = api_stats.get('top_apis_by_calls', [])
                 if top_apis:
-                    self.logger.info("\n🔝 TOP APIs BY CALLS:")
+                    self.logger.debug("\n🔝 TOP APIs BY CALLS:")
                     for i, (api_name, stats) in enumerate(top_apis[:10], 1):
-                        self.logger.info(
+                        self.logger.debug(
                             f"  {i:2d}. {api_name}: {stats.get('total_calls', 0)} calls "
                             f"(avg: {stats.get('avg_duration_seconds', 0):.3f}s, "
                             f"success: {stats.get('success_rate', 0):.1f}%)"
