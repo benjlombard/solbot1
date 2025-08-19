@@ -96,52 +96,26 @@ class DexScreenerClient(BaseApiClient):
     
     async def get_tokens_batch_async(self, session: aiohttp.ClientSession, token_addresses: List[str], batch_size: int = 30) -> Dict[str, TokenData]:
         """
-        Asynchronously get token data for multiple addresses
+        Asynchronously get token data for multiple addresses.
+        This method is simplified to only handle batching. Fallback logic is handled by the calling processor.
         """
         all_tokens_data = {}
-        
-        # Limite DexScreener: maximum 30 tokens par requête
         max_batch_size = min(30, batch_size)
         
-        # Create batch tasks avec limitation
         tasks = []
         for i in range(0, len(token_addresses), max_batch_size):
             batch = token_addresses[i:i + max_batch_size]
-            # CORRECTION: Vérifier la taille du batch
-            if len(batch) > max_batch_size:
-                # Si trop gros, traiter individuellement
-                for token_addr in batch:
-                    task = self._fetch_single_token_async(session, token_addr)
-                    tasks.append(('individual', token_addr, task))
-            else:
-                task = self._fetch_batch_async(session, batch)
-                tasks.append(('batch', batch, task))
+            tasks.append(self._fetch_batch_async(session, batch))
         
-        # Execute batches avec timeout plus court
-        for task_type, addresses, task in tasks:
-            try:
-                if task_type == 'batch':
-                    result = await asyncio.wait_for(task, timeout=15.0)  # Timeout réduit
-                    all_tokens_data.update(result)
-                else:  # individual
-                    result = await asyncio.wait_for(task, timeout=10.0)
-                    if result:
-                        all_tokens_data[addresses] = result
-                        
-            except asyncio.TimeoutError:
-                self.logger.warning(f"Timeout for {task_type} request: {addresses}")
-                # Fallback immédiat vers individual pour les batch qui timeout
-                if task_type == 'batch':
-                    for addr in addresses:
-                        try:
-                            individual_result = await self._fetch_single_token_async(session, addr)
-                            if individual_result:
-                                all_tokens_data[addr] = individual_result
-                        except Exception as e:
-                            self.logger.debug(f"Individual fallback failed for {addr}: {e}")
-            except Exception as e:
-                self.logger.error(f"Error in {task_type} request: {e}")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
+        for result in results:
+            if isinstance(result, Exception):
+                self.logger.warning(f"A batch request failed with exception: {result}")
+                continue
+            if result:
+                all_tokens_data.update(result)
+            
         return all_tokens_data
     
     async def _fetch_batch_async(self, session: aiohttp.ClientSession, batch: List[str]) -> Dict[str, TokenData]:
@@ -179,8 +153,6 @@ class DexScreenerClient(BaseApiClient):
             
             result1.update(result2)
             return result1
-        
-        response = await self.make_async_request(session, f"dex/tokens/{addresses_str}")
         
         try:
             response = await self.make_async_request(session, f"dex/tokens/{addresses_str}")

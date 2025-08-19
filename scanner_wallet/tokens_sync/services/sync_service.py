@@ -72,8 +72,8 @@ class SyncService:
             self.logger.warning("⚠️ Historization processor not available")
         
         # Initialize monitoring
-        self.api_tracker = ApiTracker(db_connection=self.db_connection, logger=self.logger)
-        self.cycle_logger = CycleLogger(logger=self.logger)
+        #self.api_tracker = ApiTracker(db_connection=self.db_connection, logger=self.logger)
+        #self.cycle_logger = CycleLogger(logger=self.logger)
         
         # Statistics
         self.stats = {
