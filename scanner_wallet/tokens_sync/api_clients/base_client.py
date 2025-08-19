@@ -63,6 +63,26 @@ class BaseApiClient(ABC):
         # Session management
         self.session = self._create_session()
         
+    def _is_batch_call(self, endpoint: str, params: Optional[Dict]) -> bool:
+        """Détermine si c'est un appel batch"""
+        # Pour DexScreener : endpoint contient plusieurs adresses séparées par des virgules
+        if 'tokens/' in endpoint:
+            # Extraire la partie après 'tokens/'
+            token_part = endpoint.split('tokens/')[-1]
+            # Si contient des virgules, c'est un batch
+            return ',' in token_part
+        return False
+
+    def _count_addresses_in_call(self, endpoint: str, params: Optional[Dict]) -> int:
+        """Compte le nombre d'adresses dans l'appel"""
+        if 'tokens/' in endpoint:
+            token_part = endpoint.split('tokens/')[-1]
+            if ',' in token_part:
+                return len(token_part.split(','))
+            else:
+                return 1
+        return 0
+        
     def _create_session(self) -> requests.Session:
         """Create and configure requests session"""
         session = requests.Session()
@@ -161,7 +181,7 @@ class BaseApiClient(ABC):
             )
     
     def make_request(self, endpoint: str, method: str = "GET", params: Optional[Dict] = None, 
-                data: Optional[Dict] = None, max_retries: int = 3) -> ApiResponse:
+                data: Optional[Dict] = None, max_retries: int = 0) -> ApiResponse:
         """
         Make HTTP request with retry logic, rate limiting, and API tracking
         """
@@ -210,6 +230,22 @@ class BaseApiClient(ABC):
                         # Ne pas faire échouer la requête si le tracking échoue
                         self.logger.debug(f"API tracker error: {tracker_error}")
                 
+                if hasattr(self, 'cycle_logger') and self.cycle_logger:
+                    try:
+                        # Déterminer si c'est un appel batch ou individuel
+                        is_batch_call = self._is_batch_call(endpoint, params)
+                        addresses_count = self._count_addresses_in_call(endpoint, params)
+                        
+                        self.cycle_logger.record_api_endpoint_call(
+                            client_name=self.api_name,
+                            endpoint=endpoint.strip('/').replace('/', '_'),
+                            is_batch=is_batch_call,
+                            addresses_count=addresses_count
+                        )
+                    except Exception as cycle_error:
+                        # Ne pas faire échouer la requête si le tracking échoue
+                        self.logger.debug(f"Cycle logger error: {cycle_error}")
+
                 # Check if we should retry
                 if not api_response.success and self._should_retry(api_response, attempt, max_retries):
                     continue

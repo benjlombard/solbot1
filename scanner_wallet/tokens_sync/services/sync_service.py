@@ -241,7 +241,7 @@ class SyncService:
         self.logger.info(f"📊 Processing {len(pending_tokens)} new tokens")
         
         # Process tokens in batch
-        return asyncio.run(self.batch_processor.process_tokens_batch(pending_tokens))
+        return asyncio.run(self.batch_processor.process_new_tokens_from_queue(pending_tokens))
     
     def _update_existing_prices(self) -> int:
         """Update existing token prices"""
@@ -251,7 +251,7 @@ class SyncService:
         # Use monitoring.price_update_limit instead of processing.price_update_limit
         price_update_limit = getattr(self.config.monitoring, 'price_update_limit', 100)
         price_update_interval = getattr(self.config.monitoring, 'price_update_interval_seconds', 600)
-        max_failed_attempts = getattr(self.config.monitoring, 'max_failed_attempts', 3)
+        max_failed_attempts = getattr(self.config.monitoring, 'max_failed_attempts', 1)
         
         # Get tokens needing updates
         tokens_to_update = self.token_repo.get_tokens_needing_price_update(
@@ -267,7 +267,7 @@ class SyncService:
         self.logger.info(f"📊 Updating {len(tokens_to_update)} token prices")
         
         # Process updates in batch
-        return asyncio.run(self.batch_processor.process_tokens_batch(tokens_to_update))
+        return asyncio.run(self.batch_processor.process_price_updates(tokens_to_update))
     
     def _run_historization_improved(self) -> int:
         """Run token historization with better logic"""
@@ -407,10 +407,30 @@ class SyncService:
         return cycle_id
     
     def _end_sync_cycle(self, cycle_id: int):
-        """End the current sync cycle"""
+        """End the current sync cycle with detailed API stats"""
+        cycle_summary = self.cycle_logger.get_cycle_api_summary()
+        
+        # Log detailed API breakdown
+        self.logger.info("🌐 API CALLS BREAKDOWN:")
+        self.logger.info(f"  📡 Total API calls: {sum(cycle_summary['calls_by_client'].values())}")
+        
+        # By client
+        for client, calls in cycle_summary['calls_by_client'].items():
+            self.logger.info(f"  🔸 {client}: {calls} calls total")
+            
+            # Batch vs individual breakdown
+            if client in cycle_summary['batch_vs_individual']:
+                batch_count = cycle_summary['batch_vs_individual'][client]['batch']
+                individual_count = cycle_summary['batch_vs_individual'][client]['individual']
+                self.logger.info(f"     └─ Batch calls: {batch_count}, Individual calls: {individual_count}")
+        
+        # Individual calls summary
+        if cycle_summary['total_individual_calls'] > 0:
+            self.logger.info(f"  ⚠️ Total individual calls: {cycle_summary['total_individual_calls']}")
+            self.logger.info(f"  ⚠️ Individual addresses: {cycle_summary['individual_addresses_count']}")
+        
         self.cycle_logger.end_cycle()
         self.api_tracker.end_cycle()
-        self.current_sync_cycle_id = None
     
     def _wait_for_next_cycle(self):
         """Wait for the next sync cycle in a way that can be interrupted."""

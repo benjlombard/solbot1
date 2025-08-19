@@ -557,7 +557,7 @@ class RugCheckClient(BaseApiClient):
         try:
             # Test with a known token (should be fast)
             test_token = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC
-            response = self.make_request(f"tokens/{test_token}/risks", max_retries=1)
+            response = self.make_request(f"tokens/{test_token}/risks", max_retries=0)
             
             return {
                 'healthy': response.success,

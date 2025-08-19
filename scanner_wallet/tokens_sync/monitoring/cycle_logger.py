@@ -32,7 +32,8 @@ class CycleMetrics:
     # API call tracking
     api_calls: Dict[str, int] = field(default_factory=dict)
     api_durations: Dict[str, List[float]] = field(default_factory=lambda: defaultdict(list))
-    
+    api_breakdown: Optional[Dict] = field(default=None) 
+
     # Error tracking
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -62,10 +63,18 @@ class CycleMetrics:
         return sum(self.api_calls.values())
     
     def calculate_performance_metrics(self):
-        """Calculate performance metrics"""
         if self.duration > 0:
-            self.tokens_per_second = (self.new_tokens + self.updated_tokens) / self.duration
+            # Fix: éviter division par zéro si pas de tokens traités
+            total_tokens = self.new_tokens + self.updated_tokens
+            if total_tokens > 0:
+                self.tokens_per_second = total_tokens / self.duration
+            else:
+                self.tokens_per_second = 0.0
+                
             self.api_calls_per_minute = (self.total_api_calls / self.duration) * 60
+        else:
+            self.tokens_per_second = 0.0
+            self.api_calls_per_minute = 0.0
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for serialization"""
@@ -120,6 +129,10 @@ class CycleLogger:
         # Cycle history
         self.cycle_history: List[CycleMetrics] = []
         
+        self.current_api_calls_by_client: Dict[str, int] = {}
+        self.current_batch_vs_individual: Dict[str, Dict[str, int]] = {}
+        self.current_individual_addresses: List[str] = []
+
         # Cumulative statistics
         self.cumulative_stats = {
             'total_cycles': 0,
@@ -159,11 +172,67 @@ class CycleLogger:
             start_time=time.time()
         )
         
+        # AJOUT: Reset API tracking for new cycle
+        self.current_api_calls_by_client.clear()
+        self.current_batch_vs_individual.clear()
+        self.current_individual_addresses.clear()
+        
         if self.cumulative_stats['start_time'] is None:
             self.cumulative_stats['start_time'] = self.current_cycle.start_time
         
         self.logger.info(f"🔄 CYCLE {self.cycle_count} STARTED - ID: {cycle_id}")
     
+    def record_operation(self, operation_type: str, count: int):
+        """Record operations in the current cycle"""
+        if not self.current_cycle:
+            return
+        
+        # Map operation types to cycle attributes
+        if operation_type == 'new_tokens':
+            self.current_cycle.new_tokens = count
+        elif operation_type == 'updated_tokens':
+            self.current_cycle.updated_tokens = count
+        elif operation_type == 'historized_tokens':
+            self.current_cycle.historized_tokens = count
+        elif operation_type == 'creation_timestamps':
+            self.current_cycle.creation_timestamps = count
+        elif operation_type == 'dead_tokens_marked':
+            self.current_cycle.dead_tokens_marked = count
+        elif operation_type == 'pumpfun_updated':
+            self.current_cycle.pumpfun_updated = count
+        else:
+            # For unknown operation types, log as debug
+            self.logger.debug(f"Unknown operation type: {operation_type} = {count}")
+
+    def _log_api_breakdown(self):
+        """Log detailed API breakdown for the cycle"""
+        try:
+            cycle_summary = self.get_cycle_api_summary()
+            
+            # Log detailed API breakdown
+            total_calls = sum(cycle_summary['calls_by_client'].values())
+            if total_calls > 0:
+                self.logger.info("🌐 API CALLS BREAKDOWN:")
+                self.logger.info(f"  📡 Total API calls: {total_calls}")
+                
+                # By client
+                for client, calls in cycle_summary['calls_by_client'].items():
+                    self.logger.info(f"  🔸 {client}: {calls} calls total")
+                    
+                    # Batch vs individual breakdown
+                    if client in cycle_summary['batch_vs_individual']:
+                        batch_count = cycle_summary['batch_vs_individual'][client]['batch']
+                        individual_count = cycle_summary['batch_vs_individual'][client]['individual']
+                        self.logger.info(f"     └─ Batch calls: {batch_count}, Individual calls: {individual_count}")
+                
+                # Individual calls summary
+                if cycle_summary['total_individual_calls'] > 0:
+                    self.logger.info(f"  ⚠️ Total individual calls: {cycle_summary['total_individual_calls']}")
+                    self.logger.info(f"  ⚠️ Individual addresses: {cycle_summary['individual_addresses_count']}")
+            
+        except Exception as e:
+            self.logger.error(f"Error logging API breakdown: {e}")
+
     def end_cycle(self):
         """End the current synchronization cycle and generate reports"""
         if not self.current_cycle:
@@ -173,6 +242,10 @@ class CycleLogger:
         # Finalize cycle
         self.current_cycle.end_time = time.time()
         self.current_cycle.calculate_performance_metrics()
+        
+        # AJOUT: Sauvegarder les stats API dans le cycle
+        if hasattr(self.current_cycle, 'api_breakdown'):
+            self.current_cycle.api_breakdown = self.get_cycle_api_summary()
         
         # Update cumulative statistics
         self._update_cumulative_stats()
@@ -191,29 +264,16 @@ class CycleLogger:
         self._log_cycle_summary()
         self._log_cumulative_summary()
         
+        # AJOUT: Log API breakdown
+        self._log_api_breakdown()
+        
+        # AJOUT: Reset API tracking
+        self.current_api_calls_by_client.clear()
+        self.current_batch_vs_individual.clear()
+        self.current_individual_addresses.clear()
+        
         # Reset current cycle
         self.current_cycle = None
-    
-    def record_operation(self, operation: str, count: int = 1):
-        """Record an operation in the current cycle"""
-        if not self.current_cycle:
-            self.logger.warning(f"No active cycle to record operation: {operation}")
-            return
-        
-        if operation == 'new_tokens':
-            self.current_cycle.new_tokens += count
-        elif operation == 'updated_tokens':
-            self.current_cycle.updated_tokens += count
-        elif operation == 'historized_tokens':
-            self.current_cycle.historized_tokens += count
-        elif operation == 'creation_timestamps':
-            self.current_cycle.creation_timestamps += count
-        elif operation == 'dead_tokens_marked':
-            self.current_cycle.dead_tokens_marked += count
-        elif operation == 'pumpfun_updated':
-            self.current_cycle.pumpfun_updated += count
-        else:
-            self.logger.debug(f"Unknown operation type: {operation}")
     
     def record_api_call(self, api_name: str, count: int = 1, duration: Optional[float] = None):
         """Record API calls in the current cycle"""
@@ -351,7 +411,33 @@ class CycleLogger:
                 self.logger.info(f"  ⚠️ Warnings: {len(cycle.warnings)}")
     
 
-    
+    def record_api_endpoint_call(self, client_name: str, endpoint: str, is_batch: bool, addresses_count: int = 0):
+        """Record detailed API call info"""
+        # Track by client
+        if client_name not in self.current_api_calls_by_client:
+            self.current_api_calls_by_client[client_name] = 0
+        self.current_api_calls_by_client[client_name] += 1
+        
+        # Track batch vs individual
+        if client_name not in self.current_batch_vs_individual:
+            self.current_batch_vs_individual[client_name] = {'batch': 0, 'individual': 0}
+        
+        call_type = 'batch' if is_batch else 'individual'
+        self.current_batch_vs_individual[client_name][call_type] += 1
+        
+        # Track individual addresses
+        if not is_batch and addresses_count == 1:
+            self.current_individual_addresses.append(f"{client_name}_{endpoint}")
+
+    def get_cycle_api_summary(self) -> Dict:
+        """Get detailed API summary for cycle end"""
+        return {
+            'calls_by_client': dict(self.current_api_calls_by_client),
+            'batch_vs_individual': dict(self.current_batch_vs_individual),
+            'total_individual_calls': sum(stats.get('individual', 0) for stats in self.current_batch_vs_individual.values()),
+            'individual_addresses_count': len(self.current_individual_addresses)
+        }
+
     def _group_api_calls_detailed(self, api_calls: Dict[str, int]) -> Dict[str, Dict[str, int]]:
         """Group API calls by service with endpoint details"""
         groups = {

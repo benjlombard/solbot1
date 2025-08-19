@@ -456,7 +456,7 @@ class PumpFunClient(BaseApiClient):
         
         # Test main endpoint
         try:
-            response = self.make_request("coins/trending", max_retries=1)
+            response = self.make_request("coins/trending", max_retries=0)
             health_status['main_endpoint'] = response.success
             if response.success:
                 health_status['recommended_endpoint'] = self.base_url
