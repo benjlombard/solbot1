@@ -6,6 +6,13 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import time
 import numpy as np
+# Ajouter après les imports existants
+import sys
+import os
+
+# Ajouter le chemin pour importer la page d'analyse des tokens
+sys.path.append(os.path.dirname(__file__))
+
 
 # Configuration de la page
 st.set_page_config(
@@ -14,6 +21,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Import de la nouvelle page (à créer dans un fichier séparé)
+try:
+    from token_analysis import main as token_analysis_main
+except ImportError:
+    token_analysis_main = None
 
 # Configuration de l'API
 API_BASE_URL = "http://localhost:8010/api"  # Changé de 8000 à 8010
@@ -127,12 +140,12 @@ def main():
         st.header("⚙️ Contrôles")
         
         # Bouton de rafraîchissement
-        if st.button("🔄 Actualiser", use_container_width=True):
+        if st.button("🔄 Actualiser", use_container_width=True, key="sidebar_refresh"):
             st.cache_data.clear()
             st.rerun()
         
         # Force poll pour debug
-        if st.button("⚡ Force Poll", use_container_width=True):
+        if st.button("⚡ Force Poll Now", use_container_width=True, key="system_force_poll"):
             try:
                 response = requests.post(f"{API_BASE_URL}/force-poll", timeout=10)
                 if response.status_code == 200:
@@ -330,7 +343,7 @@ def main():
                 st.plotly_chart(fig_credits, use_container_width=True)
     
     # Onglets pour organiser le contenu
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Vue d'ensemble", "🏆 Top Performers", "🆕 Nouveaux Tokens", "🎯 Signaux Trading", "🔧 Système"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Vue d'ensemble", "🏆 Top Performers", "🆕 Nouveaux Tokens", "🎯 Signaux Trading", "🔍 Analyse Tokens", "🔧 Système"])
     
     with tab1:
         st.header("📊 Vue d'ensemble du système")
@@ -574,6 +587,40 @@ def main():
                         st.link_button("👤 Wallet", f"https://solscan.io/account/{opp['early_adopter']}")
     
     with tab5:
+        st.header("🔍 Analyse Avancée des Tokens")
+        
+        if token_analysis_main:
+            # Afficher la page d'analyse des tokens
+            try:
+                token_analysis_main()
+            except Exception as e:
+                st.error(f"Erreur lors du chargement de l'analyse des tokens: {e}")
+                st.info("Veuillez créer le fichier 'token_analysis.py' avec la fonction main()")
+        else:
+            st.warning("Module d'analyse des tokens non disponible")
+            st.info("Créez le fichier 'token_analysis.py' dans le même dossier avec le code de la page d'analyse")
+            
+            # Interface de base en attendant
+            st.subheader("🚧 Fonctionnalité en développement")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Tokens à analyser", "En attente")
+            with col2:
+                st.metric("Score moyen", "N/A")
+            with col3:
+                st.metric("Recommandations", "0")
+            
+            st.info("""
+            Cette page contiendra :
+            - 📊 Analyse complète des tokens avec scoring
+            - 🎯 Matrice risque vs opportunité
+            - 🔍 Filtres avancés (liquidité, holders, etc.)
+            - 📈 Données bonding curve en temps réel
+            - ⚡ Recommandations d'achat automatiques
+            """)
+
+    with tab6:
         st.header("🔧 Système & Monitoring")
         
         # Statistiques détaillées du polling
@@ -639,7 +686,7 @@ def main():
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("🔄 Force Update Scores", use_container_width=True):
+            if st.button("🔄 Force Update Scores", use_container_width=True, key="system_update_scores"):
                 try:
                     response = requests.post(f"{API_BASE_URL}/update-scores")
                     if response.status_code == 200:
@@ -665,7 +712,7 @@ def main():
                     st.error(f"❌ Erreur: {e}")
         
         with col3:
-            if st.button("🗑️ Clear Cache", use_container_width=True):
+            if st.button("🗑️ Clear Cache", use_container_width=True, key="system_clear_cache"):
                 st.cache_data.clear()
                 st.success("✅ Cache vidé")
     

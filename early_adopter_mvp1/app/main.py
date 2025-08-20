@@ -13,7 +13,7 @@ from early_adopter_scorer import scorer
 from database import db
 from config import settings
 
-# Configuration du logging
+# Configuration du logging AVANT d'importer pump_fun_client
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -24,6 +24,16 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+# MAINTENANT importer et initialiser le client Pump.fun
+try:
+    from pump_fun_client import PumpFunClient
+    pump_client = PumpFunClient(logger=logger)
+    logger.info("Pump.fun client initialized successfully")
+except ImportError as e:
+    logger.error(f"Failed to import PumpFunClient: {e}")
+    pump_client = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -519,6 +529,283 @@ async def debug_database_content():
         logger.error(f"Error in debug endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/tokens-analysis")
+async def get_tokens_analysis():
+    """Récupère les données d'analyse des tokens enrichies"""
+    try:
+        # Récupérer les tokens récents avec les achats early adopters
+        recent_tokens = db.get_recent_tokens(hours_back=48, limit=200)
+        
+        enriched_tokens = []
+        
+        for token in recent_tokens:
+            try:
+                token_address = token['address']
+                
+                # Calculer l'âge en heures
+                created_at = datetime.fromisoformat(token['created_at']) if isinstance(token['created_at'], str) else token['created_at']
+                age_hours = (datetime.now() - created_at).total_seconds() / 3600
+                
+                # Récupérer les achats détaillés pour ce token
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT ep.*, ea.confidence_score, ea.success_rate, ea.total_picks
+                        FROM early_purchases ep
+                        LEFT JOIN early_adopters ea ON ep.buyer_address = ea.wallet_address
+                        WHERE ep.token_address = ?
+                        ORDER BY ep.timestamp DESC
+                    """, (token_address,))
+                    
+                    purchases = cursor.fetchall()
+                
+                # Enrichir les données early adopters avec leurs profils
+                ea_buyers_enriched = []
+                for purchase in purchases:
+                    if purchase['confidence_score']:  # Si c'est un EA qualifié
+                        ea_buyers_enriched.append({
+                            'address': purchase['buyer_address'],
+                            'confidence_score': purchase['confidence_score'],
+                            'success_rate': purchase['success_rate'],
+                            'total_picks': purchase['total_picks'],
+                            'sol_amount': purchase['sol_amount'],
+                            'minutes_after_creation': purchase['minutes_after_creation']
+                        })
+                
+                # Calculer les métriques réelles basées sur les données
+                total_volume_sol = sum([p['sol_amount'] for p in purchases])
+                avg_entry_timing = sum([p['minutes_after_creation'] for p in purchases]) / len(purchases) if purchases else 0
+                
+                # Calculer la concentration des achats
+                buyer_amounts = {}
+                for purchase in purchases:
+                    buyer = purchase['buyer_address']
+                    buyer_amounts[buyer] = buyer_amounts.get(buyer, 0) + purchase['sol_amount']
+                
+                if buyer_amounts:
+                    sorted_amounts = sorted(buyer_amounts.values(), reverse=True)
+                    top_5_amount = sum(sorted_amounts[:5])
+                    total_amount = sum(sorted_amounts)
+                    top_5_percentage = (top_5_amount / total_amount * 100) if total_amount > 0 else 0
+                else:
+                    top_5_percentage = 0
+                
+                # Récupérer les données Pump.fun pour ce token (version synchrone)
+                pump_token_data = None
+                if pump_client:
+                    try:
+                        pump_token_data = pump_client.get_token_data(token_address)
+                    except Exception as e:
+                        logger.debug(f"Failed to get Pump.fun data for {token_address}: {e}")
+                
+                # Données de base
+                token_enriched = {
+                    'address': token_address,
+                    'symbol': token.get('symbol', 'UNK'),
+                    'name': token.get('name', 'Unknown'),
+                    'creator': token['creator'],
+                    'created_at': token['created_at'],
+                    'age_hours': round(age_hours, 2),
+                    
+                    # Données Early Adopter réelles
+                    'early_adopter_buyers': ea_buyers_enriched,
+                    'early_purchases_count': token.get('early_purchases_count', 0),
+                    
+                    # Données calculées à partir des achats réels
+                    'volume_24h_sol': total_volume_sol,
+                    'unique_buyers': len(set([p['buyer_address'] for p in purchases])),
+                    'avg_entry_timing_minutes': round(avg_entry_timing, 1),
+                    'top_5_holders_percentage': round(top_5_percentage, 1),
+                    
+                    # Calculs de tendances (24h vs total)
+                    'recent_volume_24h': sum([p['sol_amount'] for p in purchases 
+                                            if (datetime.now() - datetime.fromisoformat(p['timestamp'])).total_seconds() < 86400]),
+                    
+                    # Métriques dérivées des données réelles
+                    'ea_avg_confidence': sum([ea['confidence_score'] for ea in ea_buyers_enriched]) / len(ea_buyers_enriched) if ea_buyers_enriched else 0,
+                    'ea_recent_activity': len([ea for ea in ea_buyers_enriched if ea['total_picks'] > 0]),
+                    'fastest_entry_minutes': min([p['minutes_after_creation'] for p in purchases]) if purchases else None,
+                    'largest_purchase_sol': max([p['sol_amount'] for p in purchases]) if purchases else 0,
+                }
+                
+                # Ajouter les données Pump.fun si disponibles
+                if pump_token_data:
+                    token_enriched.update({
+                        # Données financières réelles de Pump.fun
+                        'price_usd': pump_token_data.price_usd,
+                        'market_cap_usd': pump_token_data.market_cap,
+                        'bonding_curve_progress': pump_token_data.bonding_curve_progress,
+                        'holders_count': pump_token_data.holder_count,
+                        'volume_24h_pump': pump_token_data.volume_24h,
+                        'is_pump_fun': pump_token_data.is_pump_fun,
+                        'is_verified': pump_token_data.is_verified,
+                        'logo_uri': pump_token_data.logo_uri,
+                        'symbol': pump_token_data.symbol or token_enriched['symbol'],
+                        'name': pump_token_data.name or token_enriched['name'],
+                    })
+                else:
+                    # Valeurs par défaut si pas de données Pump.fun
+                    token_enriched.update({
+                        'price_usd': None,
+                        'market_cap_usd': None,
+                        'bonding_curve_progress': None,
+                        'holders_count': None,
+                        'volume_24h_pump': None,
+                        'is_pump_fun': False,
+                        'is_verified': False,
+                        'logo_uri': None,
+                    })
+                
+                enriched_tokens.append(token_enriched)
+                
+            except Exception as e:
+                logger.error(f"Error enriching token {token.get('address', 'unknown')}: {e}")
+                continue
+        
+        logger.info(f"Enriched {len(enriched_tokens)} tokens")
+        return enriched_tokens
+        
+    except Exception as e:
+        logger.error(f"Error in get_tokens_analysis: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving token analysis data: {str(e)}")
+
+@app.get("/api/token/{token_address}/details")
+async def get_token_details(token_address: str):
+    """Récupère les détails complets d'un token avec données Pump.fun"""
+    try:
+        # Récupérer le token de base
+        token = db.get_token_by_address(token_address)
+        
+        if not token:
+            raise HTTPException(status_code=404, detail="Token not found")
+        
+        # Récupérer les données Pump.fun
+        pump_token_data = pump_client.get_token_data(token_address)
+        bonding_status = pump_client.get_token_bonding_status(token_address)
+        
+        # Récupérer tous les achats pour ce token avec profils EA
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    ep.*,
+                    ea.confidence_score,
+                    ea.success_rate,
+                    ea.total_picks,
+                    ea.successful_picks,
+                    ea.avg_roi
+                FROM early_purchases ep
+                LEFT JOIN early_adopters ea ON ep.buyer_address = ea.wallet_address
+                WHERE ep.token_address = ?
+                ORDER BY ep.timestamp ASC
+            """, (token_address,))
+            
+            purchases = []
+            for row in cursor.fetchall():
+                purchases.append({
+                    'signature': row['signature'],
+                    'buyer_address': row['buyer_address'],
+                    'sol_amount': row['sol_amount'],
+                    'token_amount': row['token_amount'],
+                    'timestamp': row['timestamp'],
+                    'minutes_after_creation': row['minutes_after_creation'],
+                    'market_cap_at_purchase': row['market_cap_at_purchase'],
+                    'ea_profile': {
+                        'confidence_score': row['confidence_score'],
+                        'success_rate': row['success_rate'],
+                        'total_picks': row['total_picks'],
+                        'successful_picks': row['successful_picks'],
+                        'avg_roi': row['avg_roi']
+                    } if row['confidence_score'] else None
+                })
+        
+        # Calculer des métriques réelles
+        age_hours = (datetime.now() - token.created_at).total_seconds() / 3600
+        
+        # Analyse temporelle des achats
+        purchase_timeline = []
+        cumulative_volume = 0
+        for purchase in purchases:
+            cumulative_volume += purchase['sol_amount']
+            purchase_timeline.append({
+                'timestamp': purchase['timestamp'],
+                'cumulative_volume': cumulative_volume,
+                'sol_amount': purchase['sol_amount'],
+                'is_early_adopter': purchase['ea_profile'] is not None
+            })
+        
+        # Données de base
+        detailed_data = {
+            'address': token.address,
+            'symbol': token.symbol,
+            'name': token.name,
+            'creator': token.creator,
+            'created_at': token.created_at.isoformat(),
+            'age_hours': age_hours,
+            'market_cap_discovery': token.market_cap_discovery,
+            
+            # Données d'achat réelles
+            'purchases': purchases,
+            'purchase_timeline': purchase_timeline,
+            'total_purchases': len(purchases),
+            'ea_purchases': len([p for p in purchases if p['ea_profile']]),
+            'total_volume_sol': sum([p['sol_amount'] for p in purchases]),
+            'unique_buyers': len(set([p['buyer_address'] for p in purchases])),
+            
+            # Métriques temporelles
+            'avg_purchase_amount': sum([p['sol_amount'] for p in purchases]) / len(purchases) if purchases else 0,
+            'avg_entry_timing': sum([p['minutes_after_creation'] for p in purchases]) / len(purchases) if purchases else 0,
+            'fastest_entry': min([p['minutes_after_creation'] for p in purchases]) if purchases else None,
+            'latest_entry': max([p['minutes_after_creation'] for p in purchases]) if purchases else None,
+            
+            # Analyse Early Adopters
+            'top_ea_buyers': [p for p in purchases if p['ea_profile'] and p['ea_profile']['confidence_score'] > 0.8],
+            'ea_avg_confidence': sum([p['ea_profile']['confidence_score'] for p in purchases if p['ea_profile']]) / len([p for p in purchases if p['ea_profile']]) if any(p['ea_profile'] for p in purchases) else 0,
+        }
+        
+        # Ajouter les données Pump.fun si disponibles
+        if pump_token_data:
+            detailed_data.update({
+                'pump_fun_data': {
+                    'price_usd': pump_token_data.price_usd,
+                    'market_cap': pump_token_data.market_cap,
+                    'bonding_curve_progress': pump_token_data.bonding_curve_progress,
+                    'holder_count': pump_token_data.holder_count,
+                    'volume_24h': pump_token_data.volume_24h,
+                    'is_verified': pump_token_data.is_verified,
+                    'logo_uri': pump_token_data.logo_uri,
+                    'symbol_pump': pump_token_data.symbol,
+                    'name_pump': pump_token_data.name,
+                }
+            })
+        
+        # Ajouter les données de bonding curve si disponibles
+        if bonding_status:
+            detailed_data.update({
+                'bonding_curve_data': bonding_status
+            })
+        
+        return detailed_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting token details for {token_address}: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving token details")
+
+# Endpoint pour vérifier la santé de l'API Pump.fun
+@app.get("/api/pump-fun/health")
+async def get_pump_fun_health():
+    """Vérifie la santé de l'API Pump.fun"""
+    try:
+        health_status = pump_client.get_pump_fun_health_status()
+        return health_status
+    except Exception as e:
+        logger.error(f"Error checking Pump.fun health: {e}")
+        return {"overall_healthy": False, "error": str(e)}
+
 @app.get("/api/dashboard-data")
 async def get_dashboard_data():
     """Données complètes pour le dashboard Streamlit"""
@@ -555,6 +842,25 @@ async def global_exception_handler(request: Request, exc: Exception):
             "timestamp": datetime.now().isoformat()
         }
     )
+
+
+# Fonctions utilitaires
+def _calculate_volume_trend(local_volume: float, pump_volume: float) -> float:
+    """Calcule la tendance de volume en comparant les données locales et Pump.fun"""
+    if pump_volume and pump_volume > 0:
+        return ((local_volume - pump_volume) / pump_volume) * 100
+    return 0.0
+
+def _estimate_holder_growth(current_holders: int, age_hours: float) -> float:
+    """Estime la croissance des holders basée sur l'âge du token"""
+    if age_hours < 24:
+        # Pour les tokens de moins de 24h, estimer la croissance basée sur le taux actuel
+        holders_per_hour = current_holders / max(age_hours, 1)
+        return (holders_per_hour / current_holders) * 100 if current_holders > 0 else 0
+    else:
+        # Pour les tokens plus anciens, difficile d'estimer sans données historiques
+        return None
+
 
 if __name__ == "__main__":
     logger.info("Starting PumpFun Tracker server with intelligent polling...")
