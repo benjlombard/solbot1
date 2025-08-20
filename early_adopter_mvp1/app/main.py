@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -326,7 +326,7 @@ async def get_recent_purchases_detailed(hours_back: int = 24, limit: int = 100):
     except Exception as e:
         logger.error(f"Error getting recent purchases detailed: {e}")
         raise HTTPException(status_code=500, detail=f"Error retrieving recent purchases detailed: {str(e)}")
-        
+
 @app.post("/api/update-scores")
 async def trigger_score_update():
     """Déclenche manuellement une mise à jour des scores"""
@@ -370,6 +370,154 @@ async def get_polling_stats():
     except Exception as e:
         logger.error(f"Error getting polling stats: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving polling stats")
+
+
+@app.get("/api/transactions-detailed")
+async def get_transactions_detailed(
+    hours_back: int = 24, 
+    limit: int = 100,
+    min_sol_amount: float = 0.0,
+    max_minutes_after: int = 1440,  # 24h par défaut
+    early_adopters_only: bool = False
+):
+    """Récupère les transactions détaillées directement depuis la base de données"""
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Calculer la date de début
+            since_date = (datetime.now() - timedelta(hours=hours_back)).isoformat()
+            
+            # Requête SQL pour récupérer toutes les données nécessaires
+            base_query = """
+                SELECT 
+                    ep.signature,
+                    ep.token_address,
+                    ep.buyer_address,
+                    ep.sol_amount,
+                    ep.token_amount,
+                    ep.timestamp,
+                    ep.minutes_after_creation,
+                    ep.market_cap_at_purchase,
+                    pt.name as token_name,
+                    pt.symbol as token_symbol,
+                    pt.creator as token_creator,
+                    pt.created_at as token_created_at,
+                    ea.confidence_score,
+                    ea.success_rate,
+                    ea.total_picks,
+                    ea.successful_picks,
+                    ea.avg_roi,
+                    ea.avg_entry_timing
+                FROM early_purchases ep
+                JOIN pump_tokens pt ON ep.token_address = pt.address
+                LEFT JOIN early_adopters ea ON ep.buyer_address = ea.wallet_address
+                WHERE ep.timestamp >= ?
+                AND ep.sol_amount >= ?
+                AND ep.minutes_after_creation <= ?
+            """
+            
+            params = [since_date, min_sol_amount, max_minutes_after]
+            
+            # Ajouter filtre early adopters si nécessaire
+            if early_adopters_only:
+                base_query += " AND ea.wallet_address IS NOT NULL"
+            
+            # Ordonner et limiter
+            base_query += " ORDER BY ep.timestamp DESC LIMIT ?"
+            params.append(limit)
+            
+            cursor.execute(base_query, params)
+            rows = cursor.fetchall()
+            
+            # Convertir en liste de dictionnaires
+            transactions = []
+            for row in rows:
+                transaction = {
+                    'signature': row['signature'],
+                    'token_address': row['token_address'],
+                    'buyer_address': row['buyer_address'],
+                    'sol_amount': row['sol_amount'],
+                    'token_amount': row['token_amount'],
+                    'timestamp': row['timestamp'],
+                    'minutes_after_creation': row['minutes_after_creation'],
+                    'market_cap_at_purchase': row['market_cap_at_purchase'],
+                    'token_name': row['token_name'],
+                    'token_symbol': row['token_symbol'],
+                    'token_creator': row['token_creator'],
+                    'token_created_at': row['token_created_at'],
+                    'early_adopter_profile': None
+                }
+                
+                # Ajouter le profil early adopter s'il existe
+                if row['confidence_score'] is not None:
+                    transaction['early_adopter_profile'] = {
+                        'confidence_score': row['confidence_score'],
+                        'success_rate': row['success_rate'],
+                        'total_picks': row['total_picks'],
+                        'successful_picks': row['successful_picks'],
+                        'avg_roi': row['avg_roi'],
+                        'avg_entry_timing': row['avg_entry_timing']
+                    }
+                
+                transactions.append(transaction)
+            
+            return {
+                "transactions": transactions,
+                "count": len(transactions),
+                "filters": {
+                    "hours_back": hours_back,
+                    "limit": limit,
+                    "min_sol_amount": min_sol_amount,
+                    "max_minutes_after": max_minutes_after,
+                    "early_adopters_only": early_adopters_only
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting detailed transactions: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving detailed transactions: {str(e)}")
+
+
+@app.get("/api/debug/database-content")
+async def debug_database_content():
+    """Endpoint de debug pour vérifier le contenu de la base de données"""
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Compter les entrées dans chaque table
+            cursor.execute("SELECT COUNT(*) FROM pump_tokens")
+            tokens_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM early_purchases")
+            purchases_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM early_adopters")
+            adopters_count = cursor.fetchone()[0]
+            
+            # Récupérer quelques exemples
+            cursor.execute("SELECT * FROM early_purchases ORDER BY timestamp DESC LIMIT 5")
+            sample_purchases = [dict(row) for row in cursor.fetchall()]
+            
+            cursor.execute("SELECT * FROM pump_tokens ORDER BY created_at DESC LIMIT 5")
+            sample_tokens = [dict(row) for row in cursor.fetchall()]
+            
+            return {
+                "counts": {
+                    "pump_tokens": tokens_count,
+                    "early_purchases": purchases_count,
+                    "early_adopters": adopters_count
+                },
+                "samples": {
+                    "recent_purchases": sample_purchases,
+                    "recent_tokens": sample_tokens
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/dashboard-data")
 async def get_dashboard_data():
