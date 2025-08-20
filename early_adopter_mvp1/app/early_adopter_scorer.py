@@ -121,25 +121,26 @@ class EarlyAdopterScorer:
     
     def _get_wallet_purchases_detailed(self, wallet_address: str) -> List[Dict[str, Any]]:
         """
-        Récupère les achats détaillés d'un wallet avec les résultats
+        Récupère les achats détaillés d'un wallet avec les résultats - FIXED SQL QUERY
         """
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
                 
+                # CORRECTION: Utiliser un alias différent pour éviter le conflit avec le mot-clé réservé "to"
                 cursor.execute("""
                     SELECT 
                         ep.*,
                         pt.name,
                         pt.symbol,
                         pt.created_at as token_created_at,
-                        to.roi_24h,
-                        to.roi_7d,
-                        to.outcome_type,
-                        to.peak_market_cap
+                        outcomes.roi_24h,
+                        outcomes.roi_7d,
+                        outcomes.outcome_type,
+                        outcomes.peak_market_cap
                     FROM early_purchases ep
                     JOIN pump_tokens pt ON ep.token_address = pt.address
-                    LEFT JOIN token_outcomes to ON ep.token_address = to.token_address
+                    LEFT JOIN token_outcomes outcomes ON ep.token_address = outcomes.token_address
                     WHERE ep.buyer_address = ?
                     AND ep.minutes_after_creation <= ?
                     ORDER BY ep.timestamp DESC
