@@ -3,12 +3,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, Request, HTTPException, Header
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from webhook_handler import webhook_handler
+from polling_manager import polling_manager
 from early_adopter_scorer import scorer
 from database import db
 from config import settings
@@ -28,10 +28,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestionnaire de cycle de vie de l'application"""
-    logger.info("Starting PumpFun Tracker...")
+    logger.info("Starting PumpFun Tracker with intelligent polling...")
     
-    # Démarrage des services
-    webhook_handler.start_background_processing()
+    # Démarrage du polling intelligent
+    polling_manager.start_polling()
     
     # Mise à jour initiale des scores
     try:
@@ -46,14 +46,14 @@ async def lifespan(app: FastAPI):
     
     # Arrêt propre
     logger.info("Shutting down PumpFun Tracker...")
-    await webhook_handler.shutdown()
+    await polling_manager.shutdown()
     logger.info("PumpFun Tracker stopped")
 
 # Création de l'application FastAPI
 app = FastAPI(
     title="PumpFun Early Adopters Tracker",
-    description="Système de tracking des early adopters pump.fun avec Helius",
-    version="1.0.0",
+    description="Système de tracking des early adopters pump.fun avec polling intelligent",
+    version="1.0.1",
     lifespan=lifespan
 )
 
@@ -70,38 +70,12 @@ app.add_middleware(
 async def root():
     """Page d'accueil de l'API"""
     return {
-        "message": "PumpFun Early Adopters Tracker API",
-        "version": "1.0.0",
+        "message": "PumpFun Early Adopters Tracker API - Polling Version",
+        "version": "1.0.1",
         "status": "running",
+        "polling_mode": True,
         "timestamp": datetime.now().isoformat()
     }
-
-@app.post("/helius/webhook")
-async def helius_webhook(
-    request: Request,
-    x_helius_signature: str = Header(None, alias="x-helius-signature")
-):
-    """
-    Endpoint pour recevoir les webhooks Helius
-    """
-    try:
-        # Lire le payload brut
-        payload = await request.body()
-        
-        if not payload:
-            raise HTTPException(status_code=400, detail="Empty payload")
-        
-        # Traiter le webhook
-        result = await webhook_handler.handle_webhook(payload, x_helius_signature)
-        
-        logger.info(f"Webhook processed: {result}")
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in webhook endpoint: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/health")
 async def health_check():
@@ -110,8 +84,8 @@ async def health_check():
         # Vérifier la base de données
         stats = db.get_dashboard_stats()
         
-        # Vérifier le webhook handler
-        webhook_health = await webhook_handler.health_check()
+        # Vérifier le polling manager
+        polling_health = await polling_manager.health_check()
         
         health = {
             "status": "healthy",
@@ -121,17 +95,17 @@ async def health_check():
                 "total_tokens": stats.get('total_tokens_tracked', 0),
                 "total_early_adopters": stats.get('total_early_adopters', 0)
             },
-            "webhook_handler": webhook_health,
+            "polling_manager": polling_health,
             "services": {
                 "database": "ok",
-                "webhook_processing": "ok" if webhook_health['status'] == 'healthy' else "warning"
+                "polling": "ok" if polling_health['status'] == 'healthy' else "warning"
             }
         }
         
         # Déterminer le statut global
-        if webhook_health['status'] == 'warning':
+        if polling_health['status'] == 'warning':
             health['status'] = 'warning'
-        elif not stats or webhook_health['status'] == 'degraded':
+        elif not stats or polling_health['status'] == 'degraded':
             health['status'] = 'degraded'
         
         return health
@@ -151,18 +125,13 @@ async def get_stats():
         # Stats base de données
         db_stats = db.get_dashboard_stats()
         
-        # Stats webhook handler
-        webhook_stats = webhook_handler.get_stats()
-        
-        # Stats processing
-        processing_stats = {
-            "last_updated": datetime.now().isoformat()
-        }
+        # Stats polling manager
+        polling_stats = polling_manager.get_stats()
         
         return {
             "database": db_stats,
-            "webhook_handler": webhook_stats,
-            "processing": processing_stats
+            "polling_manager": polling_stats,
+            "last_updated": datetime.now().isoformat()
         }
         
     except Exception as e:
@@ -292,6 +261,34 @@ async def trigger_score_update():
         logger.error(f"Error triggering score update: {e}")
         raise HTTPException(status_code=500, detail="Error triggering score update")
 
+@app.post("/api/force-poll")
+async def force_poll():
+    """Force un polling immédiat (pour debug/test)"""
+    try:
+        result = await polling_manager.force_poll_now()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in force poll: {e}")
+        raise HTTPException(status_code=500, detail="Error forcing poll")
+
+@app.get("/api/polling-stats")
+async def get_polling_stats():
+    """Statistiques détaillées du polling"""
+    try:
+        stats = polling_manager.get_stats()
+        health = await polling_manager.health_check()
+        
+        return {
+            "polling_stats": stats,
+            "health_check": health,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting polling stats: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving polling stats")
+
 @app.get("/api/dashboard-data")
 async def get_dashboard_data():
     """Données complètes pour le dashboard Streamlit"""
@@ -301,14 +298,14 @@ async def get_dashboard_data():
         top_performers = scorer.get_top_performers(limit=10)
         recent_tokens = db.get_recent_tokens(hours_back=24, limit=20)
         opportunities = await scorer.identify_copy_trading_opportunities(min_confidence=0.8)
-        webhook_stats = webhook_handler.get_stats()
+        polling_stats = polling_manager.get_stats()
         
         return {
             "stats": db_stats,
             "top_performers": top_performers,
             "recent_tokens": recent_tokens,
             "copy_trading_opportunities": opportunities,
-            "system_health": webhook_stats,
+            "system_health": polling_stats,
             "last_updated": datetime.now().isoformat()
         }
         
@@ -330,7 +327,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 if __name__ == "__main__":
-    logger.info("Starting PumpFun Tracker server...")
+    logger.info("Starting PumpFun Tracker server with intelligent polling...")
     
     uvicorn.run(
         "main:app",

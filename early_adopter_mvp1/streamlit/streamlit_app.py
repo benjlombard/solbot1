@@ -9,14 +9,14 @@ import numpy as np
 
 # Configuration de la page
 st.set_page_config(
-    page_title="PumpFun Early Adopters Tracker",
+    page_title="PumpFun Early Adopters Tracker - Polling",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # Configuration de l'API
-API_BASE_URL = "http://localhost:8000/api"
+API_BASE_URL = "http://localhost:8010/api"  # Changé de 8000 à 8010
 
 # Cache des données pour éviter les appels répétés
 @st.cache_data(ttl=30)  # Cache pendant 30 secondes
@@ -44,6 +44,18 @@ def fetch_health_status():
             return {"status": "error", "error": f"HTTP {response.status_code}"}
     except:
         return {"status": "error", "error": "Connexion impossible"}
+
+@st.cache_data(ttl=30)
+def fetch_polling_stats():
+    """Récupère les statistiques détaillées du polling"""
+    try:
+        response = requests.get(f"{API_BASE_URL}/polling-stats", timeout=5)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except:
+        return None
 
 def format_wallet_address(address):
     """Formate une adresse de wallet pour l'affichage"""
@@ -85,12 +97,30 @@ def get_confidence_color(score):
     else:
         return "🔴"
 
+def get_status_color(status):
+    """Retourne la couleur selon le statut"""
+    if status == "healthy":
+        return "🟢"
+    elif status == "warning":
+        return "🟡"
+    else:
+        return "🔴"
+
+def format_duration(seconds):
+    """Formate une durée en secondes"""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    elif seconds < 3600:
+        return f"{seconds/60:.0f}m"
+    else:
+        return f"{seconds/3600:.1f}h"
+
 def main():
     """Interface principale du dashboard"""
     
     # Titre principal
     st.title("🚀 PumpFun Early Adopters Tracker")
-    st.markdown("*Système de tracking des early adopters pump.fun en temps réel*")
+    st.markdown("*Système de tracking avec polling intelligent - Version optimisée*")
     
     # Sidebar pour les contrôles
     with st.sidebar:
@@ -101,33 +131,78 @@ def main():
             st.cache_data.clear()
             st.rerun()
         
+        # Force poll pour debug
+        if st.button("⚡ Force Poll", use_container_width=True):
+            try:
+                response = requests.post(f"{API_BASE_URL}/force-poll", timeout=10)
+                if response.status_code == 200:
+                    result = response.json()
+                    if result['status'] == 'success':
+                        st.success("✅ Polling forcé avec succès")
+                    else:
+                        st.error(f"❌ Erreur: {result.get('message', 'Unknown error')}")
+                else:
+                    st.error(f"❌ Erreur HTTP: {response.status_code}")
+            except Exception as e:
+                st.error(f"❌ Erreur: {e}")
+        
+        st.divider()
+        
         # Statut du système
         st.header("📊 Statut Système")
         health = fetch_health_status()
         
-        if health['status'] == 'healthy':
-            st.success("✅ Système opérationnel")
-        elif health['status'] == 'warning':
-            st.warning("⚠️ Système en alerte")
-        else:
-            st.error("❌ Système en erreur")
+        status_text = f"{get_status_color(health['status'])} {health['status'].upper()}"
+        st.markdown(f"**Statut:** {status_text}")
         
-        # Affichage des métriques de santé
+        # Métriques de base
         if 'database' in health:
-            st.metric("Tokens trackés", health['database'].get('total_tokens', 0))
-            st.metric("Early Adopters", health['database'].get('total_early_adopters', 0))
+            db_info = health['database']
+            st.metric("Tokens trackés", db_info.get('total_tokens', 0))
+            st.metric("Early Adopters", db_info.get('total_early_adopters', 0))
         
-        if 'webhook_handler' in health:
-            webhook_stats = health['webhook_handler']
-            st.metric("Crédits utilisés", f"{webhook_stats.get('credits_used_today', 0)}/{webhook_stats.get('max_daily_credits', 2500)}")
+        st.divider()
+        
+        # Statistiques de polling
+        st.header("🔄 Polling Status")
+        polling_stats = fetch_polling_stats()
+        
+        if polling_stats:
+            poll_data = polling_stats.get('polling_stats', {})
+            health_data = polling_stats.get('health_check', {})
             
-            credit_pct = webhook_stats.get('credit_usage_percent', 0)
+            # Statut du polling
+            polling_status = "🟢 Actif" if poll_data.get('is_running') else "🔴 Arrêté"
+            st.markdown(f"**Polling:** {polling_status}")
+            
+            # Intervalle actuel
+            interval = poll_data.get('current_polling_interval', 0)
+            st.metric("Intervalle", f"{interval}s")
+            
+            # Activité récente
+            avg_activity = poll_data.get('recent_activity_avg', 0)
+            st.metric("Activité moy.", f"{avg_activity:.1f} tx/poll")
+            
+            # Utilisation des crédits
+            credits_used = poll_data.get('credits_used_today', 0)
+            max_credits = poll_data.get('max_daily_credits', 2000)
+            credit_pct = (credits_used / max_credits) * 100 if max_credits > 0 else 0
+            
+            st.metric("Crédits", f"{credits_used}/{max_credits}")
+            
+            # Barre de progression pour les crédits
+            progress_color = "normal"
             if credit_pct > 90:
-                st.error(f"⚠️ Utilisation crédits: {credit_pct:.1f}%")
+                progress_color = "red"
             elif credit_pct > 70:
-                st.warning(f"⚠️ Utilisation crédits: {credit_pct:.1f}%")
-            else:
-                st.info(f"📊 Utilisation crédits: {credit_pct:.1f}%")
+                progress_color = "orange"
+            
+            st.progress(credit_pct / 100)
+            
+            if credit_pct > 90:
+                st.error(f"⚠️ Crédits critiques: {credit_pct:.1f}%")
+            elif credit_pct > 70:
+                st.warning(f"⚠️ Crédits élevés: {credit_pct:.1f}%")
         
         # Auto-refresh
         auto_refresh = st.checkbox("🔄 Auto-refresh (30s)")
@@ -178,8 +253,84 @@ def main():
     
     st.divider()
     
+    # Section de monitoring du polling
+    polling_stats = fetch_polling_stats()
+    if polling_stats:
+        with st.expander("📊 Monitoring Polling Détaillé", expanded=False):
+            col1, col2, col3 = st.columns(3)
+            
+            poll_data = polling_stats.get('polling_stats', {})
+            health_data = polling_stats.get('health_check', {})
+            
+            with col1:
+                st.subheader("🔄 Statistiques Polling")
+                daily_stats = poll_data.get('daily_stats', {})
+                
+                st.write(f"**Transactions traitées:** {daily_stats.get('transactions_processed', 0)}")
+                st.write(f"**Cycles de polling:** {daily_stats.get('polling_cycles', 0)}")
+                st.write(f"**Cache signatures:** {poll_data.get('cache_size', 0)}")
+                
+                # Calculs de performance
+                tx_per_min = poll_data.get('transactions_per_minute', 0)
+                st.write(f"**TX/min:** {tx_per_min:.1f}")
+            
+            with col2:
+                st.subheader("⚡ Performance")
+                
+                # Intervalle adaptatif
+                current_interval = poll_data.get('current_polling_interval', 120)
+                st.write(f"**Intervalle actuel:** {current_interval}s")
+                
+                # Activité récente
+                recent_activity = poll_data.get('recent_activity_avg', 0)
+                st.write(f"**Activité récente:** {recent_activity:.1f} tx/poll")
+                
+                # Dernière activité
+                last_activity = poll_data.get('last_activity_time', '')
+                if last_activity:
+                    last_time = datetime.fromisoformat(last_activity.replace('Z', '+00:00'))
+                    time_diff = datetime.now() - last_time.replace(tzinfo=None)
+                    st.write(f"**Dernière activité:** {format_duration(time_diff.total_seconds())} ago")
+            
+            with col3:
+                st.subheader("🩺 Santé Système")
+                
+                issues = health_data.get('issues', [])
+                if not issues:
+                    st.success("✅ Aucun problème détecté")
+                else:
+                    for issue in issues:
+                        st.warning(f"⚠️ {issue}")
+                
+                # Graphique d'utilisation des crédits
+                credit_pct = health_data.get('credit_usage_percent', 0)
+                
+                fig_credits = go.Figure(go.Indicator(
+                    mode = "gauge+number+delta",
+                    value = credit_pct,
+                    domain = {'x': [0, 1], 'y': [0, 1]},
+                    title = {'text': "Utilisation Crédits (%)"},
+                    delta = {'reference': 80},
+                    gauge = {
+                        'axis': {'range': [None, 100]},
+                        'bar': {'color': "darkblue"},
+                        'steps': [
+                            {'range': [0, 70], 'color': "lightgray"},
+                            {'range': [70, 90], 'color': "yellow"},
+                            {'range': [90, 100], 'color': "red"}
+                        ],
+                        'threshold': {
+                            'line': {'color': "red", 'width': 4},
+                            'thickness': 0.75,
+                            'value': 90
+                        }
+                    }
+                ))
+                fig_credits.update_layout(height=200)
+                st.plotly_chart(fig_credits, use_container_width=True)
+    
     # Onglets pour organiser le contenu
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Vue d'ensemble", "🏆 Top Performers", "🆕 Nouveaux Tokens", "🎯 Signaux Trading"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Vue d'ensemble", "🏆 Top Performers", "🆕 Nouveaux Tokens", "🎯 Signaux Trading", "🔧 Système"])
     
     with tab1:
         st.header("📊 Vue d'ensemble du système")
@@ -198,7 +349,9 @@ def main():
                     y=[format_wallet_address(addr) for addr in df_performers.head(10)['wallet_address']],
                     orientation='h',
                     title="🏆 Top 10 Early Adopters par Score de Confiance",
-                    labels={'confidence_score': 'Score de Confiance', 'y': 'Wallet'}
+                    labels={'confidence_score': 'Score de Confiance', 'y': 'Wallet'},
+                    color='confidence_score',
+                    color_continuous_scale='Viridis'
                 )
                 fig_confidence.update_layout(height=400)
                 st.plotly_chart(fig_confidence, use_container_width=True)
@@ -248,6 +401,8 @@ def main():
             )
             fig_timeline.update_layout(height=400)
             st.plotly_chart(fig_timeline, use_container_width=True)
+        else:
+            st.info("Aucun nouveau token détecté dans les dernières 24h")
     
     with tab2:
         st.header("🏆 Top Performers - Early Adopters")
@@ -263,11 +418,11 @@ def main():
                 performers_data.append({
                     "Wallet": format_wallet_address(performer['wallet_address']),
                     "Score": f"{get_confidence_color(performer['confidence_score'])} {performer['confidence_score']:.3f}",
-                    "Success Rate": format_percentage(performer['success_rate']),
-                    "Total Picks": performer['total_picks'],
-                    "Picks Réussis": performer['successful_picks'],
-                    "ROI Moyen": format_roi(performer['avg_roi']),
-                    "Timing Moy.": f"{performer['avg_entry_timing']:.1f}h",
+                    "Success Rate": f"{performer['success_rate']*100:.1f}%",
+                    "Total Picks": int(performer['total_picks']),
+                    "Picks Réussis": int(performer['successful_picks']),
+                    "ROI Moyen": f"{performer['avg_roi']:.1f}x" if performer['avg_roi'] else "N/A",
+                    "Timing Moy. (h)": f"{performer['avg_entry_timing']:.1f}",
                     "Niveau": performer['confidence_level'],
                     "Dernière Activité": performer['last_activity'][:10]
                 })
@@ -418,6 +573,102 @@ def main():
                     with col3:
                         st.link_button("👤 Wallet", f"https://solscan.io/account/{opp['early_adopter']}")
     
+    with tab5:
+        st.header("🔧 Système & Monitoring")
+        
+        # Statistiques détaillées du polling
+        if polling_stats:
+            poll_data = polling_stats.get('polling_stats', {})
+            health_data = polling_stats.get('health_check', {})
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("📈 Statistiques de Performance")
+                
+                daily_stats = poll_data.get('daily_stats', {})
+                
+                # Tableau des métriques avec types de données corrects
+                metrics_data = {
+                    "Métrique": [
+                        "Transactions Traitées",
+                        "Cycles de Polling",
+                        "Crédits Utilisés",
+                        "Cache Signatures",
+                        "Intervalle Actuel (sec)",
+                        "Activité Récente (tx/poll)"
+                    ],
+                    "Valeur": [
+                        int(daily_stats.get('transactions_processed', 0)),
+                        int(daily_stats.get('polling_cycles', 0)),
+                        int(poll_data.get('credits_used_today', 0)),
+                        int(poll_data.get('cache_size', 0)),
+                        int(poll_data.get('current_polling_interval', 0)),
+                        round(float(poll_data.get('recent_activity_avg', 0)), 1)
+                    ]
+                }
+                
+                df_metrics = pd.DataFrame(metrics_data)
+                st.dataframe(df_metrics, hide_index=True, use_container_width=True)
+            
+            with col2:
+                st.subheader("🩺 État de Santé")
+                
+                # Status général
+                overall_status = health_data.get('status', 'unknown')
+                st.markdown(f"**Statut Global:** {get_status_color(overall_status)} {overall_status.upper()}")
+                
+                # Issues détaillées
+                issues = health_data.get('issues', [])
+                if issues:
+                    st.write("**Problèmes détectés:**")
+                    for issue in issues:
+                        st.warning(f"⚠️ {issue}")
+                else:
+                    st.success("✅ Aucun problème détecté")
+                
+                # Métriques de santé
+                st.write("**Métriques de Santé:**")
+                st.write(f"• Utilisation crédits: {health_data.get('credit_usage_percent', 0):.1f}%")
+                st.write(f"• Temps depuis dernière activité: {health_data.get('time_since_last_activity_minutes', 0):.1f}min")
+                st.write(f"• Intervalle polling: {health_data.get('polling_interval', 0)}s")
+        
+        # Actions système
+        st.subheader("🛠️ Actions Système")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔄 Force Update Scores", use_container_width=True):
+                try:
+                    response = requests.post(f"{API_BASE_URL}/update-scores")
+                    if response.status_code == 200:
+                        st.success("✅ Mise à jour des scores déclenchée")
+                    else:
+                        st.error("❌ Erreur lors de la mise à jour")
+                except Exception as e:
+                    st.error(f"❌ Erreur: {e}")
+        
+        with col2:
+            if st.button("⚡ Force Poll Now", use_container_width=True):
+                try:
+                    response = requests.post(f"{API_BASE_URL}/force-poll")
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result['status'] == 'success':
+                            st.success("✅ Polling forcé avec succès")
+                        else:
+                            st.error(f"❌ {result.get('message', 'Erreur inconnue')}")
+                    else:
+                        st.error(f"❌ Erreur HTTP: {response.status_code}")
+                except Exception as e:
+                    st.error(f"❌ Erreur: {e}")
+        
+        with col3:
+            if st.button("🗑️ Clear Cache", use_container_width=True):
+                st.cache_data.clear()
+                st.success("✅ Cache vidé")
+    
     # Footer avec informations système
     st.divider()
     col1, col2, col3 = st.columns(3)
@@ -426,18 +677,11 @@ def main():
         st.caption(f"🕒 Dernière mise à jour: {data.get('last_updated', 'N/A')[:19]}")
     
     with col2:
-        st.caption("🔗 API Status: ✅ Connecté")
+        st.caption("🔗 API Status: ✅ Connecté (Polling Mode)")
     
     with col3:
-        if st.button("🔄 Forcer Mise à Jour Scores"):
-            try:
-                response = requests.post(f"{API_BASE_URL}/update-scores")
-                if response.status_code == 200:
-                    st.success("✅ Mise à jour des scores déclenchée")
-                else:
-                    st.error("❌ Erreur lors de la mise à jour")
-            except Exception as e:
-                st.error(f"❌ Erreur: {e}")
+        # Indicateur de mode
+        st.caption("🚀 Mode: Polling Intelligent")
 
 if __name__ == "__main__":
     main()

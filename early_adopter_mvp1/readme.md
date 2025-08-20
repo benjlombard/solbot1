@@ -1,1 +1,1 @@
-python -m pip install fastapi uvicorn pydantic httpx pandas numpy streamlit plotly
+pip install fastapi uvicorn streamlit httpx pydantic plotly pandas requests python-dotenv pydantic-settings
