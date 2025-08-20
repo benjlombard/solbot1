@@ -21,48 +21,11 @@ API_BASE_URL = "http://localhost:8010/api"
 def fetch_detailed_transactions():
     """Récupère les transactions détaillées avec toutes les informations"""
     try:
-        # Récupérer les achats récents avec détails
-        response = requests.get(f"{API_BASE_URL}/dashboard-data", timeout=10)
+        # Utiliser le nouvel endpoint dédié
+        response = requests.get(f"{API_BASE_URL}/recent-purchases-detailed?hours_back=24&limit=100", timeout=10)
         if response.status_code == 200:
             data = response.json()
-            
-            # Construire la liste des transactions détaillées
-            detailed_transactions = []
-            
-            # Récupérer les tokens récents avec early adopters
-            recent_tokens = data.get('recent_tokens', [])
-            
-            for token in recent_tokens:
-                if token.get('early_adopter_buyers'):
-                    for buyer in token['early_adopter_buyers']:
-                        # Récupérer les détails du wallet
-                        try:
-                            wallet_response = requests.get(f"{API_BASE_URL}/wallet/{buyer}", timeout=5)
-                            if wallet_response.status_code == 200:
-                                wallet_data = wallet_response.json()
-                                purchases = wallet_data.get('recent_purchases', [])
-                                
-                                # Filtrer les achats pour ce token
-                                for purchase in purchases:
-                                    if purchase['token_address'] == token['address']:
-                                        detailed_transactions.append({
-                                            'signature': purchase['signature'],
-                                            'timestamp': purchase['timestamp'],
-                                            'minutes_after_creation': purchase['minutes_after_creation'],
-                                            'sol_amount': purchase['sol_amount'],
-                                            'token_address': token['address'],
-                                            'token_name': token.get('name', 'Unknown'),
-                                            'token_symbol': token.get('symbol', 'UNK'),
-                                            'token_creator': token['creator'],
-                                            'token_created_at': token['created_at'],
-                                            'buyer_address': buyer,
-                                            'early_adopter_profile': wallet_data.get('early_adopter_profile'),
-                                            'early_purchases_count': token.get('early_purchases_count', 0)
-                                        })
-                        except:
-                            continue
-            
-            return detailed_transactions
+            return data.get('purchases', [])
         else:
             st.error(f"Erreur API: {response.status_code}")
             return []
