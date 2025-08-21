@@ -3,9 +3,9 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import statistics
 
-from models import EarlyAdopter
-from database import db
-from config import settings
+from .models import EarlyAdopter
+from .database import db
+from .config import settings
 
 logger = logging.getLogger(__name__)
 

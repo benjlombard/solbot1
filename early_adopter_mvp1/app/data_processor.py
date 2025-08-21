@@ -7,9 +7,9 @@ import struct
 import httpx
 from collections import defaultdict
 
-from models import PumpToken, EarlyPurchase, HeliusTransaction
-from database import db
-from config import settings
+from .models import PumpToken, EarlyPurchase, HeliusTransaction
+from .database import db
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -322,7 +322,7 @@ class OptimizedPumpFunDataProcessor:
             if not token:
                 logger.info(f"     ❌ Token not found, creating new token: {token_address}")
                 # Créer le token automatiquement
-                from models import PumpToken
+                from .models import PumpToken
                 new_token = PumpToken(
                     address=token_address,
                     name=None,

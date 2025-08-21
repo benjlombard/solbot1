@@ -5,7 +5,7 @@ from collections import deque, defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, Any, Deque
 
-from database import DatabaseManager
+from .database import DatabaseManager
 
 class SystemMonitor:
     """
@@ -74,17 +74,25 @@ class SystemMonitor:
         metrics = defaultdict(dict)
         now = datetime.now()
 
-        for key, interval in self.time_intervals.items():
+        # Add "total" to time intervals for cumulative metrics
+        time_intervals_with_total = self.time_intervals.copy()
+        time_intervals_with_total["total"] = timedelta(days=365*10) # A large delta for "all time"
+
+        for key, interval in time_intervals_with_total.items():
             since_time = now - interval
             
             # API call counts
-            metrics["helius_calls"][key] = self._count_events_in_interval(self.api_calls["helius"], interval)
-            metrics["rugcheck_calls"][key] = self._count_events_in_interval(self.api_calls["rugcheck"], interval)
-            metrics["pumpfun_calls"][key] = self._count_events_in_interval(self.api_calls["pumpfun"], interval)
-            
-            # Helius credits
-            metrics["helius_credits_spent"][key] = self._sum_credits_in_interval(self.helius_credits, interval)
-            
+            if key == "total":
+                metrics["helius_calls"][key] = len(self.api_calls["helius"])
+                metrics["rugcheck_calls"][key] = len(self.api_calls["rugcheck"])
+                metrics["pumpfun_calls"][key] = len(self.api_calls["pumpfun"])
+                metrics["helius_credits_spent"][key] = sum(c for _, c in self.helius_credits)
+            else:
+                metrics["helius_calls"][key] = self._count_events_in_interval(self.api_calls["helius"], interval)
+                metrics["rugcheck_calls"][key] = self._count_events_in_interval(self.api_calls["rugcheck"], interval)
+                metrics["pumpfun_calls"][key] = self._count_events_in_interval(self.api_calls["pumpfun"], interval)
+                metrics["helius_credits_spent"][key] = self._sum_credits_in_interval(self.helius_credits, interval)
+
             # Database metrics
             metrics["new_tokens"][key] = self.db_manager.get_new_tokens_count(since_time)
             metrics["new_early_adopters"][key] = self.db_manager.get_new_early_adopters_count(since_time)
@@ -93,12 +101,30 @@ class SystemMonitor:
         return dict(metrics)
 
     def generate_report(self) -> str:
-        """Generates a JSON report of the current metrics."""
-        report = {
-            "timestamp": datetime.now().isoformat(),
-            "metrics": self.collect_metrics()
-        }
-        return json.dumps(report, indent=2)
+        """Generates a text-based table report of the current metrics."""
+        metrics = self.collect_metrics()
+        now = datetime.now().isoformat()
+
+        header = f"System Monitor Report - {now}\n"
+        header += "=" * (len(header) - 1) + "\n"
+
+        table = "{:<25} | {:<10} | {:<10} | {:<10} | {:<10} | {:<10} | {:<10}\n".format(
+            "Metric", "5m", "30m", "1h", "6h", "24h", "Total"
+        )
+        table += "-" * 95 + "\n"
+
+        for metric_name, values in metrics.items():
+            table += "{:<25} | {:<10} | {:<10} | {:<10} | {:<10} | {:<10} | {:<10}\n".format(
+                metric_name.replace("_", " ").title(),
+                values.get("5m", "N/A"),
+                values.get("30m", "N/A"),
+                values.get("1h", "N/A"),
+                values.get("6h", "N/A"),
+                values.get("24h", "N/A"),
+                values.get("total", "N/A")
+            )
+
+        return header + table
 
     def run(self):
         """
@@ -117,7 +143,11 @@ class SystemMonitor:
             time.sleep(30)
 
 if __name__ == '__main__':
+    import sys
+    import os
+    # Add the parent directory to the path to allow relative imports
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
     logging.basicConfig(level=logging.INFO)
-    from database import db
+    from app.database import db
     monitor = SystemMonitor(db)
     monitor.run()

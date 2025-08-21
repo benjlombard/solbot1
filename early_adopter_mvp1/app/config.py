@@ -57,7 +57,7 @@ class Settings:
         
         # API Configuration
         self.api_host: str = os.getenv("API_HOST", "0.0.0.0")
-        self.api_port: int = int(os.getenv("API_PORT", "8000"))
+        self.api_port: int = int(os.getenv("API_PORT_MONITOR", "8011"))
         self.debug: bool = os.getenv("DEBUG", "False").lower() == "true"
         
         # Streamlit Configuration
