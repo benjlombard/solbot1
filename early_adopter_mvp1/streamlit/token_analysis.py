@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
+import json
 
 
 def get_safe(data, key, default):
@@ -112,6 +113,7 @@ def main():
         min_volume_24h = st.slider("Volume 24h min (SOL)", 0.0, 50.0, 0.0)
         max_risk_score = st.slider("Score risque max", 0, 100, 100)
         min_opportunity_score = st.slider("Score opportunité min", 0, 100, 0)
+        bonding_curve_progress_filter = st.slider("Progression Bonding Curve (%)", 0, 100, (0, 100))
         
         # Options d'affichage
         show_only_recommendations = st.checkbox("Montrer seulement les recommandations d'achat", False)
@@ -188,12 +190,14 @@ def main():
                 continue
         
         # Autres filtres
+        bonding_progress = get_safe(token, 'bonding_curve_progress', 0)
         if (get_safe(token, 'liquidity_sol', 0) < min_liquidity or
             get_safe(token, 'holders_count', 0) < min_holders or
             ea_count < min_ea_signal or
             get_safe(token, 'volume_24h_sol', 0) < min_volume_24h or
             risk_score > max_risk_score or
-            opportunity_score < min_opportunity_score):
+            opportunity_score < min_opportunity_score or
+            not (bonding_curve_progress_filter[0] <= bonding_progress <= bonding_curve_progress_filter[1])):
             continue
         
         # Filtre recommandations
@@ -245,10 +249,15 @@ def main():
     with col5:
         st.metric("Score Risque Moy.", f"{avg_risk:.1f}")
     
-    # Onglets
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Vue d'ensemble", "🎯 Tokens à Surveiller", "⚡ Analyses Rapides", "🔬 Analyse Détaillée"])
+    # Navigation dans la sidebar
+    with st.sidebar:
+        st.header("📄 Vues")
+        view_options = ["📊 Vue d'ensemble", "🎯 Tokens à Surveiller", "⚡ Analyses Rapides", "🔬 Analyse Détaillée"]
+        selected_view = st.radio("Choisissez une vue:", view_options)
     
-    with tab1:
+    st.write(f"**Vue sélectionnée (debug):** {selected_view}")
+
+    if selected_view == "📊 Vue d'ensemble":
         st.header("📊 Vue d'ensemble du Marché")
         
         if analyzed_tokens:
@@ -317,8 +326,8 @@ def main():
                     title="Répartition des Recommandations"
                 )
                 st.plotly_chart(fig_rec, use_container_width=True)
-    
-    with tab2:
+
+    elif selected_view == "🎯 Tokens à Surveiller":
         st.header("🎯 Tokens à Surveiller de Près")
         
         if analyzed_tokens:
@@ -327,8 +336,8 @@ def main():
 
             # Définir toutes les colonnes possibles
             ALL_COLUMNS = [
-                "Lien", "Symbole", "Nom", "Âge (h)", "Market Cap ($)", "Holders", "Volume (SOL)", 
-                "Risque", "Opportunité", "Recommandation", "Twitter", "Website", "Telegram", 
+                "Lien", "Symbole", "Nom", "Âge (h)", "Market Cap ($)", "Holders", "Volume (SOL)",
+                "Progression Bonding Curve", "Score Rugcheck", "Risque", "Opportunité", "Recommandation", "Twitter", "Website", "Telegram",
                 "Metadata", "Total Supply", "Description", "Créateur", "NSFW", "Vérifié",
                 "Bonding Curve", "KOTH Timestamp", "Assoc. Bonding Curve", "Raydium Pool",
                 "Virtual SOL", "Virtual Tokens", "Hidden", "Show Name", "Last Trade",
@@ -337,7 +346,7 @@ def main():
                 "Video", "Updated At", "Pump Swap Pool", "ATH Market Cap", "ATH Timestamp",
                 "Banner", "Hide Banner", "Livestream Score"
             ]
-            
+
             # Par défaut, afficher toutes les colonnes comme demandé par l'utilisateur
             DEFAULT_COLUMNS = ALL_COLUMNS.copy()
 
@@ -361,6 +370,8 @@ def main():
                     "Market Cap ($)": get_safe(token, 'usd_market_cap', 0),
                     "Holders": get_safe(token, 'holders_count', 0),
                     "Volume (SOL)": get_safe(token, 'volume_24h_sol', 0),
+                    "Progression Bonding Curve": get_safe(token, 'bonding_curve_progress', 0),
+                    "Score Rugcheck": get_safe(token, 'rugcheck_score', 0),
                     "Risque": get_safe(token, 'risk_score', 0),
                     "Opportunité": get_safe(token, 'opportunity_score', 0),
                     "Recommandation": get_safe(token, 'recommendation', ''),
@@ -412,51 +423,102 @@ def main():
                 display_df = display_df[existing_selected_columns]
 
             # Afficher le tableau interactif
-            st.dataframe(
-                display_df,
-                column_config={
-                    "Lien": st.column_config.LinkColumn("Pump.fun", display_text="🚀"),
-                    "Twitter": st.column_config.LinkColumn("Twitter"),
-                    "Website": st.column_config.LinkColumn("Website"),
-                    "Telegram": st.column_config.LinkColumn("Telegram"),
-                    "Metadata": st.column_config.LinkColumn("Metadata"),
-                    "Banner": st.column_config.LinkColumn("Banner"),
-                    "Video": st.column_config.LinkColumn("Video"),
-                    "Market Cap ($)": st.column_config.NumberColumn(format="$ %.2f"),
-                    "Market Cap (Native)": st.column_config.NumberColumn(format="%.2f"),
-                    "ATH Market Cap": st.column_config.NumberColumn(format="$ %.2f"),
-                    "Volume (SOL)": st.column_config.NumberColumn(format="%.2f SOL"),
-                    "Âge (h)": st.column_config.NumberColumn(format="%.1f h"),
-                    "Total Supply": st.column_config.NumberColumn(),
-                    "Virtual SOL": st.column_config.NumberColumn(),
-                    "Virtual Tokens": st.column_config.NumberColumn(),
-                    "Real SOL": st.column_config.NumberColumn(),
-                    "Real Tokens": st.column_config.NumberColumn(),
-                    "Risque": st.column_config.ProgressColumn("Risque", min_value=0, max_value=100),
-                    "Opportunité": st.column_config.ProgressColumn("Opportunité", min_value=0, max_value=100),
-                    "NSFW": st.column_config.CheckboxColumn("NSFW"),
-                    "Vérifié": st.column_config.CheckboxColumn("Vérifié"),
-                    "Hidden": st.column_config.CheckboxColumn("Hidden"),
-                    "Show Name": st.column_config.CheckboxColumn("Show Name"),
-                    "Inverted": st.column_config.CheckboxColumn("Inverted"),
-                    "Banned": st.column_config.CheckboxColumn("Banned"),
-                    "Live": st.column_config.CheckboxColumn("Live"),
-                    "Initialized": st.column_config.CheckboxColumn("Initialized"),
-                    "Hide Banner": st.column_config.CheckboxColumn("Hide Banner"),
-                    "KOTH Timestamp": st.column_config.DatetimeColumn("KOTH"),
-                    "Last Trade": st.column_config.DatetimeColumn("Last Trade"),
-                    "Ban Expiry": st.column_config.DatetimeColumn("Ban Expiry"),
-                    "Last Reply": st.column_config.DatetimeColumn("Last Reply"),
-                    "Updated At": st.column_config.DatetimeColumn("Updated At"),
-                    "ATH Timestamp": st.column_config.DatetimeColumn("ATH"),
-                },
-                use_container_width=True,
-                hide_index=True
-            )
+            if not display_df.empty:
+                st.dataframe(
+                    display_df,
+                    column_config={
+                        "Lien": st.column_config.LinkColumn("Pump.fun", display_text="🚀"),
+                        "Twitter": st.column_config.LinkColumn("Twitter"),
+                        "Website": st.column_config.LinkColumn("Website"),
+                        "Telegram": st.column_config.LinkColumn("Telegram"),
+                        "Metadata": st.column_config.LinkColumn("Metadata"),
+                        "Banner": st.column_config.LinkColumn("Banner"),
+                        "Video": st.column_config.LinkColumn("Video"),
+                        "Market Cap ($)": st.column_config.NumberColumn(format="$ %.2f"),
+                        "Market Cap (Native)": st.column_config.NumberColumn(format="%.2f"),
+                        "ATH Market Cap": st.column_config.NumberColumn(format="$ %.2f"),
+                        "Volume (SOL)": st.column_config.NumberColumn(format="%.2f SOL"),
+                        "Âge (h)": st.column_config.NumberColumn(format="%.1f h"),
+                        "Total Supply": st.column_config.NumberColumn(),
+                        "Virtual SOL": st.column_config.NumberColumn(),
+                        "Virtual Tokens": st.column_config.NumberColumn(),
+                        "Real SOL": st.column_config.NumberColumn(),
+                        "Real Tokens": st.column_config.NumberColumn(),
+                        "Progression Bonding Curve": st.column_config.ProgressColumn("Progression Bonding Curve", min_value=0, max_value=100, format="%.1f%%"),
+                        "Score Rugcheck": st.column_config.ProgressColumn("Score Rugcheck", min_value=0, max_value=100, format="%.0f"),
+                        "Risque": st.column_config.ProgressColumn("Risque", min_value=0, max_value=100),
+                        "Opportunité": st.column_config.ProgressColumn("Opportunité", min_value=0, max_value=100),
+                        "NSFW": st.column_config.CheckboxColumn("NSFW"),
+                        "Vérifié": st.column_config.CheckboxColumn("Vérifié"),
+                        "Hidden": st.column_config.CheckboxColumn("Hidden"),
+                        "Show Name": st.column_config.CheckboxColumn("Show Name"),
+                        "Inverted": st.column_config.CheckboxColumn("Inverted"),
+                        "Banned": st.column_config.CheckboxColumn("Banned"),
+                        "Live": st.column_config.CheckboxColumn("Live"),
+                        "Initialized": st.column_config.CheckboxColumn("Initialized"),
+                        "Hide Banner": st.column_config.CheckboxColumn("Hide Banner"),
+                        "KOTH Timestamp": st.column_config.DatetimeColumn("KOTH"),
+                        "Last Trade": st.column_config.DatetimeColumn("Last Trade"),
+                        "Ban Expiry": st.column_config.DatetimeColumn("Ban Expiry"),
+                        "Last Reply": st.column_config.DatetimeColumn("Last Reply"),
+                        "Updated At": st.column_config.DatetimeColumn("Updated At"),
+                        "ATH Timestamp": st.column_config.DatetimeColumn("ATH"),
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                # Sélecteur pour l'analyse détaillée
+                st.subheader("🔬 Analyse Détaillée d'un Token")
+                token_options = {f"{get_safe(row, 'Symbole', 'UNK')} - {get_safe(row, 'Nom', 'N/A')}": index for index, row in display_df.iterrows()}
+                selected_token_label = st.selectbox("Sélectionnez un token pour voir les détails de Rugcheck:", options=list(token_options.keys()))
+                
+                if selected_token_label:
+                    selected_index = token_options[selected_token_label]
+                    selected_token = df.loc[selected_index]
+                    
+                    st.write(f"**Analyse pour : {selected_token_label}**")
+                    
+                    # Liens externes
+                    st.write(f"""
+                    **Liens Externes:**
+                    - [Pump.fun](https://pump.fun/{selected_token['address']})
+                    - [Rugcheck.xyz](https://rugcheck.xyz/tokens/{selected_token['address']})
+                    - [Solscan](https://solscan.io/token/{selected_token['address']})
+                    """)
+
+                    # Afficher les risques
+                    risks_json = get_safe(selected_token, 'rugcheck_risks', '[]')
+                    try:
+                        risks = json.loads(risks_json)
+                        if risks:
+                            st.write("**Risques détectés par Rugcheck:**")
+                            for risk in risks:
+                                st.warning(f"- **{risk.get('name', 'Unknown risk')}**: {risk.get('description', '')} (Sévérité: {risk.get('severity', 'N/A')})")
+                        else:
+                            st.success("✅ Aucun risque majeur détecté par Rugcheck.")
+                    except (json.JSONDecodeError, TypeError):
+                        st.info("Données de risques non disponibles ou invalides.")
+                    
+                    st.write("---")
+                    
+                    # Afficher les top holders
+                    top_holders_json = get_safe(selected_token, 'rugcheck_top_holders', '[]')
+                    try:
+                        top_holders = json.loads(top_holders_json)
+                        if top_holders:
+                            st.write("**Top 10 Holders:**")
+                            holders_df = pd.DataFrame(top_holders[:10])
+                            st.dataframe(holders_df, use_container_width=True)
+                        else:
+                            st.info("Aucune information sur les détenteurs disponible.")
+                    except (json.JSONDecodeError, TypeError):
+                        st.info("Données de détenteurs non disponibles ou invalides.")
+
         else:
             st.info("Aucun token ne correspond aux filtres actuels.")
-    
-    with tab3:
+
+    elif selected_view == "⚡ Analyses Rapides":
         st.header("⚡ Analyses et Actions Rapides")
         
         # Actions rapides
@@ -532,8 +594,8 @@ def main():
                     mime="text/csv",
                     use_container_width=True
                 )
-    
-    with tab4:
+
+    elif selected_view == "🔬 Analyse Détaillée":
         st.header("🔬 Analyse Détaillée d'un Token")
         
         if analyzed_tokens:

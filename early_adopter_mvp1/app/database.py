@@ -117,13 +117,29 @@ class DatabaseManager:
                 )
             """)
             
+            # Table rugcheck_reports
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rugcheck_reports (
+                    token_address TEXT PRIMARY KEY,
+                    score REAL,
+                    is_rugged BOOLEAN,
+                    risks TEXT,
+                    top_holders TEXT,
+                    raw_report TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (token_address) REFERENCES pump_tokens(address)
+                )
+            """)
+
             # Création des index pour optimiser les performances
             indexes = [
                 "CREATE INDEX IF NOT EXISTS idx_created_at ON pump_tokens(created_at)",
                 "CREATE INDEX IF NOT EXISTS idx_buyer_address ON early_purchases(buyer_address)",
                 "CREATE INDEX IF NOT EXISTS idx_token_timestamp ON early_purchases(token_address, timestamp)",
                 "CREATE INDEX IF NOT EXISTS idx_confidence_score ON early_adopters(confidence_score DESC)",
-                "CREATE INDEX IF NOT EXISTS idx_signature ON early_purchases(signature)"
+                "CREATE INDEX IF NOT EXISTS idx_signature ON early_purchases(signature)",
+                "CREATE INDEX IF NOT EXISTS idx_rugcheck_reports_token_address ON rugcheck_reports(token_address)"
             ]
             
             for index in indexes:
@@ -295,16 +311,21 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 since_date = datetime.now() - timedelta(hours=hours_back)
                 
-                # La requête inclut maintenant toutes les colonnes de pump_tokens
+                # La requête inclut maintenant toutes les colonnes de pump_tokens et le score de rugcheck
                 cursor.execute("""
                     SELECT 
                         pt.*,
+                        rr.score as rugcheck_score,
+                        rr.risks as rugcheck_risks,
+                        rr.top_holders as rugcheck_top_holders,
+                        rr.raw_report as rugcheck_raw_report,
                         COUNT(ep.id) as early_purchases_count,
                         GROUP_CONCAT(DISTINCT ea.wallet_address) as early_adopter_buyers
                     FROM pump_tokens pt
                     LEFT JOIN early_purchases ep ON pt.address = ep.token_address
                     LEFT JOIN early_adopters ea ON ep.buyer_address = ea.wallet_address 
                         AND ea.confidence_score >= 0.6
+                    LEFT JOIN rugcheck_reports rr ON pt.address = rr.token_address
                     WHERE pt.created_at >= ?
                     GROUP BY pt.address
                     ORDER BY pt.created_at DESC
@@ -433,6 +454,33 @@ class DatabaseManager:
                 return True
         except Exception as e:
             logger.error(f"Error updating token {token_address} with comprehensive pump.fun data: {e}", exc_info=True)
+            return False
+
+    def upsert_rugcheck_report(self, token_address: str, report: Dict[str, Any]) -> bool:
+        """Insère ou met à jour un rapport de rugcheck."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                score = report.get('score_normalised')
+                is_rugged = report.get('rugged')
+                risks = json.dumps(report.get('risks', []))
+                top_holders = json.dumps(report.get('topHolders', []))
+                raw_report = json.dumps(report)
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO rugcheck_reports 
+                    (token_address, score, is_rugged, risks, top_holders, raw_report, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    token_address, score, is_rugged, risks, top_holders, raw_report,
+                    datetime.now().isoformat()
+                ))
+                conn.commit()
+                logger.info(f"Upserted rugcheck report for {token_address}")
+                return True
+        except Exception as e:
+            logger.error(f"Error upserting rugcheck report for {token_address}: {e}")
             return False
 
 # Instance globale

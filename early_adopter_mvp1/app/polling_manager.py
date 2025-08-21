@@ -12,6 +12,7 @@ from early_adopter_scorer import scorer
 from config import settings
 from database import db
 from pump_fun_client import PumpFunClient
+from rugcheck_client import RugCheckClient
 from sutils2 import get_pump_progress_correct
 import aiohttp
 from models import HeliusTransaction, HeliusInstruction
@@ -28,6 +29,7 @@ class IntelligentPollingManager:
         
         self.httpx_client = httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0))
         self.pump_fun_client = PumpFunClient(logger_instance=logger)
+        self.rugcheck_client = RugCheckClient(logger=logger)
         self.polling_task = None
         self.is_running = False
         
@@ -898,18 +900,21 @@ class IntelligentPollingManager:
             async with aiohttp.ClientSession() as session:
                 http_api_tasks = [self.pump_fun_client.get_token_data(session, t['address']) for t in tokens_to_enrich]
                 on_chain_tasks = [get_pump_progress_correct(t['address'], t.get('bonding_curve'), t.get('associated_bonding_curve')) for t in tokens_to_enrich]
+                rugcheck_tasks = [self.rugcheck_client.get_token_report_async(session, t['address']) for t in tokens_to_enrich]
                 
-                all_tasks = http_api_tasks + on_chain_tasks
+                all_tasks = http_api_tasks + on_chain_tasks + rugcheck_tasks
                 results = await asyncio.gather(*all_tasks, return_exceptions=True)
 
             http_api_results = results[:len(tokens_to_enrich)]
-            on_chain_results = results[len(tokens_to_enrich):]
+            on_chain_results = results[len(tokens_to_enrich):2*len(tokens_to_enrich)]
+            rugcheck_results = results[2*len(tokens_to_enrich):]
 
             updated_count = 0
             for i, token in enumerate(tokens_to_enrich):
                 token_address = token['address']
                 pump_data = http_api_results[i] if isinstance(http_api_results[i], dict) else {}
                 on_chain_data = on_chain_results[i] if isinstance(on_chain_results[i], dict) else {}
+                rugcheck_report = rugcheck_results[i] if isinstance(rugcheck_results[i], dict) else None
 
                 # Combine the data
                 if on_chain_data.get('success'):
@@ -920,6 +925,9 @@ class IntelligentPollingManager:
                     success = db.update_token_pumpfun_data(token_address, pump_data)
                     if success:
                         updated_count += 1
+                
+                if rugcheck_report:
+                    db.upsert_rugcheck_report(token_address, rugcheck_report)
             
             logger.info(f"Enrichment task complete. Updated {updated_count}/{len(tokens_to_enrich)} tokens.")
 
