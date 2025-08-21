@@ -12,7 +12,7 @@ from early_adopter_scorer import scorer
 from config import settings
 from database import db
 from pump_fun_client import PumpFunClient
-from solana_utils import get_pump_progress_correct
+from sutils2 import get_pump_progress_correct
 import aiohttp
 from models import HeliusTransaction, HeliusInstruction
 from data_processor import processor
