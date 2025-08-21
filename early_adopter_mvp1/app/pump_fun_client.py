@@ -46,9 +46,25 @@ class PumpFunClient:
         
         try:
             async with session.get(url, headers=headers, timeout=20) as response:
+                self.logger.info(f"Response for {token_address}: status={response.status}, content-type='{response.headers.get('content-type')}'")
+                
+                # Read the response text
+                response_text = await response.text()
+
+                # If response is empty, return None
+                if not response_text:
+                    self.logger.warning(f"Empty response for {token_address}")
+                    return None
+
                 # Raise an HTTPError for bad responses (4xx or 5xx)
                 response.raise_for_status()
-                data = await response.json()
+
+                # Log the raw response if debugging is needed
+                if 'application/json' not in response.headers.get('content-type', ''):
+                    self.logger.warning(f"Unexpected content type for {token_address}. Raw content: {response_text[:500]}")
+                
+                # Allow any content type by setting content_type=None
+                data = await response.json(content_type=None)
                 self.logger.debug(f"Successfully fetched data for {token_address}")
                 return data
 

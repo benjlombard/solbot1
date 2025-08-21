@@ -41,6 +41,7 @@ class IntelligentPollingManager:
         # Statistiques
         self.daily_stats = defaultdict(int)
         self.last_reset_date = datetime.now().date()
+        self.credits_used_today = 0
         
         # Paramètres de polling adaptatif
         self.base_polling_interval = settings.base_polling_interval_seconds

@@ -517,7 +517,7 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM pump_tokens WHERE created_at >= ?", (since.isoformat(),))
+                cursor.execute("SELECT COUNT(*) FROM pump_tokens WHERE row_created_at >= ?", (since.isoformat(),))
                 return cursor.fetchone()[0]
         except Exception as e:
             self.logger.error(f"Error counting new tokens: {e}")
