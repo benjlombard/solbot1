@@ -463,7 +463,7 @@ def main():
             # Définir toutes les colonnes possibles
             ALL_COLUMNS = [
                 "Détails", "Lien", "Symbole", "Nom", "Âge (h)", "Market Cap ($)", "MC/Liq Ratio", "Holders", "Volume (SOL)",
-                "Progression Bonding Curve", "Score Rugcheck", "Risque", "Opportunité", "Recommandation", "Twitter", "Website", "Telegram",
+                "Progression Bonding Curve","Créateur Badge", "Score Créateur", "Créateur Risque", "Créateur Tokens", "Créateur Succès", "Score Rugcheck", "Risque", "Opportunité", "Recommandation", "Twitter", "Website", "Telegram",
                 "Metadata", "Total Supply", "Description", "Créateur", "NSFW", "Vérifié",
                 "Bonding Curve", "KOTH Timestamp", "Assoc. Bonding Curve", "Raydium Pool",
                 "Virtual SOL", "Virtual Tokens", "Hidden", "Show Name", "Last Trade",
@@ -507,6 +507,7 @@ def main():
                     ),
                     "Créateur Risque": f"{get_safe(token, 'creator_risk_score', 50):.1f}",
                     "Créateur Tokens": get_safe(token, 'creator_total_tokens', 0),
+                    "Créateur Succès": f"{get_safe(token, 'creator_success_rate', 0)*100:.1f}%",
                     "Score Rugcheck": format_rugcheck_score(get_safe(token, 'rugcheck_score', None)),
                     "Risque": format_risk_score(get_safe(token, 'risk_score', 0)),
                     "Opportunité": format_opportunity_score(get_safe(token, 'opportunity_score', 0)),
@@ -614,6 +615,10 @@ def main():
                         "Créateur Tokens": st.column_config.NumberColumn(
                             "Tokens Créés",
                             help="Nombre total de tokens créés par ce créateur"
+                        ),
+                        "Créateur Tokens": st.column_config.NumberColumn(
+                            "Rate Success Créateur",
+                            help="Success Rate"
                         )
                     },
                     use_container_width=True,

@@ -15,7 +15,8 @@ from .early_adopter_scorer import scorer
 from .database import db
 from .config import settings
 from .pump_fun_client import PumpFunClient
-
+# Ajoutez cette ligne avec les autres imports
+from .creator_analyzer import creator_analyzer
 # Configuration du logging AVANT d'importer pump_fun_client
 logging.basicConfig(
     level=logging.INFO,
@@ -620,7 +621,7 @@ async def get_tokens_analysis():
                             'creator_consecutive_failures': 0,
                             'creator_confidence_level': 'UNKNOWN'
                         })
-                        
+
                 enriched_tokens.append(token_data)
 
             except Exception as e:
