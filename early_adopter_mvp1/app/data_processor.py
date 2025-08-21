@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import struct
 import httpx
 from collections import defaultdict
+import base58
 
 from .models import PumpToken, EarlyPurchase, HeliusTransaction
 from .database import db
@@ -177,76 +178,67 @@ class OptimizedPumpFunDataProcessor:
         try:
             logger.info(f"     🔍 Analyzing transaction for token creation...")
             
-            # Recherche rapide des données de token dans les instructions
-            for i, instruction in enumerate(transaction.instructions):
-                logger.info(f"     Instruction {i}: {instruction.programId}")
+            token_address = self._extract_token_address_fast(transaction)
+            
+            if not token_address:
+                logger.info(f"     ❌ No token creation instruction found in transaction.")
+                return None
+
+            # Vérifier si ce token existe déjà
+            existing_token = db.get_token_by_address(token_address)
+            if existing_token:
+                logger.info(f"     ⚠️ Token already exists: {token_address}")
+                return None
+            
+            # Créer un token avec métadonnées minimales
+            token = PumpToken(
+                address=token_address,
+                name=None,  # À enrichir plus tard si nécessaire
+                symbol=None,
+                description=None,
+                creator=transaction.feePayer,
+                created_at=transaction.timestamp,
+                market_cap_discovery=None
+            )
+            
+            logger.info(f"     💾 Saving new token to database...")
+            
+            # Sauvegarder immédiatement
+            if db.insert_pump_token(token):
+                logger.info(f"     ✅ New pump.fun token created: {token.address}")
+                return token
+            else:
+                logger.info(f"     ❌ Failed to save token to database")
                 
-                if instruction.programId == self.pumpfun_program_id:
-                    logger.info(f"     ✅ Found pump.fun instruction at index {i}")
-                    
-                    # Extraction rapide de l'adresse du token
-                    token_address = self._extract_token_address_fast(instruction, transaction)
-                    
-                    logger.info(f"     Extracted token address: {token_address}")
-                    
-                    if not token_address:
-                        logger.info(f"     ❌ No token address found")
-                        continue
-                    
-                    # Vérifier si ce token existe déjà
-                    existing_token = db.get_token_by_address(token_address)
-                    if existing_token:
-                        logger.info(f"     ⚠️ Token already exists: {token_address}")
-                        continue
-                    
-                    # Créer un token avec métadonnées minimales
-                    token = PumpToken(
-                        address=token_address,
-                        name=None,  # À enrichir plus tard si nécessaire
-                        symbol=None,
-                        description=None,
-                        creator=transaction.feePayer,
-                        created_at=transaction.timestamp,
-                        market_cap_discovery=None
-                    )
-                    
-                    logger.info(f"     💾 Saving new token to database...")
-                    
-                    # Sauvegarder immédiatement
-                    if db.insert_pump_token(token):
-                        logger.info(f"     ✅ New pump.fun token created: {token.address}")
-                        
-                        # Enrichir les métadonnées en arrière-plan (optionnel)
-                        # asyncio.create_task(self._enrich_token_metadata_async(token_address))
-                        
-                        return token
-                    else:
-                        logger.info(f"     ❌ Failed to save token to database")
-                        
         except Exception as e:
             logger.error(f"     💥 Error processing token creation {transaction.signature}: {e}")
         
         return None
     
-    def _extract_token_address_fast(self, instruction: Any, transaction: HeliusTransaction) -> Optional[str]:
+    def _extract_token_address_fast(self, transaction: HeliusTransaction) -> Optional[str]:
         """
-        Extraction rapide de l'adresse du token depuis les données de transaction
+        Extracts the token mint address by finding the 'create' instruction in a pump.fun transaction.
         """
+        # Discriminator for the 'create' instruction on pump.fun program
+        # sighash('global:create') -> 0xaf23ab6c82ce0561
+        CREATE_DISCRIMINATOR = b'\xaf\x23\xab\x6c\x82\xce\x05\x61'
+
         try:
-            # Méthode 1: Depuis les comptes de l'instruction
-            if len(instruction.accounts) > 0:
-                # Le token mint est généralement dans les premiers comptes
-                for account in instruction.accounts[:3]:
-                    if len(account) >= 32:  # Adresse Solana valide
-                        return account
-            
-            # Méthode 2: Depuis les données de compte si disponibles
-            if hasattr(transaction, 'accountData') and transaction.accountData:
-                for account_info in transaction.accountData:
-                    account_addr = account_info.get('account', '')
-                    if len(account_addr) >= 32:
-                        return account_addr
-            
+            for instruction in transaction.instructions:
+                if instruction.programId == self.pumpfun_program_id:
+                    # Instruction data is base58 encoded
+                    try:
+                        data = base58.b58decode(instruction.data)
+                        # Check for discriminator
+                        if data.startswith(CREATE_DISCRIMINATOR):
+                            # The mint address is the first account in the create instruction
+                            if instruction.accounts:
+                                token_address = instruction.accounts[0]
+                                logger.info(f"Found 'create' instruction, token mint: {token_address}")
+                                return token_address
+                    except Exception:
+                        # Not a valid base58 string, or other error, just skip
+                        continue
             return None
             
         except Exception as e:
