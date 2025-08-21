@@ -116,7 +116,7 @@ LOG_LEVEL=INFO
 def initialize_database():
     """Initialise la base de données"""
     try:
-        from database import db
+        from .database import db
         logger.info("Base de données initialisée avec succès")
         return True
     except Exception as e:
@@ -129,7 +129,7 @@ def start_api_server():
     
     try:
         # Import de l'application
-        from main import app
+        from .main import app
         import uvicorn
         
         # Configuration
@@ -140,8 +140,12 @@ def start_api_server():
         logger.info(f"Serveur API démarré sur http://{host}:{port}")
         
         # Démarrage
+        # NOTE: The app string must be "app.main:app" for reload to work correctly
+        # when running with `python -m app.run` from the parent directory.
+        app_string = "app.main:app"
+        
         uvicorn.run(
-            "main:app",
+            app_string if debug else app,
             host=host,
             port=port,
             reload=debug,
