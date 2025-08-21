@@ -590,6 +590,37 @@ async def get_tokens_analysis():
                 token_data['avg_entry_timing_minutes'] = round(avg_entry_timing, 1)
                 token_data['unique_buyers'] = len(set([p['buyer_address'] for p in purchases]))
                 
+                creator_address = token.get('creator')
+                if creator_address:
+                    try:
+                        creator_performance = creator_analyzer.analyze_creator(creator_address)
+                        
+                        # Ajouter les données créateur au token
+                        token_data.update({
+                            'creator_reputation_score': creator_performance.reputation_score,
+                            'creator_risk_score': creator_performance.risk_score,
+                            'creator_success_rate': creator_performance.success_rate,
+                            'creator_is_blacklisted': creator_performance.is_blacklisted,
+                            'creator_blacklist_reason': creator_performance.blacklist_reason,
+                            'creator_total_tokens': creator_performance.total_tokens,
+                            'creator_consecutive_failures': creator_performance.consecutive_failures,
+                            'creator_confidence_level': creator_performance.confidence_level
+                        })
+                        
+                    except Exception as e:
+                        logger.error(f"Error analyzing creator {creator_address}: {e}")
+                        # Valeurs par défaut en cas d'erreur
+                        token_data.update({
+                            'creator_reputation_score': 50.0,
+                            'creator_risk_score': 50.0,
+                            'creator_success_rate': 0.0,
+                            'creator_is_blacklisted': False,
+                            'creator_blacklist_reason': None,
+                            'creator_total_tokens': 0,
+                            'creator_consecutive_failures': 0,
+                            'creator_confidence_level': 'UNKNOWN'
+                        })
+                        
                 enriched_tokens.append(token_data)
 
             except Exception as e:

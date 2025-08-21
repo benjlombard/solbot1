@@ -10,6 +10,10 @@ import numpy as np
 import sys
 import os
 
+print(f"🔍 Python path: {sys.path}")
+print(f"🔍 Current dir: {os.getcwd()}")
+print(f"🔍 Script dir: {os.path.dirname(__file__)}")
+print(f"🔍 Files in streamlit dir: {os.listdir(os.path.dirname(__file__))}")
 # Ajouter le chemin pour importer la page d'analyse des tokens
 sys.path.append(os.path.dirname(__file__))
 
@@ -22,10 +26,24 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Import de la nouvelle page (à créer dans un fichier séparé)
 try:
     from token_analysis import main as token_analysis_main
 except ImportError:
+    token_analysis_main = None
+
+# Par ceci :
+try:
+    import token_analysis
+    token_analysis_main = token_analysis.main
+    print("✅ Module token_analysis importé avec succès")
+except ImportError as e:
+    print(f"❌ ImportError: {e}")
+    token_analysis_main = None
+except SyntaxError as e:
+    print(f"❌ SyntaxError dans token_analysis.py: {e}")
+    token_analysis_main = None
+except Exception as e:
+    print(f"❌ Autre erreur: {e}")
     token_analysis_main = None
 
 # Configuration de l'API

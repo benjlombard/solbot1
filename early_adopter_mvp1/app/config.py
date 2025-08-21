@@ -77,6 +77,8 @@ class Settings:
         # Metadata Enrichment
         self.enable_metadata_enrichment: bool = os.getenv("ENABLE_METADATA_ENRICHMENT", "True").lower() == "true"
         self.enrichment_interval_seconds: int = int(os.getenv("ENRICHMENT_INTERVAL_SECONDS", "300")) # 5 minutes
+        self.enrichment_batch_size: int = int(os.getenv("ENRICHMENT_BATCH_SIZE", "50"))
+        self.enrichment_update_interval_minutes: int = int(os.getenv("ENRICHMENT_UPDATE_INTERVAL_MINUTES", "5"))
         
         # Monitoring & Alerts
         self.health_check_interval_seconds: int = int(os.getenv("HEALTH_CHECK_INTERVAL_SECONDS", "300"))

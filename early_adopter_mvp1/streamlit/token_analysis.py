@@ -6,8 +6,20 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import numpy as np
 import json
+import sys
+import os
 
-
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'app')))
+try:
+    # Import direct du module (pas d'import relatif)
+    import creator_analyzer as ca_module
+    creator_analyzer = ca_module.creator_analyzer
+    CREATOR_ANALYZER_AVAILABLE = True
+    print("✅ creator_analyzer disponible")
+except ImportError as e:
+    print(f"⚠️ creator_analyzer non disponible: {e}")
+    creator_analyzer = None
+    CREATOR_ANALYZER_AVAILABLE = False
 def get_safe(data, key, default):
     """Récupère une valeur d'un dictionnaire de manière sûre, en retournant une valeur par défaut
     si la clé est absente ou si la valeur est None."""
@@ -139,6 +151,32 @@ def get_recommendation(risk_score, opportunity_score, token_data):
     else:
         return "🔴 ÉVITER", "Risques trop élevés ou opportunité faible"
 
+def get_creator_badge(reputation_score, is_blacklisted, success_rate):
+    """Génère un badge pour le créateur"""
+    if is_blacklisted:
+        return "🚨 BLACKLISTÉ"
+    elif reputation_score >= 80 and success_rate >= 0.6:
+        return "⭐ EXCELLENT"
+    elif reputation_score >= 65 and success_rate >= 0.4:
+        return "✅ FIABLE"
+    elif reputation_score >= 45:
+        return "⚠️ MOYEN"
+    else:
+        return "❌ RISQUÉ"
+
+def get_creator_color(reputation_score, is_blacklisted):
+    """Retourne la couleur selon le score créateur"""
+    if is_blacklisted:
+        return "red"
+    elif reputation_score >= 80:
+        return "green"
+    elif reputation_score >= 65:
+        return "lightgreen"
+    elif reputation_score >= 45:
+        return "yellow"
+    else:
+        return "orange"
+        
 def main():
     st.title("🔍 Analyse Avancée des Tokens Pump.fun")
     st.markdown("*Aide à la décision d'investissement avec scoring avancé*")
@@ -165,6 +203,21 @@ def main():
         min_opportunity_score = st.slider("Score opportunité min", 0, 100, 0)
         bonding_curve_progress_filter = st.slider("Progression Bonding Curve (%)", 0, 100, (0, 100))
         
+        # st.header("🎭 Filtres Créateur")
+
+        # min_creator_score = st.slider("Score créateur min", 0, 100, 0)
+        # max_creator_risk = st.slider("Risque créateur max", 0, 100, 100)
+        # hide_blacklisted = st.checkbox("Masquer créateurs blacklistés", value=True)
+        # show_only_excellent = st.checkbox("Afficher seulement créateurs excellents")
+
+        # # Dans le filtrage des tokens, ajouter ces conditions :
+        # creator_score = get_safe(token, 'creator_reputation_score', 50)
+        # creator_risk = get_safe(token, 'creator_risk_score', 50)
+        # is_blacklisted = get_safe(token, 'creator_is_blacklisted', False)
+
+        # if (creator_score < min_creator_score or creator_risk > max_creator_risk or (hide_blacklisted and is_blacklisted) or (show_only_excellent and (creator_score < 80 or get_safe(token, 'creator_success_rate', 0) < 0.6))):
+        #     continue
+            
         # Options d'affichage
         show_only_recommendations = st.checkbox("Montrer seulement les recommandations d'achat", False)
         sort_by = st.selectbox(
@@ -295,7 +348,7 @@ def main():
             analyzed_tokens.sort(key=lambda x: get_safe(x, sort_key, 0), reverse=reverse)
     
     # Métriques globales
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6, col7  = st.columns(7)
     
     total_tokens = len(analyzed_tokens)
     strong_buy = len([t for t in analyzed_tokens if t['recommendation'].startswith("🟢")])
@@ -314,6 +367,14 @@ def main():
     with col5:
         st.metric("Score Risque Moy.", f"{avg_risk:.1f}")
     
+    with col6:
+        blacklisted_count = len([t for t in analyzed_tokens if get_safe(t, 'creator_is_blacklisted', False)])
+        st.metric("🚨 Créateurs Blacklistés", blacklisted_count)
+    with col7:
+        excellent_count = len([t for t in analyzed_tokens 
+                            if get_safe(t, 'creator_reputation_score', 0) >= 80])
+        st.metric("⭐ Créateurs Excellents", excellent_count)
+
     # Navigation dans la sidebar
     with st.sidebar:
         st.header("📄 Vues")
@@ -438,6 +499,14 @@ def main():
                     "Holders": get_safe(token, 'holders_count', 0),
                     "Volume (SOL)": get_safe(token, 'volume_24h_sol', 0),
                     "Progression Bonding Curve": get_safe(token, 'bonding_curve_progress', 0),
+                    "Créateur Score": f"{get_safe(token, 'creator_reputation_score', 50):.1f}",
+                    "Créateur Badge": get_creator_badge(
+                        get_safe(token, 'creator_reputation_score', 50),
+                        get_safe(token, 'creator_is_blacklisted', False),
+                        get_safe(token, 'creator_success_rate', 0)
+                    ),
+                    "Créateur Risque": f"{get_safe(token, 'creator_risk_score', 50):.1f}",
+                    "Créateur Tokens": get_safe(token, 'creator_total_tokens', 0),
                     "Score Rugcheck": format_rugcheck_score(get_safe(token, 'rugcheck_score', None)),
                     "Risque": format_risk_score(get_safe(token, 'risk_score', 0)),
                     "Opportunité": format_opportunity_score(get_safe(token, 'opportunity_score', 0)),
@@ -528,10 +597,68 @@ def main():
                         "Last Reply": st.column_config.DatetimeColumn("Last Reply"),
                         "Updated At": st.column_config.DatetimeColumn("Updated At"),
                         "ATH Timestamp": st.column_config.DatetimeColumn("ATH"),
+                        "Créateur Score": st.column_config.NumberColumn(
+                            "Score Créateur",
+                            help="Score de réputation du créateur (0-100)",
+                            format="%.1f"
+                        ),
+                        "Créateur Badge": st.column_config.TextColumn(
+                            "Badge Créateur",
+                            help="Évaluation rapide du créateur"
+                        ),
+                        "Créateur Risque": st.column_config.NumberColumn(
+                            "Risque Créateur", 
+                            help="Score de risque (0-100, plus haut = plus risqué)",
+                            format="%.1f"
+                        ),
+                        "Créateur Tokens": st.column_config.NumberColumn(
+                            "Tokens Créés",
+                            help="Nombre total de tokens créés par ce créateur"
+                        )
                     },
                     use_container_width=True,
                     hide_index=True
                 )
+
+                # Après l'affichage du tableau, ajouter une section d'alertes :
+                st.subheader("🚨 Alertes Créateurs")
+
+                # Filtrer les tokens avec créateurs blacklistés
+                blacklisted_tokens = [t for t in analyzed_tokens if get_safe(t, 'creator_is_blacklisted', False)]
+
+                if blacklisted_tokens:
+                    st.error(f"⚠️ ATTENTION: {len(blacklisted_tokens)} tokens de créateurs BLACKLISTÉS détectés!")
+                    
+                    for token in blacklisted_tokens[:5]:  # Afficher les 5 premiers
+                        st.markdown(f"""
+                        <div style="border: 2px solid red; border-radius: 5px; padding: 10px; margin: 5px 0; background-color: #ffe6e6;">
+                            <strong>🚨 TOKEN RISQUÉ</strong><br>
+                            <strong>Token:</strong> {get_safe(token, 'symbol', 'UNK')} ({get_safe(token, 'address', '')[:10]}...)<br>
+                            <strong>Raison:</strong> {get_safe(token, 'creator_blacklist_reason', 'Non spécifiée')}<br>
+                            <strong>Créateur:</strong> {get_safe(token, 'creator', '')[:10]}...<br>
+                            <strong>Recommandation:</strong> ÉVITER ABSOLUMENT
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                # Filtrer les tokens avec excellents créateurs
+                excellent_tokens = [t for t in analyzed_tokens 
+                                if get_safe(t, 'creator_reputation_score', 0) >= 80 
+                                and get_safe(t, 'creator_success_rate', 0) >= 0.6
+                                and not get_safe(t, 'creator_is_blacklisted', False)]
+
+                if excellent_tokens:
+                    st.success(f"✨ OPPORTUNITÉS: {len(excellent_tokens)} tokens de créateurs EXCELLENTS détectés!")
+                    
+                    for token in excellent_tokens[:3]:  # Afficher les 3 premiers
+                        st.markdown(f"""
+                        <div style="border: 2px solid green; border-radius: 5px; padding: 10px; margin: 5px 0; background-color: #e6ffe6;">
+                            <strong>⭐ TOKEN PROMETTEUR</strong><br>
+                            <strong>Token:</strong> {get_safe(token, 'symbol', 'UNK')} ({get_safe(token, 'address', '')[:10]}...)<br>
+                            <strong>Score Créateur:</strong> {get_safe(token, 'creator_reputation_score', 0):.1f}/100<br>
+                            <strong>Taux Succès:</strong> {get_safe(token, 'creator_success_rate', 0)*100:.1f}%<br>
+                            <strong>Recommandation:</strong> OPPORTUNITÉ INTÉRESSANTE
+                        </div>
+                        """, unsafe_allow_html=True)
 
                 # Sélecteur pour l'analyse détaillée
                 st.subheader("🔬 Analyse Détaillée d'un Token")

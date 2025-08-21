@@ -380,19 +380,22 @@ class DatabaseManager:
             logger.error(f"Error getting dashboard stats: {e}")
             return {}
 
-    def get_tokens_to_enrich(self, limit: int = 20) -> List[str]:
-        """Récupère une liste d'adresses de tokens qui ont besoin d'être enrichies."""
+    def get_tokens_to_enrich(self, limit: int = 50, update_interval_minutes: int = 5) -> List[str]:
+        """
+        Récupère une liste d'adresses de tokens qui ont besoin d'être enrichies.
+        Sélectionne les tokens qui n'ont pas été mis à jour dans l'intervalle de temps spécifié.
+        """
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                # Tokens qui n'ont jamais été mis à jour ou mis à jour il y a plus de 24h
-                twenty_four_hours_ago = (datetime.now() - timedelta(hours=24)).isoformat()
+                # Tokens qui n'ont jamais été mis à jour ou mis à jour il y a plus de X minutes
+                interval_ago = (datetime.now() - timedelta(minutes=update_interval_minutes)).isoformat()
                 cursor.execute("""
                     SELECT address FROM pump_tokens
                     WHERE last_updated_pumpfun IS NULL OR last_updated_pumpfun < ?
                     ORDER BY created_at DESC
                     LIMIT ?
-                """, (twenty_four_hours_ago, limit))
+                """, (interval_ago, limit))
                 
                 rows = cursor.fetchall()
                 return [row['address'] for row in rows]

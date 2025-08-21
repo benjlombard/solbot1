@@ -886,7 +886,10 @@ class IntelligentPollingManager:
         try:
             # Note: get_tokens_to_enrich returns addresses, but we need the full token object
             # to get the bonding curve addresses. Let's get the full objects.
-            token_addresses_to_enrich = db.get_tokens_to_enrich(limit=50)
+            token_addresses_to_enrich = db.get_tokens_to_enrich(
+                limit=settings.enrichment_batch_size,
+                update_interval_minutes=settings.enrichment_update_interval_minutes
+            )
             
             if not token_addresses_to_enrich:
                 logger.info("No tokens require metadata enrichment at this time.")
