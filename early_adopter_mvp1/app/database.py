@@ -29,7 +29,48 @@ class DatabaseManager:
                     description TEXT,
                     creator TEXT,
                     created_at TIMESTAMP,
-                    market_cap_discovery REAL
+                    market_cap_discovery REAL,
+                    -- Cached data from Pump.fun API
+                    usd_market_cap REAL,
+                    holders_count INTEGER,
+                    bonding_curve_progress REAL,
+                    logo_uri TEXT,
+                    is_verified BOOLEAN,
+                    last_updated_pumpfun TIMESTAMP,
+                    twitter TEXT,
+                    telegram TEXT,
+                    website TEXT,
+                    total_supply REAL,
+                    nsfw BOOLEAN,
+                    bonding_curve TEXT,
+                    king_of_the_hill_timestamp TIMESTAMP,
+                    metadata_uri TEXT,
+                    associated_bonding_curve TEXT,
+                    raydium_pool TEXT,
+                    virtual_sol_reserves REAL,
+                    virtual_token_reserves REAL,
+                    hidden BOOLEAN,
+                    show_name BOOLEAN,
+                    last_trade_timestamp TIMESTAMP,
+                    market_cap REAL,
+                    market_id TEXT,
+                    inverted BOOLEAN,
+                    real_sol_reserves REAL,
+                    real_token_reserves REAL,
+                    livestream_ban_expiry TIMESTAMP,
+                    last_reply TIMESTAMP,
+                    reply_count INTEGER,
+                    is_banned BOOLEAN,
+                    is_currently_live BOOLEAN,
+                    initialized BOOLEAN,
+                    video_uri TEXT,
+                    updated_at TIMESTAMP,
+                    pump_swap_pool TEXT,
+                    ath_market_cap REAL,
+                    ath_market_cap_timestamp TIMESTAMP,
+                    banner_uri TEXT,
+                    hide_banner BOOLEAN,
+                    livestream_downrank_score REAL
                 )
             """)
             
@@ -248,12 +289,13 @@ class DatabaseManager:
             return []
     
     def get_recent_tokens(self, hours_back: int = 24, limit: int = 100) -> List[Dict[str, Any]]:
-        """Récupère les tokens récents avec les achats early adopters"""
+        """Récupère les tokens récents avec les données enrichies et les achats early adopters"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 since_date = datetime.now() - timedelta(hours=hours_back)
                 
+                # La requête inclut maintenant toutes les colonnes de pump_tokens
                 cursor.execute("""
                     SELECT 
                         pt.*,
@@ -275,16 +317,12 @@ class DatabaseManager:
                     if row['early_adopter_buyers']:
                         early_adopters = row['early_adopter_buyers'].split(',')
                     
-                    tokens.append({
-                        'address': row['address'],
-                        'name': row['name'],
-                        'symbol': row['symbol'],
-                        'creator': row['creator'],
-                        'created_at': row['created_at'],
-                        'market_cap_discovery': row['market_cap_discovery'],
-                        'early_purchases_count': row['early_purchases_count'],
-                        'early_adopter_buyers': early_adopters
-                    })
+                    # Convertir la ligne de la base de données en dictionnaire
+                    token_data = dict(row)
+                    # Ajouter les acheteurs early adopters traités
+                    token_data['early_adopter_buyers'] = early_adopters
+                    tokens.append(token_data)
+                    
                 return tokens
         except Exception as e:
             logger.error(f"Error getting recent tokens: {e}")
@@ -318,6 +356,84 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting dashboard stats: {e}")
             return {}
+
+    def get_tokens_to_enrich(self, limit: int = 20) -> List[str]:
+        """Récupère une liste d'adresses de tokens qui ont besoin d'être enrichies."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Tokens qui n'ont jamais été mis à jour ou mis à jour il y a plus de 24h
+                twenty_four_hours_ago = (datetime.now() - timedelta(hours=24)).isoformat()
+                cursor.execute("""
+                    SELECT address FROM pump_tokens
+                    WHERE last_updated_pumpfun IS NULL OR last_updated_pumpfun < ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (twenty_four_hours_ago, limit))
+                
+                rows = cursor.fetchall()
+                return [row['address'] for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting tokens to enrich: {e}")
+            return []
+
+    def update_token_pumpfun_data(self, token_address: str, pump_data: Dict[str, Any]) -> bool:
+        """Met à jour un token avec les données fraîches et complètes de l'API Pump.fun."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                def ts_to_iso(timestamp_ms):
+                    if not timestamp_ms:
+                        return None
+                    return datetime.fromtimestamp(timestamp_ms / 1000).isoformat()
+
+                cursor.execute("""
+                    UPDATE pump_tokens
+                    SET 
+                        name = ?, symbol = ?, description = ?, logo_uri = ?, is_verified = ?,
+                        usd_market_cap = ?, bonding_curve_progress = ?,
+                        twitter = ?, telegram = ?, website = ?, total_supply = ?, nsfw = ?,
+                        bonding_curve = ?, king_of_the_hill_timestamp = ?, metadata_uri = ?,
+                        associated_bonding_curve = ?, raydium_pool = ?, virtual_sol_reserves = ?,
+                        virtual_token_reserves = ?, hidden = ?, show_name = ?, last_trade_timestamp = ?,
+                        market_cap = ?, market_id = ?, inverted = ?, real_sol_reserves = ?,
+                        real_token_reserves = ?, livestream_ban_expiry = ?, last_reply = ?,
+                        reply_count = ?, is_banned = ?, is_currently_live = ?, initialized = ?,
+                        video_uri = ?, updated_at = ?, pump_swap_pool = ?, ath_market_cap = ?,
+                        ath_market_cap_timestamp = ?, banner_uri = ?, hide_banner = ?,
+                        livestream_downrank_score = ?, last_updated_pumpfun = ?
+                    WHERE address = ?
+                """, (
+                    pump_data.get('name'), pump_data.get('symbol'), pump_data.get('description'),
+                    pump_data.get('image_uri'), pump_data.get('complete', False),
+                    pump_data.get('usd_market_cap'),
+                    pump_data.get('bonding_curve_progress'), pump_data.get('twitter'),
+                    pump_data.get('telegram'), pump_data.get('website'), pump_data.get('total_supply'),
+                    pump_data.get('nsfw', False), pump_data.get('bonding_curve'),
+                    ts_to_iso(pump_data.get('king_of_the_hill_timestamp')), pump_data.get('metadata_uri'),
+                    pump_data.get('associated_bonding_curve'), pump_data.get('raydium_pool'),
+                    pump_data.get('virtual_sol_reserves'), pump_data.get('virtual_token_reserves'),
+                    pump_data.get('hidden'), pump_data.get('show_name'),
+                    ts_to_iso(pump_data.get('last_trade_timestamp')), pump_data.get('market_cap'),
+                    pump_data.get('market_id'), pump_data.get('inverted'),
+                    pump_data.get('real_sol_reserves'), pump_data.get('real_token_reserves'),
+                    ts_to_iso(pump_data.get('livestream_ban_expiry')), ts_to_iso(pump_data.get('last_reply')),
+                    pump_data.get('reply_count'), pump_data.get('is_banned'),
+                    pump_data.get('is_currently_live'), pump_data.get('initialized'),
+                    pump_data.get('video_uri'), pump_data.get('updated_at'),
+                    pump_data.get('pump_swap_pool'), pump_data.get('ath_market_cap'),
+                    ts_to_iso(pump_data.get('ath_market_cap_timestamp')), pump_data.get('banner_uri'),
+                    pump_data.get('hide_banner'), pump_data.get('livestream_downrank_score'),
+                    datetime.now().isoformat(),
+                    token_address
+                ))
+                conn.commit()
+                logger.info(f"Enriched token data comprehensively for {token_address}")
+                return True
+        except Exception as e:
+            logger.error(f"Error updating token {token_address} with comprehensive pump.fun data: {e}", exc_info=True)
+            return False
 
 # Instance globale
 db = DatabaseManager()

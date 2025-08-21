@@ -10,6 +10,13 @@ from models import HeliusTransaction, HeliusInstruction
 from data_processor import processor
 from early_adopter_scorer import scorer
 from config import settings
+from database import db
+from pump_fun_client import PumpFunClient
+from solana_utils import get_pump_progress_correct
+import aiohttp
+from models import HeliusTransaction, HeliusInstruction
+from data_processor import processor
+from early_adopter_scorer import scorer
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +27,12 @@ class IntelligentPollingManager:
         self.pumpfun_program_id = settings.pumpfun_program_id
         
         self.httpx_client = httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0))
+        self.pump_fun_client = PumpFunClient(logger_instance=logger)
         self.polling_task = None
         self.is_running = False
+        
+        # Timer for enrichment task
+        self.last_enrichment_run = datetime.now() - timedelta(minutes=10) # Run on first loop
         
         # Cache pour éviter les doublons
         self.processed_signatures: Set[str] = set()
@@ -90,6 +101,10 @@ class IntelligentPollingManager:
                 
                 # Nettoyer le cache périodiquement
                 await self._cleanup_cache()
+
+                # Exécuter l'enrichissement des métadonnées périodiquement
+                if settings.enable_metadata_enrichment and (datetime.now() - self.last_enrichment_run).total_seconds() > settings.enrichment_interval_seconds:
+                    await self._enrich_token_metadata()
                 
                 # Adapter l'intervalle de polling
                 self._adapt_polling_interval()
@@ -862,6 +877,54 @@ class IntelligentPollingManager:
         
         await self.httpx_client.aclose()
         logger.info("Polling manager shutdown complete")
+
+    async def _enrich_token_metadata(self):
+        """Tâche de fond pour enrichir les métadonnées des tokens."""
+        logger.info("Starting token metadata enrichment task...")
+        self.last_enrichment_run = datetime.now()
+        
+        try:
+            # Note: get_tokens_to_enrich returns addresses, but we need the full token object
+            # to get the bonding curve addresses. Let's get the full objects.
+            tokens_to_enrich = db.get_recent_tokens(hours_back=48, limit=50) # A simple way to get tokens to process
+            
+            if not tokens_to_enrich:
+                logger.info("No tokens require metadata enrichment at this time.")
+                return
+
+            logger.info(f"Found {len(tokens_to_enrich)} tokens to enrich.")
+            
+            # Fetch data from HTTP API and on-chain concurrently
+            async with aiohttp.ClientSession() as session:
+                http_api_tasks = [self.pump_fun_client.get_token_data(session, t['address']) for t in tokens_to_enrich]
+                on_chain_tasks = [get_pump_progress_correct(t['address'], t.get('bonding_curve'), t.get('associated_bonding_curve')) for t in tokens_to_enrich]
+                
+                all_tasks = http_api_tasks + on_chain_tasks
+                results = await asyncio.gather(*all_tasks, return_exceptions=True)
+
+            http_api_results = results[:len(tokens_to_enrich)]
+            on_chain_results = results[len(tokens_to_enrich):]
+
+            updated_count = 0
+            for i, token in enumerate(tokens_to_enrich):
+                token_address = token['address']
+                pump_data = http_api_results[i] if isinstance(http_api_results[i], dict) else {}
+                on_chain_data = on_chain_results[i] if isinstance(on_chain_results[i], dict) else {}
+
+                # Combine the data
+                if on_chain_data.get('success'):
+                    pump_data['bonding_curve_progress'] = on_chain_data.get('bonding_curve_progress')
+
+                # Update the database if we got any new data
+                if pump_data:
+                    success = db.update_token_pumpfun_data(token_address, pump_data)
+                    if success:
+                        updated_count += 1
+            
+            logger.info(f"Enrichment task complete. Updated {updated_count}/{len(tokens_to_enrich)} tokens.")
+
+        except Exception as e:
+            logger.error(f"An error occurred during the enrichment task: {e}", exc_info=True)
 
 # Instance globale
 polling_manager = IntelligentPollingManager()

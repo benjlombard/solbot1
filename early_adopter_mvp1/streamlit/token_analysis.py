@@ -7,6 +7,12 @@ from datetime import datetime, timedelta
 import numpy as np
 
 
+def get_safe(data, key, default):
+    """Récupère une valeur d'un dictionnaire de manière sûre, en retournant une valeur par défaut
+    si la clé est absente ou si la valeur est None."""
+    val = data.get(key)
+    return default if val is None else val
+
 
 # Configuration API
 API_BASE_URL = "http://localhost:8010/api"
@@ -36,12 +42,12 @@ def fetch_token_details(token_address):
 def calculate_risk_score(token_data):
     """Calcule un score de risque (0-100, plus bas = moins risqué)"""
     risk_factors = {
-        'liquidity_low': 30 if token_data.get('liquidity_sol', 0) < 10 else 0,
-        'holder_concentration': min(50, token_data.get('top_5_holders_percentage', 0)),
-        'no_early_adopters': 20 if len(token_data.get('early_adopter_buyers', [])) == 0 else 0,
-        'recent_creation': 15 if token_data.get('age_hours', 0) < 1 else 0,
-        'low_volume': 25 if token_data.get('volume_24h_sol', 0) < 1 else 0,
-        'creator_history': 10 if token_data.get('creator_previous_tokens', 0) > 5 else 0
+        'liquidity_low': 30 if get_safe(token_data, 'liquidity_sol', 0) < 10 else 0,
+        'holder_concentration': min(50, get_safe(token_data, 'top_5_holders_percentage', 0)),
+        'no_early_adopters': 20 if len(get_safe(token_data, 'early_adopter_buyers', [])) == 0 else 0,
+        'recent_creation': 15 if get_safe(token_data, 'age_hours', 0) < 1 else 0,
+        'low_volume': 25 if get_safe(token_data, 'volume_24h_sol', 0) < 1 else 0,
+        'creator_history': 10 if get_safe(token_data, 'creator_previous_tokens', 0) > 5 else 0
     }
     
     total_risk = sum(risk_factors.values())
@@ -50,11 +56,11 @@ def calculate_risk_score(token_data):
 def calculate_opportunity_score(token_data):
     """Calcule un score d'opportunité (0-100, plus haut = meilleure opportunité)"""
     opportunity_factors = {
-        'early_adopter_signal': min(40, len(token_data.get('early_adopter_buyers', [])) * 10),
-        'good_timing': 20 if token_data.get('age_hours', 24) < 6 else 10,
-        'rising_volume': 15 if token_data.get('volume_trend', 0) > 0 else 0,
-        'good_liquidity': 15 if token_data.get('liquidity_sol', 0) > 20 else 5,
-        'holder_growth': 10 if token_data.get('holder_growth_24h', 0) > 0 else 0
+        'early_adopter_signal': min(40, len(get_safe(token_data, 'early_adopter_buyers', [])) * 10),
+        'good_timing': 20 if get_safe(token_data, 'age_hours', 24) < 6 else 10,
+        'rising_volume': 15 if get_safe(token_data, 'volume_trend', 0) > 0 else 0,
+        'good_liquidity': 15 if get_safe(token_data, 'liquidity_sol', 0) > 20 else 5,
+        'holder_growth': 10 if get_safe(token_data, 'holder_growth_24h', 0) > 0 else 0
     }
     
     total_opportunity = sum(opportunity_factors.values())
@@ -70,8 +76,8 @@ def format_large_number(num):
 
 def get_recommendation(risk_score, opportunity_score, token_data):
     """Génère une recommandation d'investissement"""
-    ea_count = len(token_data.get('early_adopter_buyers', []))
-    age_hours = token_data.get('age_hours', 24)
+    ea_count = len(get_safe(token_data, 'early_adopter_buyers', []))
+    age_hours = get_safe(token_data, 'age_hours', 24)
     
     if opportunity_score >= 70 and risk_score <= 30 and ea_count >= 3:
         return "🟢 ACHAT FORT", "Excellente opportunité avec signal EA fort"
@@ -104,8 +110,8 @@ def main():
         
         # Filtres de performance
         min_volume_24h = st.slider("Volume 24h min (SOL)", 0.0, 50.0, 0.0)
-        max_risk_score = st.slider("Score risque max", 0, 100, 70)
-        min_opportunity_score = st.slider("Score opportunité min", 0, 100, 30)
+        max_risk_score = st.slider("Score risque max", 0, 100, 100)
+        min_opportunity_score = st.slider("Score opportunité min", 0, 100, 0)
         
         # Options d'affichage
         show_only_recommendations = st.checkbox("Montrer seulement les recommandations d'achat", False)
@@ -167,8 +173,8 @@ def main():
         recommendation, reason = get_recommendation(risk_score, opportunity_score, token)
         
         # Application des filtres
-        ea_count = len(token.get('early_adopter_buyers', []))
-        age_hours = token.get('age_hours', 24)
+        ea_count = len(get_safe(token, 'early_adopter_buyers', []))
+        age_hours = get_safe(token, 'age_hours', 24)
         
         # Filtres temporels
         if age_filter != "Toutes":
@@ -182,10 +188,10 @@ def main():
                 continue
         
         # Autres filtres
-        if (token.get('liquidity_sol', 0) < min_liquidity or
-            token.get('holders_count', 0) < min_holders or
+        if (get_safe(token, 'liquidity_sol', 0) < min_liquidity or
+            get_safe(token, 'holders_count', 0) < min_holders or
             ea_count < min_ea_signal or
-            token.get('volume_24h_sol', 0) < min_volume_24h or
+            get_safe(token, 'volume_24h_sol', 0) < min_volume_24h or
             risk_score > max_risk_score or
             opportunity_score < min_opportunity_score):
             continue
@@ -216,7 +222,8 @@ def main():
     
     if sort_by in sort_key_map:
         reverse = sort_by not in ["Score Risque", "Âge"]
-        analyzed_tokens.sort(key=lambda x: x.get(sort_key_map[sort_by], 0), reverse=reverse)
+        sort_key = sort_key_map[sort_by]
+        analyzed_tokens.sort(key=lambda x: get_safe(x, sort_key, 0), reverse=reverse)
     
     # Métriques globales
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -273,7 +280,8 @@ def main():
                 
                 # Distribution des signaux EA
                 max_ea_count = scores_df['ea_count'].max()
-                nbins_ea = max(1, max_ea_count if max_ea_count is not None else 1)
+                # Cast to int to avoid numpy.int64 type error in plotly
+                nbins_ea = int(max(1, max_ea_count if max_ea_count is not None else 1))
 
                 fig_ea = px.histogram(
                     scores_df,
@@ -313,72 +321,140 @@ def main():
     with tab2:
         st.header("🎯 Tokens à Surveiller de Près")
         
-        # Affichage des tokens avec scoring
-        for i, token in enumerate(analyzed_tokens[:20]):
-            with st.expander(
-                f"{token['recommendation']} {token.get('symbol', 'UNK')} - "
-                f"Opp: {token['opportunity_score']}/100, Risque: {token['risk_score']}/100"
-            ):
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.write("**📋 Informations de Base:**")
-                    st.write(f"• **Nom:** {token.get('name', 'N/A')}")
-                    st.write(f"• **Symbole:** {token.get('symbol', 'UNK')}")
-                    st.write(f"• **Âge:** {token.get('age_hours', 0):.1f}h")
-                    st.write(f"• **Créateur:** `{token.get('creator', 'N/A')[:20]}...`")
-                    
-                    # Liens rapides
-                    st.write("**🔗 Liens:**")
-                    st.write(f"[🚀 Pump.fun](https://pump.fun/{token['address']})")
-                    st.write(f"[🔍 Solscan](https://solscan.io/token/{token['address']})")
-                
-                with col2:
-                    st.write("**💰 Données Financières:**")
-                    st.write(f"• **Price:** ${token.get('price_usd', 0):.6f}")
-                    st.write(f"• **Market Cap:** ${format_large_number(token.get('market_cap_usd', 0))}")
-                    st.write(f"• **Liquidité:** {token.get('liquidity_sol', 0):.2f} SOL")
-                    st.write(f"• **Volume 24h:** {token.get('volume_24h_sol', 0):.2f} SOL")
-                    st.write(f"• **Bonding Curve:** {token.get('bonding_curve_progress', 0):.1f}%")
-                
-                with col3:
-                    st.write("**👥 Données Communauté:**")
-                    st.write(f"• **Holders:** {token.get('holders_count', 0)}")
-                    st.write(f"• **Top 5 détiennent:** {token.get('top_5_holders_percentage', 0):.1f}%")
-                    st.write(f"• **Croissance holders:** {token.get('holder_growth_24h', 0):.1f}%")
-                    st.write(f"• **Early Adopters:** {token['ea_count']}")
-                    
-                    if token.get('early_adopter_buyers'):
-                        st.write("**🏆 Early Adopters:**")
-                        for ea in token['early_adopter_buyers'][:3]:
-                            st.write(f"• `{ea[:12]}...`")
-                
-                with col4:
-                    st.write("**📊 Analyse & Scores:**")
-                    st.write(f"• **Score Opportunité:** {token['opportunity_score']}/100")
-                    st.write(f"• **Score Risque:** {token['risk_score']}/100")
-                    st.write(f"• **Recommandation:** {token['recommendation']}")
-                    st.write(f"• **Raison:** {token['reason']}")
-                    
-                    # Barre de progression pour les scores
-                    st.write("**Opportunité:**")
-                    st.progress(token['opportunity_score'] / 100)
-                    
-                    st.write("**Risque:**")
-                    st.progress(token['risk_score'] / 100)
-                    
-                    # Indicateur de timing
-                    age_hours = token.get('age_hours', 24)
-                    if age_hours < 1:
-                        timing_indicator = "🔥 TRÈS RÉCENT"
-                    elif age_hours < 6:
-                        timing_indicator = "⚡ RÉCENT"
-                    elif age_hours < 24:
-                        timing_indicator = "📅 NOUVEAU"
-                    else:
-                        timing_indicator = "📆 ÉTABLI"
-                    
-                    st.write(f"**Timing:** {timing_indicator}")
+        if analyzed_tokens:
+            # Convertir en DataFrame pour une manipulation facile
+            df = pd.DataFrame(analyzed_tokens)
+
+            # Définir toutes les colonnes possibles
+            ALL_COLUMNS = [
+                "Lien", "Symbole", "Nom", "Âge (h)", "Market Cap ($)", "Holders", "Volume (SOL)", 
+                "Risque", "Opportunité", "Recommandation", "Twitter", "Website", "Telegram", 
+                "Metadata", "Total Supply", "Description", "Créateur", "NSFW", "Vérifié",
+                "Bonding Curve", "KOTH Timestamp", "Assoc. Bonding Curve", "Raydium Pool",
+                "Virtual SOL", "Virtual Tokens", "Hidden", "Show Name", "Last Trade",
+                "Market Cap (Native)", "Market ID", "Inverted", "Real SOL", "Real Tokens",
+                "Ban Expiry", "Last Reply", "Reply Count", "Banned", "Live", "Initialized",
+                "Video", "Updated At", "Pump Swap Pool", "ATH Market Cap", "ATH Timestamp",
+                "Banner", "Hide Banner", "Livestream Score"
+            ]
+            
+            # Par défaut, afficher toutes les colonnes comme demandé par l'utilisateur
+            DEFAULT_COLUMNS = ALL_COLUMNS.copy()
+
+            # Widget de sélection de colonnes dans la sidebar
+            with st.sidebar:
+                st.header("📊 Colonnes du Tableau")
+                selected_columns = st.multiselect(
+                    "Choisir les colonnes à afficher",
+                    options=ALL_COLUMNS,
+                    default=DEFAULT_COLUMNS
+                )
+
+            # Préparer les données pour le tableau
+            table_data = []
+            for _, token in df.iterrows():
+                row_data = {
+                    "Lien": f"https://pump.fun/{get_safe(token, 'address', '')}",
+                    "Symbole": get_safe(token, 'symbol', 'UNK'),
+                    "Nom": get_safe(token, 'name', 'N/A'),
+                    "Âge (h)": get_safe(token, 'age_hours', 0),
+                    "Market Cap ($)": get_safe(token, 'usd_market_cap', 0),
+                    "Holders": get_safe(token, 'holders_count', 0),
+                    "Volume (SOL)": get_safe(token, 'volume_24h_sol', 0),
+                    "Risque": get_safe(token, 'risk_score', 0),
+                    "Opportunité": get_safe(token, 'opportunity_score', 0),
+                    "Recommandation": get_safe(token, 'recommendation', ''),
+                    "Twitter": get_safe(token, 'twitter', ''),
+                    "Website": get_safe(token, 'website', ''),
+                    "Telegram": get_safe(token, 'telegram', ''),
+                    "Metadata": get_safe(token, 'metadata_uri', ''),
+                    "Total Supply": get_safe(token, 'total_supply', 0),
+                    "Description": get_safe(token, 'description', ''),
+                    "Créateur": get_safe(token, 'creator', ''),
+                    "NSFW": get_safe(token, 'nsfw', False),
+                    "Vérifié": get_safe(token, 'is_verified', False),
+                    "Bonding Curve": get_safe(token, 'bonding_curve', ''),
+                    "KOTH Timestamp": get_safe(token, 'king_of_the_hill_timestamp', None),
+                    "Assoc. Bonding Curve": get_safe(token, 'associated_bonding_curve', ''),
+                    "Raydium Pool": get_safe(token, 'raydium_pool', ''),
+                    "Virtual SOL": get_safe(token, 'virtual_sol_reserves', 0),
+                    "Virtual Tokens": get_safe(token, 'virtual_token_reserves', 0),
+                    "Hidden": get_safe(token, 'hidden', False),
+                    "Show Name": get_safe(token, 'show_name', False),
+                    "Last Trade": get_safe(token, 'last_trade_timestamp', None),
+                    "Market Cap (Native)": get_safe(token, 'market_cap', 0),
+                    "Market ID": get_safe(token, 'market_id', ''),
+                    "Inverted": get_safe(token, 'inverted', False),
+                    "Real SOL": get_safe(token, 'real_sol_reserves', 0),
+                    "Real Tokens": get_safe(token, 'real_token_reserves', 0),
+                    "Ban Expiry": get_safe(token, 'livestream_ban_expiry', None),
+                    "Last Reply": get_safe(token, 'last_reply', None),
+                    "Reply Count": get_safe(token, 'reply_count', 0),
+                    "Banned": get_safe(token, 'is_banned', False),
+                    "Live": get_safe(token, 'is_currently_live', False),
+                    "Initialized": get_safe(token, 'initialized', False),
+                    "Video": get_safe(token, 'video_uri', ''),
+                    "Updated At": get_safe(token, 'updated_at', None),
+                    "Pump Swap Pool": get_safe(token, 'pump_swap_pool', ''),
+                    "ATH Market Cap": get_safe(token, 'ath_market_cap', 0),
+                    "ATH Timestamp": get_safe(token, 'ath_market_cap_timestamp', None),
+                    "Banner": get_safe(token, 'banner_uri', ''),
+                    "Hide Banner": get_safe(token, 'hide_banner', False),
+                    "Livestream Score": get_safe(token, 'livestream_downrank_score', 0)
+                }
+                table_data.append(row_data)
+            
+            display_df = pd.DataFrame(table_data)
+            
+            # Filtrer le DataFrame pour n'afficher que les colonnes sélectionnées
+            if selected_columns:
+                existing_selected_columns = [col for col in selected_columns if col in display_df.columns]
+                display_df = display_df[existing_selected_columns]
+
+            # Afficher le tableau interactif
+            st.dataframe(
+                display_df,
+                column_config={
+                    "Lien": st.column_config.LinkColumn("Pump.fun", display_text="🚀"),
+                    "Twitter": st.column_config.LinkColumn("Twitter"),
+                    "Website": st.column_config.LinkColumn("Website"),
+                    "Telegram": st.column_config.LinkColumn("Telegram"),
+                    "Metadata": st.column_config.LinkColumn("Metadata"),
+                    "Banner": st.column_config.LinkColumn("Banner"),
+                    "Video": st.column_config.LinkColumn("Video"),
+                    "Market Cap ($)": st.column_config.NumberColumn(format="$ %.2f"),
+                    "Market Cap (Native)": st.column_config.NumberColumn(format="%.2f"),
+                    "ATH Market Cap": st.column_config.NumberColumn(format="$ %.2f"),
+                    "Volume (SOL)": st.column_config.NumberColumn(format="%.2f SOL"),
+                    "Âge (h)": st.column_config.NumberColumn(format="%.1f h"),
+                    "Total Supply": st.column_config.NumberColumn(),
+                    "Virtual SOL": st.column_config.NumberColumn(),
+                    "Virtual Tokens": st.column_config.NumberColumn(),
+                    "Real SOL": st.column_config.NumberColumn(),
+                    "Real Tokens": st.column_config.NumberColumn(),
+                    "Risque": st.column_config.ProgressColumn("Risque", min_value=0, max_value=100),
+                    "Opportunité": st.column_config.ProgressColumn("Opportunité", min_value=0, max_value=100),
+                    "NSFW": st.column_config.CheckboxColumn("NSFW"),
+                    "Vérifié": st.column_config.CheckboxColumn("Vérifié"),
+                    "Hidden": st.column_config.CheckboxColumn("Hidden"),
+                    "Show Name": st.column_config.CheckboxColumn("Show Name"),
+                    "Inverted": st.column_config.CheckboxColumn("Inverted"),
+                    "Banned": st.column_config.CheckboxColumn("Banned"),
+                    "Live": st.column_config.CheckboxColumn("Live"),
+                    "Initialized": st.column_config.CheckboxColumn("Initialized"),
+                    "Hide Banner": st.column_config.CheckboxColumn("Hide Banner"),
+                    "KOTH Timestamp": st.column_config.DatetimeColumn("KOTH"),
+                    "Last Trade": st.column_config.DatetimeColumn("Last Trade"),
+                    "Ban Expiry": st.column_config.DatetimeColumn("Ban Expiry"),
+                    "Last Reply": st.column_config.DatetimeColumn("Last Reply"),
+                    "Updated At": st.column_config.DatetimeColumn("Updated At"),
+                    "ATH Timestamp": st.column_config.DatetimeColumn("ATH"),
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("Aucun token ne correspond aux filtres actuels.")
     
     with tab3:
         st.header("⚡ Analyses et Actions Rapides")
@@ -391,7 +467,7 @@ def main():
             top_opportunities = sorted(analyzed_tokens, key=lambda x: x['opportunity_score'], reverse=True)[:10]
             
             for token in top_opportunities:
-                st.write(f"**{token.get('symbol', 'UNK')}** - {token['opportunity_score']}/100")
+                st.write(f"**{get_safe(token, 'symbol', 'UNK')}** - {token['opportunity_score']}/100")
                 st.write(f"[🚀 Pump.fun](https://pump.fun/{token['address']}) | EA: {token['ea_count']}")
                 st.write("---")
         
@@ -400,7 +476,7 @@ def main():
             low_risk = sorted(analyzed_tokens, key=lambda x: x['risk_score'])[:10]
             
             for token in low_risk:
-                st.write(f"**{token.get('symbol', 'UNK')}** - Risque: {token['risk_score']}/100")
+                st.write(f"**{get_safe(token, 'symbol', 'UNK')}** - Risque: {token['risk_score']}/100")
                 st.write(f"[🚀 Pump.fun](https://pump.fun/{token['address']}) | Opp: {token['opportunity_score']}/100")
                 st.write("---")
         
@@ -409,7 +485,7 @@ def main():
             strong_ea = sorted(analyzed_tokens, key=lambda x: x['ea_count'], reverse=True)[:10]
             
             for token in strong_ea:
-                st.write(f"**{token.get('symbol', 'UNK')}** - {token['ea_count']} EA")
+                st.write(f"**{get_safe(token, 'symbol', 'UNK')}** - {token['ea_count']} EA")
                 st.write(f"[🚀 Pump.fun](https://pump.fun/{token['address']}) | Opp: {token['opportunity_score']}/100")
                 st.write("---")
         
@@ -434,17 +510,17 @@ def main():
                 for token in analyzed_tokens:
                     export_data.append({
                         'Adresse': token['address'],
-                        'Symbole': token.get('symbol', 'UNK'),
-                        'Nom': token.get('name', 'N/A'),
+                        'Symbole': get_safe(token, 'symbol', 'UNK'),
+                        'Nom': get_safe(token, 'name', 'N/A'),
                         'Score_Opportunité': token['opportunity_score'],
                         'Score_Risque': token['risk_score'],
                         'Recommandation': token['recommendation'],
                         'Early_Adopters': token['ea_count'],
-                        'Liquidité_SOL': token.get('liquidity_sol', 0),
-                        'Volume_24h_SOL': token.get('volume_24h_sol', 0),
-                        'Holders': token.get('holders_count', 0),
-                        'Âge_Heures': token.get('age_hours', 0),
-                        'Market_Cap_USD': token.get('market_cap_usd', 0),
+                        'Liquidité_SOL': get_safe(token, 'liquidity_sol', 0),
+                        'Volume_24h_SOL': get_safe(token, 'volume_24h_sol', 0),
+                        'Holders': get_safe(token, 'holders_count', 0),
+                        'Âge_Heures': get_safe(token, 'age_hours', 0),
+                        'Market_Cap_USD': get_safe(token, 'market_cap_usd', 0),
                         'Pump_fun_Link': f"https://pump.fun/{token['address']}"
                     })
                 
@@ -464,7 +540,7 @@ def main():
             # Sélecteur de token
             token_options = []
             for token in analyzed_tokens[:50]:
-                label = f"{token.get('symbol', 'UNK')} - Opp: {token['opportunity_score']}/100 - EA: {token['ea_count']}"
+                label = f"{get_safe(token, 'symbol', 'UNK')} - Opp: {token['opportunity_score']}/100 - EA: {token['ea_count']}"
                 token_options.append((label, token['address']))
             
             selected_token_label = st.selectbox(
@@ -517,15 +593,15 @@ def main():
                         st.write("**Facteurs positifs:**")
                         if token_data['ea_count'] > 0:
                             st.write(f"✅ {token_data['ea_count']} Early Adopters détectés")
-                        if token_data.get('volume_24h_sol', 0) > 5:
+                        if get_safe(token_data, 'volume_24h_sol', 0) > 5:
                             st.write("✅ Volume élevé")
-                        if token_data.get('age_hours', 24) < 6:
+                        if get_safe(token_data, 'age_hours', 24) < 6:
                             st.write("✅ Token très récent")
                         
                         st.write("**Facteurs de risque:**")
-                        if token_data.get('liquidity_sol', 0) < 10:
+                        if get_safe(token_data, 'liquidity_sol', 0) < 10:
                             st.write("⚠️ Liquidité faible")
-                        if token_data.get('top_5_holders_percentage', 0) > 50:
+                        if get_safe(token_data, 'top_5_holders_percentage', 0) > 50:
                             st.write("⚠️ Concentration élevée des holders")
                 else:
                     st.error("Impossible de charger les détails du token")
