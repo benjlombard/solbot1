@@ -131,6 +131,13 @@ def format_duration(seconds):
 def main():
     """Interface principale du dashboard"""
     
+    # Gestion des pages
+    query_params = st.query_params
+    if "page" in query_params and query_params["page"] == "token_details":
+        from token_details import main as token_details_main
+        token_details_main()
+        return
+
     # Titre principal
     st.title("🚀 PumpFun Early Adopters Tracker")
     st.markdown("*Système de tracking avec polling intelligent - Version optimisée*")

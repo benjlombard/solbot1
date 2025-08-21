@@ -75,6 +75,56 @@ def format_large_number(num):
         return f"{num/1_000:.1f}K"
     return f"{num:.2f}"
 
+def format_risk_score(score):
+    if score <= 20:
+        return f"🟢 Très Faible ({score:.0f})"
+    elif score <= 40:
+        return f"🟡 Faible ({score:.0f})"
+    elif score <= 60:
+        return f"🟠 Modéré ({score:.0f})"
+    elif score <= 80:
+        return f"🔴 Élevé ({score:.0f})"
+    else:
+        return f"🚨 Très Élevé ({score:.0f})"
+
+def format_opportunity_score(score):
+    if score <= 20:
+        return f"🔴 Très Faible ({score:.0f})"
+    elif score <= 40:
+        return f"🟠 Faible ({score:.0f})"
+    elif score <= 60:
+        return f"🟡 Modéré ({score:.0f})"
+    elif score <= 80:
+        return f"🟢 Élevé ({score:.0f})"
+    else:
+        return f"✨ Très Élevé ({score:.0f})"
+
+def format_rugcheck_score(score):
+    if score is None:
+        return "N/A"
+    if score <= 15:
+        return f"🟢 EXCELLENT ({score:.0f})"
+    elif score <= 30:
+        return f"🟢 BON ({score:.0f})"
+    elif score <= 45:
+        return f"🟡 ACCEPTABLE ({score:.0f})"
+    elif score <= 60:
+        return f"🟠 RISQUÉ ({score:.0f})"
+    elif score <= 75:
+        return f"🔴 DANGEREUX ({score:.0f})"
+    else:
+        return f"🚨 CRITIQUE ({score:.0f})"
+
+def format_mc_liq_ratio(ratio):
+    if ratio <= 2:
+        return f"✅ EXCELLENT ({ratio:.2f})"
+    elif ratio <= 5:
+        return f"✅ BON ({ratio:.2f})"
+    elif ratio <= 15:
+        return f"⚠️ RISQUÉ ({ratio:.2f})"
+    else:
+        return f"🚨 TRÈS DANGEREUX ({ratio:.2f})"
+
 def get_recommendation(risk_score, opportunity_score, token_data):
     """Génère une recommandation d'investissement"""
     ea_count = len(get_safe(token_data, 'early_adopter_buyers', []))
@@ -119,7 +169,7 @@ def main():
         show_only_recommendations = st.checkbox("Montrer seulement les recommandations d'achat", False)
         sort_by = st.selectbox(
             "Trier par",
-            ["Score Opportunité", "Score Risque", "Signal EA", "Volume 24h", "Âge"],
+            ["Score Opportunité", "Score Risque", "Score Rugcheck", "Progression Bonding Curve", "MC/Liq Ratio", "Signal EA", "Volume 24h", "Âge"],
             index=0
         )
         
@@ -219,15 +269,30 @@ def main():
     sort_key_map = {
         "Score Opportunité": 'opportunity_score',
         "Score Risque": 'risk_score',
+        "Score Rugcheck": 'rugcheck_score',
+        "Progression Bonding Curve": 'bonding_curve_progress',
+        "MC/Liq Ratio": 'mc_liq_ratio',
         "Signal EA": 'ea_count',
         "Volume 24h": 'volume_24h_sol',
         "Âge": 'age_hours'
     }
-    
+
+    # Pre-calculate the ratio for sorting
+    for token in analyzed_tokens:
+        raw_report = json.loads(get_safe(token, 'rugcheck_raw_report', '{}'))
+        liquidity = raw_report.get('totalMarketLiquidity', 0)
+        market_cap = get_safe(token, 'usd_market_cap', 0)
+        token['mc_liq_ratio'] = market_cap / liquidity if liquidity > 0 else float('inf')
+
     if sort_by in sort_key_map:
-        reverse = sort_by not in ["Score Risque", "Âge"]
+        reverse = sort_by not in ["Score Risque", "Âge", "Score Rugcheck", "MC/Liq Ratio"]
         sort_key = sort_key_map[sort_by]
-        analyzed_tokens.sort(key=lambda x: get_safe(x, sort_key, 0), reverse=reverse)
+        
+        if sort_by == "Score Rugcheck":
+            # Lower is better, but we want to handle None values
+            analyzed_tokens.sort(key=lambda x: get_safe(x, sort_key, 101), reverse=False)
+        else:
+            analyzed_tokens.sort(key=lambda x: get_safe(x, sort_key, 0), reverse=reverse)
     
     # Métriques globales
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -336,7 +401,7 @@ def main():
 
             # Définir toutes les colonnes possibles
             ALL_COLUMNS = [
-                "Lien", "Symbole", "Nom", "Âge (h)", "Market Cap ($)", "Holders", "Volume (SOL)",
+                "Détails", "Lien", "Symbole", "Nom", "Âge (h)", "Market Cap ($)", "MC/Liq Ratio", "Holders", "Volume (SOL)",
                 "Progression Bonding Curve", "Score Rugcheck", "Risque", "Opportunité", "Recommandation", "Twitter", "Website", "Telegram",
                 "Metadata", "Total Supply", "Description", "Créateur", "NSFW", "Vérifié",
                 "Bonding Curve", "KOTH Timestamp", "Assoc. Bonding Curve", "Raydium Pool",
@@ -363,17 +428,19 @@ def main():
             table_data = []
             for _, token in df.iterrows():
                 row_data = {
+                    "Détails": f"/?page=token_details&address={get_safe(token, 'address', '')}",
                     "Lien": f"https://pump.fun/{get_safe(token, 'address', '')}",
                     "Symbole": get_safe(token, 'symbol', 'UNK'),
                     "Nom": get_safe(token, 'name', 'N/A'),
                     "Âge (h)": get_safe(token, 'age_hours', 0),
                     "Market Cap ($)": get_safe(token, 'usd_market_cap', 0),
+                    "MC/Liq Ratio": format_mc_liq_ratio(token.get('mc_liq_ratio', float('inf'))),
                     "Holders": get_safe(token, 'holders_count', 0),
                     "Volume (SOL)": get_safe(token, 'volume_24h_sol', 0),
                     "Progression Bonding Curve": get_safe(token, 'bonding_curve_progress', 0),
-                    "Score Rugcheck": get_safe(token, 'rugcheck_score', 0),
-                    "Risque": get_safe(token, 'risk_score', 0),
-                    "Opportunité": get_safe(token, 'opportunity_score', 0),
+                    "Score Rugcheck": format_rugcheck_score(get_safe(token, 'rugcheck_score', None)),
+                    "Risque": format_risk_score(get_safe(token, 'risk_score', 0)),
+                    "Opportunité": format_opportunity_score(get_safe(token, 'opportunity_score', 0)),
                     "Recommandation": get_safe(token, 'recommendation', ''),
                     "Twitter": get_safe(token, 'twitter', ''),
                     "Website": get_safe(token, 'website', ''),
@@ -427,6 +494,7 @@ def main():
                 st.dataframe(
                     display_df,
                     column_config={
+                        "Détails": st.column_config.LinkColumn("Détails", display_text="📄"),
                         "Lien": st.column_config.LinkColumn("Pump.fun", display_text="🚀"),
                         "Twitter": st.column_config.LinkColumn("Twitter"),
                         "Website": st.column_config.LinkColumn("Website"),
@@ -445,9 +513,6 @@ def main():
                         "Real SOL": st.column_config.NumberColumn(),
                         "Real Tokens": st.column_config.NumberColumn(),
                         "Progression Bonding Curve": st.column_config.ProgressColumn("Progression Bonding Curve", min_value=0, max_value=100, format="%.1f%%"),
-                        "Score Rugcheck": st.column_config.ProgressColumn("Score Rugcheck", min_value=0, max_value=100, format="%.0f"),
-                        "Risque": st.column_config.ProgressColumn("Risque", min_value=0, max_value=100),
-                        "Opportunité": st.column_config.ProgressColumn("Opportunité", min_value=0, max_value=100),
                         "NSFW": st.column_config.CheckboxColumn("NSFW"),
                         "Vérifié": st.column_config.CheckboxColumn("Vérifié"),
                         "Hidden": st.column_config.CheckboxColumn("Hidden"),
@@ -514,6 +579,26 @@ def main():
                             st.info("Aucune information sur les détenteurs disponible.")
                     except (json.JSONDecodeError, TypeError):
                         st.info("Données de détenteurs non disponibles ou invalides.")
+
+                    st.write("---")
+                    
+                    # Afficher l'analyse de la liquidité
+                    st.write("**Analyse de la Liquidité:**")
+                    raw_report_json = get_safe(selected_token, 'rugcheck_raw_report', '{}')
+                    try:
+                        raw_report = json.loads(raw_report_json)
+                        total_liquidity = raw_report.get('totalMarketLiquidity', 0)
+                        st.metric("Liquidité Totale (USD)", f"${total_liquidity:,.2f}")
+                        
+                        if raw_report.get('markets'):
+                            lp_info = raw_report['markets'][0].get('lp', {})
+                            lp_locked_pct = lp_info.get('lpLockedPct', 0)
+                            st.metric("Liquidité Verrouillée", f"{lp_locked_pct:.2f}%")
+                        else:
+                            st.info("Aucune information sur les marchés de liquidité disponible.")
+                            
+                    except (json.JSONDecodeError, TypeError):
+                        st.info("Données de liquidité non disponibles ou invalides.")
 
         else:
             st.info("Aucun token ne correspond aux filtres actuels.")

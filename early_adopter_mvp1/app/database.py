@@ -70,7 +70,8 @@ class DatabaseManager:
                     ath_market_cap_timestamp TIMESTAMP,
                     banner_uri TEXT,
                     hide_banner BOOLEAN,
-                    livestream_downrank_score REAL
+                    livestream_downrank_score REAL,
+                    row_created_at TIMESTAMP
                 )
             """)
             
@@ -165,11 +166,12 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO pump_tokens 
-                    (address, name, symbol, description, creator, created_at, market_cap_discovery)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (address, name, symbol, description, creator, created_at, market_cap_discovery, row_created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     token.address, token.name, token.symbol, token.description,
-                    token.creator, token.created_at, token.market_cap_discovery
+                    token.creator, token.created_at, token.market_cap_discovery,
+                    datetime.now().isoformat()
                 ))
                 conn.commit()
                 logger.info(f"Inserted token: {token.address}")
@@ -421,9 +423,9 @@ class DatabaseManager:
                         market_cap = ?, market_id = ?, inverted = ?, real_sol_reserves = ?,
                         real_token_reserves = ?, livestream_ban_expiry = ?, last_reply = ?,
                         reply_count = ?, is_banned = ?, is_currently_live = ?, initialized = ?,
-                        video_uri = ?, updated_at = ?, pump_swap_pool = ?, ath_market_cap = ?,
+                        video_uri = ?, pump_swap_pool = ?, ath_market_cap = ?,
                         ath_market_cap_timestamp = ?, banner_uri = ?, hide_banner = ?,
-                        livestream_downrank_score = ?, last_updated_pumpfun = ?
+                        livestream_downrank_score = ?, last_updated_pumpfun = ?, updated_at = ?
                     WHERE address = ?
                 """, (
                     pump_data.get('name'), pump_data.get('symbol'), pump_data.get('description'),
@@ -442,10 +444,11 @@ class DatabaseManager:
                     ts_to_iso(pump_data.get('livestream_ban_expiry')), ts_to_iso(pump_data.get('last_reply')),
                     pump_data.get('reply_count'), pump_data.get('is_banned'),
                     pump_data.get('is_currently_live'), pump_data.get('initialized'),
-                    pump_data.get('video_uri'), pump_data.get('updated_at'),
+                    pump_data.get('video_uri'),
                     pump_data.get('pump_swap_pool'), pump_data.get('ath_market_cap'),
                     ts_to_iso(pump_data.get('ath_market_cap_timestamp')), pump_data.get('banner_uri'),
                     pump_data.get('hide_banner'), pump_data.get('livestream_downrank_score'),
+                    datetime.now().isoformat(),
                     datetime.now().isoformat(),
                     token_address
                 ))
