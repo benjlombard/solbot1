@@ -9,10 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from polling_manager import polling_manager
-from early_adopter_scorer import scorer
-from database import db
-from config import settings
+from .system_monitor import SystemMonitor
+from .polling_manager import IntelligentPollingManager
+from .early_adopter_scorer import scorer
+from .database import db
+from .config import settings
+from .pump_fun_client import PumpFunClient
 
 # Configuration du logging AVANT d'importer pump_fun_client
 logging.basicConfig(
@@ -28,19 +30,25 @@ logger = logging.getLogger(__name__)
 
 # MAINTENANT importer et initialiser le client Pump.fun
 try:
-    from pump_fun_client import PumpFunClient
     pump_client = PumpFunClient(logger_instance=logger)
     logger.info("Pump.fun client initialized successfully")
 except ImportError as e:
     logger.error(f"Failed to import PumpFunClient or initialize it: {e}", exc_info=True)
     pump_client = None
 
+system_monitor = SystemMonitor(db)
+polling_manager = IntelligentPollingManager(system_monitor=system_monitor)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestionnaire de cycle de vie de l'application"""
     logger.info("Starting PumpFun Tracker with intelligent polling...")
     
+    # Start the system monitor in a background thread
+    import threading
+    monitor_thread = threading.Thread(target=system_monitor.run, daemon=True)
+    monitor_thread.start()
+
     # Démarrage du polling intelligent
     polling_manager.start_polling()
     
@@ -381,6 +389,17 @@ async def get_polling_stats():
     except Exception as e:
         logger.error(f"Error getting polling stats: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving polling stats")
+
+
+@app.get("/api/updated-tokens-stats")
+async def get_updated_tokens_stats():
+    """Récupère le nombre de tokens mis à jour récemment."""
+    try:
+        counts = db.get_updated_tokens_counts()
+        return counts
+    except Exception as e:
+        logger.error(f"Error getting updated tokens stats: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving updated tokens stats")
 
 
 @app.get("/api/transactions-detailed")

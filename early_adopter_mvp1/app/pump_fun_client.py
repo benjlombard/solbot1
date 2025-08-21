@@ -13,14 +13,16 @@ class PumpFunClient:
     This client uses the `aiohttp` library.
     """
     
-    def __init__(self, logger_instance: Optional[logging.Logger] = None):
+    def __init__(self, logger_instance: Optional[logging.Logger] = None, system_monitor: Optional['SystemMonitor'] = None):
         """
         Initializes the PumpFunClient.
         Args:
             logger_instance: An optional logger instance. If not provided, a default logger is used.
+            system_monitor: An optional SystemMonitor instance for tracking API calls.
         """
         self.base_url = "https://frontend-api-v3.pump.fun"
         self.logger = logger_instance if logger_instance else logger
+        self.system_monitor = system_monitor
 
     async def get_token_data(self, session: aiohttp.ClientSession, token_address: str) -> Optional[Dict]:
         """
@@ -33,6 +35,9 @@ class PumpFunClient:
         Returns:
             A dictionary containing the token's data from the API, or None if the request fails.
         """
+        if self.system_monitor:
+            self.system_monitor.record_api_call('pumpfun')
+
         url = f"{self.base_url}/coins/{token_address}"
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',

@@ -8,9 +8,10 @@ class RugCheckClient:
     Client for RugCheck.xyz API with specialized methods for token security analysis
     """
     
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None, system_monitor: Optional['SystemMonitor'] = None):
         self.base_url = "https://api.rugcheck.xyz/v1"
         self.logger = logger or logging.getLogger(__name__)
+        self.system_monitor = system_monitor
     
     async def get_token_report_async(
         self, 
@@ -27,6 +28,9 @@ class RugCheckClient:
         Returns:
             Complete security report or None if not available
         """
+        if self.system_monitor:
+            self.system_monitor.record_api_call('rugcheck')
+
         url = f"{self.base_url}/tokens/{token_address}/report"
         try:
             async with session.get(url, timeout=45.0) as response:

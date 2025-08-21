@@ -22,14 +22,15 @@ from early_adopter_scorer import scorer
 logger = logging.getLogger(__name__)
 
 class IntelligentPollingManager:
-    def __init__(self):
+    def __init__(self, system_monitor: 'SystemMonitor'):
+        self.system_monitor = system_monitor
         self.helius_api_key = settings.helius_api_key
         self.helius_rpc_url = "https://mainnet.helius-rpc.com"
         self.pumpfun_program_id = settings.pumpfun_program_id
         
         self.httpx_client = httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0))
-        self.pump_fun_client = PumpFunClient(logger_instance=logger)
-        self.rugcheck_client = RugCheckClient(logger=logger)
+        self.pump_fun_client = PumpFunClient(logger_instance=logger, system_monitor=self.system_monitor)
+        self.rugcheck_client = RugCheckClient(logger=logger, system_monitor=self.system_monitor)
         self.polling_task = None
         self.is_running = False
         
@@ -42,7 +43,6 @@ class IntelligentPollingManager:
         
         # Statistiques
         self.daily_stats = defaultdict(int)
-        self.credits_used_today = 0
         self.last_reset_date = datetime.now().date()
         
         # Paramètres de polling adaptatif
@@ -80,7 +80,7 @@ class IntelligentPollingManager:
                 self._check_daily_reset()
                 
                 # Vérifier les limites de crédits
-                if self.credits_used_today >= settings.max_daily_credits * 0.95:
+                if self.system_monitor.get_helius_credits_today() >= settings.max_daily_credits * 0.95:
                     logger.warning("Credit limit nearly reached, pausing polling")
                     await asyncio.sleep(3600)  # Attendre 1h
                     continue
@@ -302,12 +302,12 @@ class IntelligentPollingManager:
                         else:
                             logger.warning(f"   ❌ Failed to get transaction details")
                 
-                # Estimation crédits: 1 + nombre de getTransaction
-                credits_used = 1 + len(transactions)
-                self.credits_used_today += credits_used
-                
-                logger.info(f"✅ Retrieved {len(transactions)} pump.fun transactions (used {credits_used} credits)")
-                logger.info(f"💰 Total credits used today: {self.credits_used_today}/{settings.max_daily_credits}")
+                # Record Helius API calls
+                self.system_monitor.record_helius_call('getSignaturesForAddress', 10)
+                if transactions:
+                    self.system_monitor.record_helius_call('getTransaction', 10 * len(transactions))
+
+                logger.info(f"✅ Retrieved {len(transactions)} pump.fun transactions")
                 
                 return transactions
                 
@@ -943,5 +943,5 @@ class IntelligentPollingManager:
         except Exception as e:
             logger.error(f"An error occurred during the enrichment task: {e}", exc_info=True)
 
-# Instance globale
-polling_manager = IntelligentPollingManager()
+# This will be instantiated in main.py
+polling_manager = None

@@ -70,6 +70,18 @@ def fetch_polling_stats():
     except:
         return None
 
+@st.cache_data(ttl=30)
+def fetch_updated_tokens_stats():
+    """Récupère les statistiques des tokens mis à jour récemment"""
+    try:
+        response = requests.get(f"{API_BASE_URL}/updated-tokens-stats", timeout=5)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except:
+        return None
+
 def format_wallet_address(address):
     """Formate une adresse de wallet pour l'affichage"""
     if len(address) > 16:
@@ -271,6 +283,21 @@ def main():
             delta=None
         )
     
+    st.divider()
+
+    st.subheader("Tokens mis à jour récemment")
+    updated_tokens_stats = fetch_updated_tokens_stats()
+    if updated_tokens_stats:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("🔥 5 dernières min", updated_tokens_stats.get('5m', 0))
+        with col2:
+            st.metric("⚡ 30 dernières min", updated_tokens_stats.get('30m', 0))
+        with col3:
+            st.metric("🟡 Dernière heure", updated_tokens_stats.get('1h', 0))
+        with col4:
+            st.metric("🔵 6 dernières heures", updated_tokens_stats.get('6h', 0))
+
     st.divider()
     
     # Section de monitoring du polling

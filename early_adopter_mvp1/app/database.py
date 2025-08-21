@@ -486,5 +486,65 @@ class DatabaseManager:
             logger.error(f"Error upserting rugcheck report for {token_address}: {e}")
             return False
 
+    def get_updated_tokens_counts(self) -> Dict[str, int]:
+        """Récupère le nombre de tokens mis à jour récemment."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                intervals = {
+                    "5m": "5 minutes",
+                    "30m": "30 minutes",
+                    "1h": "1 hour",
+                    "6h": "6 hours"
+                }
+                
+                counts = {}
+                
+                for key, interval_str in intervals.items():
+                    query = f"SELECT count(*) FROM pump_tokens WHERE datetime(last_updated_pumpfun) >= datetime('now', 'localtime', '-{interval_str}');"
+                    cursor.execute(query)
+                    count = cursor.fetchone()[0]
+                    counts[key] = count
+                    
+                return counts
+        except Exception as e:
+            logger.error(f"Error getting updated tokens counts: {e}", exc_info=True)
+            return {}
+
+    def get_new_tokens_count(self, since: datetime) -> int:
+        """Counts new tokens since a given datetime."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM pump_tokens WHERE created_at >= ?", (since.isoformat(),))
+                return cursor.fetchone()[0]
+        except Exception as e:
+            self.logger.error(f"Error counting new tokens: {e}")
+            return 0
+
+    def get_new_early_adopters_count(self, since: datetime) -> int:
+        """Counts new early adopters since a given datetime."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Assuming 'last_activity' is updated when an adopter is created or becomes "early"
+                cursor.execute("SELECT COUNT(*) FROM early_adopters WHERE last_activity >= ?", (since.isoformat(),))
+                return cursor.fetchone()[0]
+        except Exception as e:
+            self.logger.error(f"Error counting new early adopters: {e}")
+            return 0
+
+    def get_pump_tokens_updates_count(self, since: datetime) -> int:
+        """Counts updated pump_tokens since a given datetime."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM pump_tokens WHERE last_updated_pumpfun >= ?", (since.isoformat(),))
+                return cursor.fetchone()[0]
+        except Exception as e:
+            self.logger.error(f"Error counting pump_tokens updates: {e}")
+            return 0
+
 # Instance globale
 db = DatabaseManager()
