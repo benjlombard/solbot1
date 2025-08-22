@@ -4,12 +4,7 @@ import json
 import sys
 import os
 
-# Add project root to path
-# This is a bit of a hack, but it's necessary to import the db module
-# when running the script from the root of the project.
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'app')))
-
-from database import db
+from app.database import db
 
 def get_safe(data, key, default):
     """Récupère une valeur d'un dictionnaire de manière sûre, en retournant une valeur par défaut

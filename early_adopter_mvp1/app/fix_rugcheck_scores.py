@@ -26,7 +26,7 @@ def fix_rugcheck_scores():
             cursor = conn.cursor()
             
             # Fetch all reports
-            cursor.execute("SELECT token_address, raw_report FROM rugcheck_reports WHERE raw_report IS NOT NULL")
+            cursor.execute("SELECT token_address, raw_report FROM rugcheck_reports WHERE raw_report IS NOT NULL and token_address like 'EfNHuhAE8hUL7qMtJeKA2RiiexB9Wi43hLwbionfpump'")
             reports = cursor.fetchall()
             
             logger.info(f"Found {len(reports)} reports to process.")
@@ -39,7 +39,7 @@ def fix_rugcheck_scores():
                 try:
                     report = json.loads(raw_report_json)
                     score_normalised = report.get('score_normalised')
-                    
+                    logger.info(f"score normalized : {score_normalised}")
                     if score_normalised is not None:
                         # Update the score column
                         cursor.execute(

@@ -1,1 +1,7 @@
 https://frontend-api-v3.pump.fun/coins/99SbmePq3ohHbuPY3MH2Bushk6mCRcDnfZw89KVLpump
+
+https://jules.google.com/task/2911894240593286406/code/early_adopter_mvp1/app/config.py
+
+https://api.rugcheck.xyz/v1/tokens/5ycc329ZLMjZNzopVVmbTsmt4TkBo2KtRAMYdc5Wpump/report
+http://localhost:8501/
+

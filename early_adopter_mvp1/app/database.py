@@ -5,8 +5,8 @@ from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
 import json
 
-from .models import PumpToken, EarlyPurchase, EarlyAdopter, TokenOutcome, OutcomeType
-from .config import settings
+from app.models import PumpToken, EarlyPurchase, EarlyAdopter, TokenOutcome, OutcomeType
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 

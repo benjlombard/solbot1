@@ -26,6 +26,14 @@ def get_safe(data, key, default):
     val = data.get(key)
     return default if val is None else val
 
+def parse_datetime_safe(dt_str):
+    """Safely parses a datetime string, returning None if invalid."""
+    if not dt_str or not isinstance(dt_str, str):
+        return None
+    try:
+        return pd.to_datetime(dt_str)
+    except (ValueError, TypeError):
+        return None
 
 # Configuration API
 API_BASE_URL = "http://localhost:8010/api"
@@ -203,12 +211,12 @@ def main():
         min_opportunity_score = st.slider("Score opportunité min", 0, 100, 0)
         bonding_curve_progress_filter = st.slider("Progression Bonding Curve (%)", 0, 100, (0, 100))
         
-        # st.header("🎭 Filtres Créateur")
+        st.header("🎭 Filtres Créateur")
 
-        # min_creator_score = st.slider("Score créateur min", 0, 100, 0)
-        # max_creator_risk = st.slider("Risque créateur max", 0, 100, 100)
-        # hide_blacklisted = st.checkbox("Masquer créateurs blacklistés", value=True)
-        # show_only_excellent = st.checkbox("Afficher seulement créateurs excellents")
+        min_creator_score = st.slider("Score créateur min", 0, 100, 0)
+        max_creator_risk = st.slider("Risque créateur max", 0, 100, 100)
+        hide_blacklisted = st.checkbox("Masquer créateurs blacklistés", value=True)
+        show_only_excellent = st.checkbox("Afficher seulement créateurs excellents")
 
         # # Dans le filtrage des tokens, ajouter ces conditions :
         # creator_score = get_safe(token, 'creator_reputation_score', 50)
@@ -307,6 +315,17 @@ def main():
         if show_only_recommendations and not recommendation.startswith("🟢"):
             if not (recommendation.startswith("🟡") and opportunity_score >= 60):
                 continue
+
+        # Filtres créateur
+        creator_score = get_safe(token, 'creator_reputation_score', 50)
+        creator_risk = get_safe(token, 'creator_risk_score', 50)
+        is_blacklisted = get_safe(token, 'creator_is_blacklisted', False)
+
+        if (creator_score < min_creator_score or 
+            creator_risk > max_creator_risk or 
+            (hide_blacklisted and is_blacklisted) or 
+            (show_only_excellent and (creator_score < 80 or get_safe(token, 'creator_success_rate', 0) < 0.6))):
+            continue
         
         token_analyzed = {
             **token,
@@ -462,7 +481,7 @@ def main():
 
             # Définir toutes les colonnes possibles
             ALL_COLUMNS = [
-                "Détails", "Lien", "Symbole", "Nom", "Âge (h)", "Market Cap ($)", "MC/Liq Ratio", "Holders", "Volume (SOL)",
+                "Détails", "Pump.fun", "DexScreener", "Solscan", "RugCheck", "Symbole", "Nom", "Dernière MàJ", "Âge (h)", "Market Cap ($)", "MC/Liq Ratio", "Holders", "Volume (SOL)",
                 "Progression Bonding Curve","Créateur Badge", "Score Créateur", "Créateur Risque", "Créateur Tokens", "Créateur Succès", "Score Rugcheck", "Risque", "Opportunité", "Recommandation", "Twitter", "Website", "Telegram",
                 "Metadata", "Total Supply", "Description", "Créateur", "NSFW", "Vérifié",
                 "Bonding Curve", "KOTH Timestamp", "Assoc. Bonding Curve", "Raydium Pool",
@@ -493,6 +512,7 @@ def main():
                     "Lien": f"https://pump.fun/{get_safe(token, 'address', '')}",
                     "Symbole": get_safe(token, 'symbol', 'UNK'),
                     "Nom": get_safe(token, 'name', 'N/A'),
+                    "Dernière MàJ": parse_datetime_safe(get_safe(token, 'last_updated_pumpfun', None)),
                     "Âge (h)": get_safe(token, 'age_hours', 0),
                     "Market Cap ($)": get_safe(token, 'usd_market_cap', 0),
                     "MC/Liq Ratio": format_mc_liq_ratio(token.get('mc_liq_ratio', float('inf'))),
@@ -572,6 +592,7 @@ def main():
                         "Metadata": st.column_config.LinkColumn("Metadata"),
                         "Banner": st.column_config.LinkColumn("Banner"),
                         "Video": st.column_config.LinkColumn("Video"),
+                        "Dernière MàJ": st.column_config.DatetimeColumn("Dernière MàJ", format="relative"),
                         "Market Cap ($)": st.column_config.NumberColumn(format="$ %.2f"),
                         "Market Cap (Native)": st.column_config.NumberColumn(format="%.2f"),
                         "ATH Market Cap": st.column_config.NumberColumn(format="$ %.2f"),
@@ -684,53 +705,47 @@ def main():
                     - [Solscan](https://solscan.io/token/{selected_token['address']})
                     """)
 
-                    # Afficher les risques
-                    risks_json = get_safe(selected_token, 'rugcheck_risks', '[]')
-                    try:
-                        risks = json.loads(risks_json)
-                        if risks:
-                            st.write("**Risques détectés par Rugcheck:**")
-                            for risk in risks:
-                                st.warning(f"- **{risk.get('name', 'Unknown risk')}**: {risk.get('description', '')} (Sévérité: {risk.get('severity', 'N/A')})")
-                        else:
-                            st.success("✅ Aucun risque majeur détecté par Rugcheck.")
-                    except (json.JSONDecodeError, TypeError):
-                        st.info("Données de risques non disponibles ou invalides.")
-                    
-                    st.write("---")
-                    
-                    # Afficher les top holders
-                    top_holders_json = get_safe(selected_token, 'rugcheck_top_holders', '[]')
-                    try:
-                        top_holders = json.loads(top_holders_json)
-                        if top_holders:
-                            st.write("**Top 10 Holders:**")
-                            holders_df = pd.DataFrame(top_holders[:10])
-                            st.dataframe(holders_df, use_container_width=True)
-                        else:
-                            st.info("Aucune information sur les détenteurs disponible.")
-                    except (json.JSONDecodeError, TypeError):
-                        st.info("Données de détenteurs non disponibles ou invalides.")
+                    # Collapsible sections for details
+                    with st.expander("🚨 Analyse des Risques (Rugcheck)"):
+                        risks_json = get_safe(selected_token, 'rugcheck_risks', '[]')
+                        try:
+                            risks = json.loads(risks_json)
+                            if risks:
+                                for risk in risks:
+                                    st.warning(f"**{risk.get('name', 'Unknown risk')}** (Sévérité: {risk.get('severity', 'N/A')}): {risk.get('description', '')}")
+                            else:
+                                st.success("✅ Aucun risque majeur détecté par Rugcheck.")
+                        except (json.JSONDecodeError, TypeError):
+                            st.info("Données de risques non disponibles ou invalides.")
 
-                    st.write("---")
-                    
-                    # Afficher l'analyse de la liquidité
-                    st.write("**Analyse de la Liquidité:**")
-                    raw_report_json = get_safe(selected_token, 'rugcheck_raw_report', '{}')
-                    try:
-                        raw_report = json.loads(raw_report_json)
-                        total_liquidity = raw_report.get('totalMarketLiquidity', 0)
-                        st.metric("Liquidité Totale (USD)", f"${total_liquidity:,.2f}")
-                        
-                        if raw_report.get('markets'):
-                            lp_info = raw_report['markets'][0].get('lp', {})
-                            lp_locked_pct = lp_info.get('lpLockedPct', 0)
-                            st.metric("Liquidité Verrouillée", f"{lp_locked_pct:.2f}%")
-                        else:
-                            st.info("Aucune information sur les marchés de liquidité disponible.")
+                    with st.expander("👥 Top 10 Détenteurs (Holders)"):
+                        top_holders_json = get_safe(selected_token, 'rugcheck_top_holders', '[]')
+                        try:
+                            top_holders = json.loads(top_holders_json)
+                            if top_holders:
+                                holders_df = pd.DataFrame(top_holders[:10])
+                                st.dataframe(holders_df, use_container_width=True)
+                            else:
+                                st.info("Aucune information sur les détenteurs disponible.")
+                        except (json.JSONDecodeError, TypeError):
+                            st.info("Données de détenteurs non disponibles ou invalides.")
+
+                    with st.expander("💧 Analyse de la Liquidité"):
+                        raw_report_json = get_safe(selected_token, 'rugcheck_raw_report', '{}')
+                        try:
+                            raw_report = json.loads(raw_report_json)
+                            total_liquidity = raw_report.get('totalMarketLiquidity', 0)
+                            st.metric("Liquidité Totale (USD)", f"${total_liquidity:,.2f}")
                             
-                    except (json.JSONDecodeError, TypeError):
-                        st.info("Données de liquidité non disponibles ou invalides.")
+                            if raw_report.get('markets'):
+                                lp_info = raw_report['markets'][0].get('lp', {})
+                                lp_locked_pct = lp_info.get('lpLockedPct', 0)
+                                st.metric("Liquidité Verrouillée", f"{lp_locked_pct:.2f}%")
+                            else:
+                                st.info("Aucune information sur les marchés de liquidité disponible.")
+                                
+                        except (json.JSONDecodeError, TypeError):
+                            st.info("Données de liquidité non disponibles ou invalides.")
 
         else:
             st.info("Aucun token ne correspond aux filtres actuels.")
