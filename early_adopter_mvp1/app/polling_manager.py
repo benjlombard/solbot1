@@ -879,13 +879,14 @@ class IntelligentPollingManager:
         logger.info("Polling manager shutdown complete")
 
     async def _enrich_token_metadata(self):
-        """Tâche de fond pour enrichir les métadonnées des tokens."""
+        """
+        Version corrigée de l'enrichissement des métadonnées
+        """
         logger.info("Starting token metadata enrichment task...")
         self.last_enrichment_run = datetime.now()
         
         try:
-            # Note: get_tokens_to_enrich returns addresses, but we need the full token object
-            # to get the bonding curve addresses. Let's get the full objects.
+            # Récupérer les tokens à enrichir
             token_addresses_to_enrich = db.get_tokens_to_enrich(
                 limit=settings.enrichment_batch_size,
                 update_interval_minutes=settings.enrichment_update_interval_minutes
@@ -895,57 +896,138 @@ class IntelligentPollingManager:
                 logger.info("No tokens require metadata enrichment at this time.")
                 return
 
-            tokens_to_enrich_obj = [db.get_token_by_address(addr) for addr in token_addresses_to_enrich]
-            tokens_to_enrich_obj = [t for t in tokens_to_enrich_obj if t is not None]
+            logger.info(f"Found {len(token_addresses_to_enrich)} tokens to enrich.")
             
-            tokens_to_enrich = [t.__dict__ for t in tokens_to_enrich_obj]
-
-            if not tokens_to_enrich:
-                logger.info("No valid token objects to enrich.")
-                return
-
-            logger.info(f"Found {len(tokens_to_enrich)} tokens to enrich.")
-            
-            # Fetch data from HTTP API and on-chain concurrently
-            async with aiohttp.ClientSession() as session:
-                http_api_tasks = [self.pump_fun_client.get_token_data(session, t['address']) for t in tokens_to_enrich]
-                on_chain_tasks = [get_pump_progress_correct(t['address'], t.get('bonding_curve'), t.get('associated_bonding_curve'), self.helius_api_key) for t in tokens_to_enrich]
-                rugcheck_tasks = [self.rugcheck_client.get_token_report_async(session, t['address']) for t in tokens_to_enrich]
-                
-                all_tasks = http_api_tasks + on_chain_tasks + rugcheck_tasks
-                results = await asyncio.gather(*all_tasks, return_exceptions=True)
-
-            http_api_results = results[:len(tokens_to_enrich)]
-            on_chain_results = results[len(tokens_to_enrich):2*len(tokens_to_enrich)]
-            rugcheck_results = results[2*len(tokens_to_enrich):]
-
+            # Traiter par lots plus petits pour éviter les timeouts
+            batch_size = 5
             updated_count = 0
-            for i, token in enumerate(tokens_to_enrich):
-                token_address = token['address']
-                pump_data = http_api_results[i] if isinstance(http_api_results[i], dict) else {}
-                on_chain_data = on_chain_results[i] if isinstance(on_chain_results[i], dict) else {}
-                rugcheck_report = rugcheck_results[i] if isinstance(rugcheck_results[i], dict) else None
-
-                # Combine the data
-                if on_chain_data.get('success'):
-                    pump_data['bonding_curve_progress'] = on_chain_data.get('bonding_curve_progress')
-
-                # Create a snapshot before updating
-                db.create_snapshot(token_address)
-
-                # Update the database if we got any new data
-                if pump_data:
-                    success = db.update_token_pumpfun_data(token_address, pump_data)
-                    if success:
-                        updated_count += 1
-                
-                if rugcheck_report:
-                    db.upsert_rugcheck_report(token_address, rugcheck_report)
             
-            logger.info(f"Enrichment task complete. Updated {updated_count}/{len(tokens_to_enrich)} tokens.")
-
+            for i in range(0, len(token_addresses_to_enrich), batch_size):
+                batch = token_addresses_to_enrich[i:i + batch_size]
+                logger.info(f"Processing batch {i//batch_size + 1}: {len(batch)} tokens")
+                
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                    # Tâches parallèles pour ce batch
+                    tasks = []
+                    
+                    for token_address in batch:
+                        # Récupérer les données du token depuis la DB
+                        token_obj = db.get_token_by_address(token_address)
+                        if not token_obj:
+                            continue
+                        
+                        # Ajouter les tâches
+                        tasks.extend([
+                            self._enrich_single_token_pumpfun(session, token_address),
+                            self._enrich_single_token_onchain(token_address, token_obj),
+                            self._enrich_single_token_rugcheck(session, token_address)
+                        ])
+                    
+                    # Exécuter toutes les tâches
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    # Traiter les résultats par groups de 3 (pumpfun, onchain, rugcheck)
+                    for j, token_address in enumerate(batch):
+                        try:
+                            base_idx = j * 3
+                            
+                            pumpfun_data = results[base_idx] if base_idx < len(results) else {}
+                            onchain_data = results[base_idx + 1] if base_idx + 1 < len(results) else {}
+                            rugcheck_data = results[base_idx + 2] if base_idx + 2 < len(results) else None
+                            
+                            # Assurer la cohérence des données
+                            if not isinstance(pumpfun_data, dict):
+                                pumpfun_data = {}
+                            if not isinstance(onchain_data, dict):
+                                onchain_data = {}
+                            
+                            # Merger les données on-chain dans pumpfun_data
+                            if onchain_data.get('success'):
+                                pumpfun_data['bonding_curve_progress'] = onchain_data.get('bonding_curve_progress', 0)
+                                pumpfun_data['virtual_sol_reserves'] = onchain_data.get('virtual_sol_reserves', 0)
+                                pumpfun_data['virtual_token_reserves'] = onchain_data.get('virtual_token_reserves', 0)
+                            
+                            # Créer snapshot avant mise à jour
+                            db.create_snapshot(token_address)
+                            
+                            # Mettre à jour les données si on a quelque chose
+                            update_success = False
+                            
+                            if pumpfun_data:
+                                # S'assurer qu'on a au moins le progrès de bonding curve
+                                if 'bonding_curve_progress' not in pumpfun_data or pumpfun_data['bonding_curve_progress'] is None:
+                                    # Essayer de récupérer depuis l'API pump.fun directement
+                                    try:
+                                        async with session.get(
+                                            f"https://frontend-api-v3.pump.fun/coins/{token_address}",
+                                            timeout=10
+                                        ) as resp:
+                                            if resp.status == 200:
+                                                api_data = await resp.json()
+                                                if 'bonding_curve_progress' in api_data:
+                                                    pumpfun_data['bonding_curve_progress'] = api_data['bonding_curve_progress']
+                                                    logger.info(f"Got bonding progress from API: {api_data['bonding_curve_progress']}")
+                                    except Exception as e:
+                                        logger.warning(f"Failed to get progress from API for {token_address}: {e}")
+                                
+                                update_success = db.update_token_pumpfun_data(token_address, pumpfun_data)
+                                if update_success:
+                                    updated_count += 1
+                                    logger.info(f"Updated {token_address} with progress: {pumpfun_data.get('bonding_curve_progress', 'N/A')}")
+                            
+                            # Mettre à jour rugcheck séparément
+                            if rugcheck_data and isinstance(rugcheck_data, dict):
+                                db.upsert_rugcheck_report(token_address, rugcheck_data)
+                            
+                        except Exception as e:
+                            logger.error(f"Error processing results for {token_address}: {e}")
+                    
+                    # Pause entre les batches
+                    await asyncio.sleep(2)
+            
+            logger.info(f"Enrichment task complete. Updated {updated_count}/{len(token_addresses_to_enrich)} tokens.")
+            
+            # Log des statistiques
+            self._log_enrichment_stats()
+            
         except Exception as e:
             logger.error(f"An error occurred during the enrichment task: {e}", exc_info=True)
 
+    async def _enrich_single_token_pumpfun(self, session: aiohttp.ClientSession, token_address: str) -> Dict:
+        """
+        Enrichit un token avec les données Pump.fun
+        """
+        try:
+            return await self.pump_fun_client.get_token_data(session, token_address) or {}
+        except Exception as e:
+            logger.error(f"Error getting pump.fun data for {token_address}: {e}")
+            return {}
+
+    async def _enrich_single_token_onchain(self, token_address: str, token_obj) -> Dict:
+        """
+        Enrichit un token avec les données on-chain
+        """
+        try:
+            from .sutils2 import get_pump_progress_correct
+            
+            return await get_pump_progress_correct(
+                token_address,
+                getattr(token_obj, 'bonding_curve', None),
+                getattr(token_obj, 'associated_bonding_curve', None),
+                self.helius_api_key
+            ) or {}
+        except Exception as e:
+            logger.error(f"Error getting on-chain data for {token_address}: {e}")
+            return {}
+
+    async def _enrich_single_token_rugcheck(self, session: aiohttp.ClientSession, token_address: str) -> Optional[Dict]:
+        """
+        Enrichit un token avec les données Rugcheck
+        """
+        try:
+            return await self.rugcheck_client.get_token_report_async(session, token_address)
+        except Exception as e:
+            logger.error(f"Error getting rugcheck data for {token_address}: {e}")
+            return None
 # This will be instantiated in main.py
 polling_manager = None
