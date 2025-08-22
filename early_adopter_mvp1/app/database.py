@@ -586,6 +586,28 @@ class DatabaseManager:
             logger.error(f"Error upserting rugcheck report for {token_address}: {e}")
             return False
 
+    def update_token_holders_count(self, token_address: str, holders_count: int) -> bool:
+        """Met à jour le nombre de détenteurs pour un token spécifique."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE pump_tokens
+                    SET holders_count = ?,
+                        updated_at = ?
+                    WHERE address = ?
+                """, (holders_count, datetime.now().isoformat(), token_address))
+                conn.commit()
+                if cursor.rowcount > 0:
+                    logger.debug(f"Updated holders count for token {token_address} to {holders_count}")
+                    return True
+                else:
+                    logger.warning(f"No token found with address {token_address} to update holders count.")
+                    return False
+        except Exception as e:
+            logger.error(f"Error updating holders count for token {token_address}: {e}", exc_info=True)
+            return False
+
     def get_updated_tokens_counts(self) -> Dict[str, int]:
         """Récupère le nombre de tokens mis à jour récemment."""
         try:

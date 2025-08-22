@@ -99,6 +99,15 @@ async def update_token(session: aiohttp.ClientSession, token_address: str, clien
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(None, db_manager.upsert_rugcheck_report, token_address, report)
                 logger.info(f"Successfully updated report for {token_address}.")
+
+                # Extract totalHolders and update pump_tokens
+                total_holders = report.get('totalHolders')
+                if total_holders is not None:
+                    logger.info(f"Found {total_holders} for {token_address}. Updating holders count...")
+                    await loop.run_in_executor(None, db_manager.update_token_holders_count, token_address, total_holders)
+                else:
+                    logger.warning(f"'totalHolders' not found in report for {token_address}.")
+
                 return token_address, True
             else:
                 logger.warning(f"No report received for {token_address}.")
