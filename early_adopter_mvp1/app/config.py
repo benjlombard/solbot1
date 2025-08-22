@@ -85,4 +85,15 @@ class Settings:
         self.activity_timeout_minutes: int = int(os.getenv("ACTIVITY_TIMEOUT_MINUTES", "30"))
         self.enable_performance_monitoring: bool = os.getenv("ENABLE_PERFORMANCE_MONITORING", "True").lower() == "true"
 
+
+        self.use_transaction_token_detection = False  # Désactiver l'ancienne méthode
+        self.token_discovery_method = os.getenv("TOKEN_DISCOVERY_METHOD", "api")  # "api" ou "transaction"
+        self.api_discovery_interval_seconds = int(os.getenv("API_DISCOVERY_INTERVAL_SECONDS", "120"))  # 2 minutes
+        self.api_discovery_limit = int(os.getenv("API_DISCOVERY_LIMIT", "50"))
+        
+        # Backwards compatibility
+        self.use_transaction_detection = self.token_discovery_method == "transaction"
+        self.use_api_discovery = self.token_discovery_method == "api"
+
+
 settings = Settings()

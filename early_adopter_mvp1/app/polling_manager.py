@@ -19,6 +19,99 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 
+class PumpFunTokenDiscovery:
+    """Service de découverte via API pump.fun"""
+    
+    def __init__(self, db_manager, system_monitor=None):
+        self.db = db_manager
+        self.system_monitor = system_monitor
+        self.base_url = "https://frontend-api-v3.pump.fun"
+        
+    async def discover_new_tokens(self, limit: int = 50) -> Dict[str, Any]:
+        """Découvre les nouveaux tokens via l'API"""
+        result = {
+            'tokens_discovered': 0,
+            'new_tokens': [],
+            'errors': []
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.base_url}/coins?offset=0&limit={limit}"
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                
+                async with session.get(url, headers=headers, timeout=30) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        tokens = data if isinstance(data, list) else []
+                        
+                        for token_data in tokens:
+                            if await self._is_new_token(token_data):
+                                new_token = await self._create_token_from_api(token_data)
+                                if new_token:
+                                    result['new_tokens'].append(new_token)
+                                    result['tokens_discovered'] += 1
+                        
+                        logger.info(f"API Discovery: {result['tokens_discovered']} new tokens found")
+                        
+        except Exception as e:
+            logger.error(f"Error in API discovery: {e}")
+            result['errors'].append(str(e))
+        
+        return result
+    
+    async def _is_new_token(self, token_data: dict) -> bool:
+        """Vérifie si le token est nouveau dans notre base"""
+        mint_address = token_data.get('mint')
+        if not mint_address:
+            return False
+        
+        # Vérifier si on a déjà ce token
+        existing_token = self.db.get_token_by_address(mint_address)
+        return existing_token is None
+    
+    async def _create_token_from_api(self, token_data: dict) -> Optional[PumpToken]:
+        """Crée un objet PumpToken depuis les données API"""
+        try:
+            from .models import PumpToken
+            
+            mint_address = token_data.get('mint')
+            creator = token_data.get('creator') 
+            name = token_data.get('name')
+            symbol = token_data.get('symbol')
+            description = token_data.get('description', '')
+            
+            # Convertir timestamp (millisecondes)
+            created_timestamp = token_data.get('created_timestamp')
+            if created_timestamp:
+                created_at = datetime.fromtimestamp(created_timestamp / 1000)
+            else:
+                created_at = datetime.now()
+            
+            market_cap = token_data.get('usd_market_cap', 0)
+            
+            token = PumpToken(
+                address=mint_address,
+                name=name,
+                symbol=symbol,
+                description=description,
+                creator=creator,
+                created_at=created_at,
+                market_cap_discovery=market_cap
+            )
+            
+            # Insérer en base
+            if self.db.insert_pump_token(token):
+                logger.info(f"NEW TOKEN via API: {mint_address} by {creator}")
+                return token
+            
+        except Exception as e:
+            logger.error(f"Error creating token from API data: {e}")
+        
+        return None
+
 class DataProcessor:
     async def process_helius_transaction(self, transaction: HeliusTransaction) -> Dict[str, Any]:
         result = {
@@ -34,79 +127,248 @@ class DataProcessor:
         if not is_pump_fun_tx:
             return result
 
-        if self._is_token_creation(transaction):
-            token_info = self._extract_token_info(transaction)
-            if token_info:
-                db.insert_pump_token(token_info)
-                result['token_created'] = token_info
-                result['processed'] = True
-                await creator_analyzer.analyze_creator(token_info.creator)
-        elif self._is_purchase(transaction):
-            purchases = self._extract_purchase_info(transaction)
+        # CORRECTION: Analyser le type d'instruction pump.fun
+        # if self._is_token_creation_correct(transaction):
+        #     token_info = self._extract_token_info_correct(transaction)
+        #     if token_info:
+        #         db.insert_pump_token(token_info)
+        #         result['token_created'] = token_info
+        #         result['processed'] = True
+        #         logger.info(f"🆕 NEW TOKEN CREATED: {token_info.address} by {token_info.creator}")
+        #         creator_analyzer.analyze_creator(token_info.creator)
+        # elif self._is_purchase_correct(transaction):
+        #     purchases = self._extract_purchase_info_correct(transaction)
+        #     for purchase in purchases:
+        #         db.insert_early_purchase(purchase)
+        #         result['purchases'].append(purchase)
+        #     if purchases:
+        #         result['processed'] = True
+        #         logger.info(f"💰 PURCHASE DETECTED: {len(purchases)} purchases")
+
+        if self._is_purchase_correct(transaction):
+            purchases = self._extract_purchase_info_correct(transaction)
             for purchase in purchases:
                 db.insert_early_purchase(purchase)
                 result['purchases'].append(purchase)
             if purchases:
                 result['processed'] = True
-        
+                logger.info(f"Purchase detected: {len(purchases)} purchases")
+
         return result
 
-    def _is_token_creation(self, transaction: HeliusTransaction) -> bool:
-        return not transaction.tokenTransfers
+    def _is_token_creation_correct(self, transaction: HeliusTransaction) -> bool:
+        """
+        Détection correcte des créations de tokens pump.fun
+        Basée sur l'analyse des discriminators d'instructions
+        """
+        for instruction in transaction.instructions:
+            if instruction.programId == settings.pumpfun_program_id:
+                # Analyser les données de l'instruction
+                if len(instruction.data) >= 8:
+                    # Les discriminators pump.fun pour "create"
+                    # Le discriminator "create" est différent de "buy"/"sell"
+                    data_bytes = instruction.data
+                    
+                    # Log pour debug
+                    logger.debug(f"Pump.fun instruction data: {data_bytes[:16] if len(data_bytes) >= 16 else data_bytes}")
+                    
+                    # Méthode 1: Détecter par longueur de données et pattern
+                    # Les créations ont généralement plus de données que les swaps
+                    if len(data_bytes) > 50:  # Les créations ont plus de metadata
+                        return True
+                    
+                    # Méthode 2: Analyser les comptes impliqués
+                    # Les créations impliquent généralement plus de comptes
+                    if len(instruction.accounts) >= 10:  # Création implique plus de comptes
+                        return True
+                    
+        return False
 
-    def _extract_token_info(self, transaction: HeliusTransaction) -> PumpToken | None:
+    def _is_purchase_correct(self, transaction: HeliusTransaction) -> bool:
+        """
+        Détection correcte des achats pump.fun
+        """
+        has_pumpfun_instruction = any(
+            inst.programId == settings.pumpfun_program_id for inst in transaction.instructions
+        )
+        
+        # Un achat a une instruction pump.fun ET des token transfers
+        return has_pumpfun_instruction and bool(transaction.tokenTransfers)
+
+    def _extract_token_info_correct(self, transaction: HeliusTransaction) -> PumpToken | None:
+        """
+        Extraction correcte des informations de token créé
+        """
         try:
-            token_address = transaction.instructions[0].accounts[0]
-            creator = transaction.feePayer
+            # Trouver l'instruction pump.fun de création
+            for instruction in transaction.instructions:
+                if instruction.programId == settings.pumpfun_program_id:
+                    if len(instruction.accounts) >= 4:  # Création nécessite plusieurs comptes
+                        
+                        # Dans pump.fun, la structure typique pour create est:
+                        # accounts[0] = creator (fee payer)
+                        # accounts[1] = mint address (nouveau token)
+                        # accounts[2] = bonding curve
+                        # accounts[3] = associated bonding curve
+                        # ... autres comptes
+                        
+                        creator = transaction.feePayer  # Le vrai créateur
+                        token_address = instruction.accounts[1]  # Mint address
+                        bonding_curve = instruction.accounts[2] if len(instruction.accounts) > 2 else None
+                        associated_bonding_curve = instruction.accounts[3] if len(instruction.accounts) > 3 else None
+                        
+                        logger.info(f"🔍 Extracting token creation:")
+                        logger.info(f"   Creator: {creator}")
+                        logger.info(f"   Token: {token_address}")
+                        logger.info(f"   Bonding curve: {bonding_curve}")
+                        logger.info(f"   Associated BC: {associated_bonding_curve}")
+                        
+                        return PumpToken(
+                            address=token_address,
+                            name=None,  # À enrichir plus tard
+                            symbol=None,  # À enrichir plus tard
+                            description=None,  # À enrichir plus tard
+                            creator=creator,
+                            created_at=transaction.timestamp,
+                            market_cap_discovery=None
+                        )
             
-            return PumpToken(
-                address=token_address,
-                name=None,
-                symbol=None,
-                description=None,
-                creator=creator,
-                created_at=transaction.timestamp,
-                market_cap_discovery=0
-            )
+            logger.warning("Could not extract token info from pump.fun creation transaction")
+            return None
+            
         except Exception as e:
             logger.error(f"Error extracting token info: {e}")
             return None
 
-    def _is_purchase(self, transaction: HeliusTransaction) -> bool:
-        return bool(transaction.tokenTransfers)
-
-    def _extract_purchase_info(self, transaction: HeliusTransaction) -> List[EarlyPurchase]:
+    def _extract_purchase_info_correct(self, transaction: HeliusTransaction) -> List[EarlyPurchase]:
+        """
+        Extraction correcte des informations d'achat
+        """
         purchases = []
-        for transfer in transaction.tokenTransfers:
-            try:
+        
+        try:
+            for transfer in transaction.tokenTransfers:
+                # Ignorer SOL (wrapped SOL)
                 if transfer.get('mint') == 'So11111111111111111111111111111111111111112':
                     continue
 
                 buyer = transfer.get('toUserAccount')
-                if not buyer:
+                token_address = transfer.get('mint')
+                token_amount = float(transfer.get('tokenAmount', 0))
+                
+                if not buyer or not token_address:
                     continue
                 
+                # Calculer le montant SOL dépensé
                 sol_amount = 0
-                if transaction.nativeTransfers:
-                    for native_transfer in transaction.nativeTransfers:
-                        # This logic is a guess, might need refinement
-                        if native_transfer.get('toUserAccount') == settings.pumpfun_program_id:
-                             sol_amount = native_transfer.get('amount', 0) / 1e9
-                             break
-
-                purchases.append(EarlyPurchase(
+                for native_transfer in transaction.nativeTransfers:
+                    if native_transfer.get('fromUserAccount') == buyer:
+                        sol_amount = native_transfer.get('amount', 0) / 1e9  # Convertir lamports en SOL
+                        break
+                
+                # Calculer les minutes après création
+                # Pour l'instant, on met 0 - sera calculé plus tard avec la DB
+                minutes_after_creation = 0
+                
+                purchase = EarlyPurchase(
                     signature=transaction.signature,
-                    token_address=transfer.get('mint'),
+                    token_address=token_address,
                     buyer_address=buyer,
                     sol_amount=sol_amount,
-                    token_amount=float(transfer.get('tokenAmount', 0)),
+                    token_amount=token_amount,
                     timestamp=transaction.timestamp,
-                    minutes_after_creation=0
-                ))
-            except Exception as e:
-                logger.error(f"Error extracting purchase info from transfer: {e}")
+                    minutes_after_creation=minutes_after_creation,
+                    market_cap_at_purchase=None
+                )
+                
+                purchases.append(purchase)
+                logger.debug(f"Extracted purchase: {buyer} bought {token_amount} {token_address} for {sol_amount} SOL")
+                
+        except Exception as e:
+            logger.error(f"Error extracting purchase info: {e}")
+        
         return purchases
 
+    def analyze_pump_instruction_discriminator(self, instruction_data: str) -> str:
+        """
+        Analyse le discriminator d'une instruction pump.fun pour déterminer le type
+        Les discriminators sont les 8 premiers bytes de l'instruction
+        """
+        if len(instruction_data) < 16:  # 8 bytes = 16 hex chars
+            return "unknown"
+        
+        # Convertir les 8 premiers bytes en discriminator
+        try:
+            # Si c'est déjà en bytes
+            if isinstance(instruction_data, bytes):
+                discriminator = instruction_data[:8]
+            else:
+                # Si c'est en base64 ou hex, le décoder
+                import base64
+                decoded = base64.b64decode(instruction_data)
+                discriminator = decoded[:8]
+            
+            discriminator_hex = discriminator.hex()
+            
+            # Discriminators connus pour pump.fun (à découvrir par reverse engineering)
+            known_discriminators = {
+                "181ec828051c0777": "create",     # Exemple - à vérifier
+                "f223c68952e1f2b6": "buy",        # Exemple - à vérifier
+                "51b6dbc3e70f2d2e": "sell",       # Exemple - à vérifier
+            }
+            
+            instruction_type = known_discriminators.get(discriminator_hex, "unknown")
+            
+            logger.debug(f"Discriminator: {discriminator_hex} -> {instruction_type}")
+            
+            return instruction_type
+            
+        except Exception as e:
+            logger.error(f"Error analyzing discriminator: {e}")
+            return "unknown"
+
+    def log_pump_instruction_details(self, transaction: HeliusTransaction):
+        """
+        Log détaillé pour découvrir les patterns des instructions pump.fun
+        """
+        for i, instruction in enumerate(transaction.instructions):
+            if instruction.programId == settings.pumpfun_program_id:
+                logger.info(f"🔍 Pump.fun instruction {i}:")
+                logger.info(f"   Program: {instruction.programId}")
+                logger.info(f"   Data length: {len(instruction.data)}")
+                logger.info(f"   Accounts count: {len(instruction.accounts)}")
+                
+                # Log les premiers bytes (discriminator)
+                if len(instruction.data) >= 8:
+                    if isinstance(instruction.data, bytes):
+                        discriminator = instruction.data[:8].hex()
+                    else:
+                        try:
+                            import base64
+                            decoded = base64.b64decode(instruction.data)
+                            discriminator = decoded[:8].hex()
+                        except:
+                            discriminator = str(instruction.data)[:16]
+                    
+                    logger.info(f"   Discriminator: {discriminator}")
+                
+                # Log quelques comptes
+                for j, account in enumerate(instruction.accounts[:5]):
+                    logger.info(f"   Account {j}: {account}")
+                
+                # Analyser le contexte
+                has_token_transfers = bool(transaction.tokenTransfers)
+                has_native_transfers = bool(transaction.nativeTransfers)
+                
+                logger.info(f"   Context: transfers={has_token_transfers}, native={has_native_transfers}")
+                
+                # Hypothèse sur le type
+                if not has_token_transfers and len(instruction.accounts) >= 8:
+                    logger.info(f"   🎯 LIKELY TOKEN CREATION (no transfers, many accounts)")
+                elif has_token_transfers:
+                    logger.info(f"   🎯 LIKELY SWAP/TRADE (has transfers)")
+                else:
+                    logger.info(f"   🎯 UNKNOWN TYPE")
 
 class IntelligentPollingManager:
     def __init__(self, system_monitor: 'SystemMonitor'):
@@ -152,6 +414,12 @@ class IntelligentPollingManager:
         # Détection pump.fun pour workaround v0 transactions
         self._last_detected_pumpfun = False
     
+        self.token_discovery = PumpFunTokenDiscovery(db, self.system_monitor)
+        self.last_api_discovery = datetime.now() - timedelta(minutes=10)
+        # Flag pour activer/désactiver l'ancienne méthode
+        self.use_transaction_token_detection = getattr(settings, 'use_transaction_detection', False)
+        self.use_api_discovery = getattr(settings, 'use_api_discovery', True)
+
     def start_polling(self):
         """Démarre le polling intelligent"""
         if not self.polling_task or self.polling_task.done():
@@ -160,8 +428,8 @@ class IntelligentPollingManager:
             logger.info("Intelligent polling started")
     
     async def _polling_loop(self):
-        """Boucle principale de polling avec gestion d'erreurs robuste"""
-        logger.info("Starting intelligent polling loop")
+        """Boucle principale de polling avec gestion d'erreurs robuste et découverte API"""
+        logger.info("Starting intelligent polling loop with API discovery")
         
         while self.is_running:
             try:
@@ -179,8 +447,21 @@ class IntelligentPollingManager:
                     logger.warning(f"API health degraded ({self.consecutive_failures} failures), extending polling interval")
                     self.current_polling_interval = min(self.current_polling_interval * 1.5, self.max_polling_interval * 2)
                 
-                # Exécuter un cycle de polling
-                success = await self._poll_recent_transactions_safe()
+                # NOUVEAU: Découverte API périodique (priorité)
+                if (hasattr(self, 'use_api_discovery') and self.use_api_discovery and 
+                    (datetime.now() - getattr(self, 'last_api_discovery', datetime.min)).total_seconds() > 
+                    getattr(settings, 'api_discovery_interval_seconds', 120)):
+                    
+                    await self._run_api_discovery()
+                
+                # Traitement des transactions selon la configuration
+                success = False
+                if getattr(self, 'use_transaction_token_detection', False):
+                    # Ancienne méthode (complète avec détection de création)
+                    success = await self._poll_recent_transactions_safe()
+                else:
+                    # Nouvelle méthode (achats seulement)
+                    success = await self._poll_transactions_for_purchases_only_safe()
                 
                 if success:
                     self.consecutive_failures = 0
@@ -213,6 +494,189 @@ class IntelligentPollingManager:
                 self.consecutive_failures += 1
                 await asyncio.sleep(60)  # Attendre 1 minute en cas d'erreur
     
+
+
+    async def _run_api_discovery(self):
+        """Exécute la découverte de tokens via l'API pump.fun"""
+        try:
+            logger.info("Running API token discovery...")
+            
+            # Initialiser le service de découverte si pas déjà fait
+            if not hasattr(self, 'token_discovery'):
+                self.token_discovery = PumpFunTokenDiscovery(db, self.system_monitor)
+            
+            # Récupérer la limite depuis la config
+            discovery_limit = getattr(settings, 'api_discovery_limit', 50)
+            
+            # Exécuter la découverte
+            result = await self.token_discovery.discover_new_tokens(limit=discovery_limit)
+            
+            # Traitement des résultats
+            if result['tokens_discovered'] > 0:
+                logger.info(f"API Discovery: {result['tokens_discovered']} new tokens found")
+                
+                # Analyser les créateurs des nouveaux tokens
+                for token in result['new_tokens']:
+                    try:
+                        # Analyse synchrone du créateur
+                        creator_analyzer.analyze_creator(token.creator)
+                        logger.info(f"Creator analyzed for new token: {token.address}")
+                    except Exception as e:
+                        logger.error(f"Error analyzing creator {token.creator}: {e}")
+                
+                # Mettre à jour les statistiques
+                self._update_daily_stats_api_discovery(result['tokens_discovered'])
+            else:
+                logger.debug("API Discovery: No new tokens found")
+            
+            # Traiter les erreurs
+            if result['errors']:
+                logger.warning(f"API Discovery errors: {result['errors']}")
+            
+            # Mettre à jour le timestamp
+            self.last_api_discovery = datetime.now()
+            
+            # Record de l'appel API pour monitoring
+            if self.system_monitor:
+                self.system_monitor.record_api_call('pumpfun_discovery')
+            
+        except Exception as e:
+            logger.error(f"Error in API discovery: {e}")
+            # En cas d'erreur, attendre plus longtemps avant le prochain essai
+            self.last_api_discovery = datetime.now() + timedelta(minutes=5)
+    
+
+
+    async def _poll_transactions_for_purchases_only_safe(self) -> bool:
+        """Version sécurisée du polling pour achats uniquement"""
+        try:
+            await self._poll_transactions_for_purchases_only()
+            return True
+        except Exception as e:
+            logger.error(f"Error in purchases-only polling: {e}")
+            return False
+
+    async def _poll_transactions_for_purchases_only(self):
+        """Version simplifiée qui ne cherche que les achats, pas les créations"""
+        try:
+            # Calculer la période à scanner
+            lookback_minutes = max(self.current_polling_interval / 60 * 1.2, 3)
+            since_time = datetime.now() - timedelta(minutes=lookback_minutes)
+            
+            logger.info(f"Polling transactions for purchases only since {since_time.isoformat()}")
+            
+            # Récupérer les transactions pump.fun récentes
+            transactions = await self._get_recent_pumpfun_transactions(since_time)
+            
+            if not transactions:
+                logger.debug("No pump.fun transactions found")
+                self.recent_activity_levels.append(0)
+                return
+            
+            # Filtrer les doublons
+            new_transactions = []
+            for tx in transactions:
+                if tx.signature not in self.processed_signatures:
+                    new_transactions.append(tx)
+                    self.processed_signatures.add(tx.signature)
+            
+            if not new_transactions:
+                logger.info(f"Found {len(transactions)} transactions but all already processed")
+                self.recent_activity_levels.append(0)
+                return
+            
+            logger.info(f"Processing {len(new_transactions)} new transactions (purchases only)")
+            
+            self.recent_activity_levels.append(len(new_transactions))
+            self.last_activity_time = datetime.now()
+            
+            # Traiter les transactions pour achats uniquement
+            await self._process_transaction_batch_purchases_only(new_transactions)
+            
+            # Mettre à jour les statistiques
+            self._update_daily_stats(len(new_transactions))
+            
+        except Exception as e:
+            logger.error(f"Error polling transactions for purchases: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+
+    async def _process_transaction_batch_purchases_only(self, transactions: List[HeliusTransaction]):
+        """Traite un lot de transactions pour achats uniquement"""
+        logger.info(f"Processing batch of {len(transactions)} transactions (purchases only)")
+        
+        purchases_detected = 0
+        
+        for transaction in transactions:
+            try:
+                # Log détaillé pour debug (optionnel)
+                if hasattr(self.data_processor, 'log_pump_instruction_details'):
+                    if any(inst.programId == self.pumpfun_program_id for inst in transaction.instructions):
+                        self.data_processor.log_pump_instruction_details(transaction)
+                
+                # Filtrer les micro-transactions
+                if not self._is_transaction_worth_processing(transaction):
+                    continue
+                
+                # Traiter SEULEMENT les achats
+                if self.data_processor._is_purchase_correct(transaction):
+                    purchases = self.data_processor._extract_purchase_info_correct(transaction)
+                    for purchase in purchases:
+                        if db.insert_early_purchase(purchase):
+                            purchases_detected += 1
+                            logger.debug(f"Purchase recorded: {purchase.buyer_address} -> {purchase.token_address}")
+            
+            except Exception as e:
+                logger.error(f"Error processing transaction {transaction.signature}: {e}")
+        
+        # Logs de résumé
+        if purchases_detected > 0:
+            logger.info(f"Batch processed: {purchases_detected} purchases detected")
+            
+            # Déclencher la mise à jour des scores
+            asyncio.create_task(self._trigger_scoring_update())
+        else:
+            logger.debug("No purchases detected in this batch")
+
+    def _update_daily_stats_api_discovery(self, tokens_discovered: int):
+        """Met à jour les statistiques pour la découverte API"""
+        self.daily_stats['api_tokens_discovered'] += tokens_discovered
+        self.daily_stats['api_discovery_calls'] += 1
+        
+        if tokens_discovered > 0:
+            logger.info(f"Daily API discovery stats: {self.daily_stats['api_tokens_discovered']} tokens discovered in {self.daily_stats['api_discovery_calls']} calls")
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Retourne les statistiques du polling avec données API"""
+        base_stats = {
+            'is_running': self.is_running,
+            'current_polling_interval': self.current_polling_interval,
+            'credits_used_today': self.system_monitor.get_helius_credits_today() if self.system_monitor else 0,
+            'max_daily_credits': settings.max_daily_credits,
+            'daily_stats': dict(self.daily_stats),
+            'cache_size': len(self.processed_signatures),
+            'recent_activity_avg': sum(self.recent_activity_levels[-5:]) / min(len(self.recent_activity_levels), 5) if self.recent_activity_levels else 0,
+            'last_activity_time': self.last_activity_time.isoformat(),
+            'last_reset_date': self.last_reset_date.isoformat(),
+            'api_health': {
+                'status': self.api_health_status,
+                'consecutive_failures': self.consecutive_failures,
+                'last_successful_poll': self.last_successful_poll.isoformat(),
+                'time_since_success_minutes': (datetime.now() - self.last_successful_poll).total_seconds() / 60
+            }
+        }
+        
+        # Ajouter les stats de découverte API
+        if hasattr(self, 'last_api_discovery'):
+            base_stats['api_discovery'] = {
+                'last_run': self.last_api_discovery.isoformat(),
+                'time_since_last_minutes': (datetime.now() - self.last_api_discovery).total_seconds() / 60,
+                'enabled': getattr(self, 'use_api_discovery', False),
+                'interval_seconds': getattr(settings, 'api_discovery_interval_seconds', 120)
+            }
+        
+        return base_stats
     async def _poll_recent_transactions_safe(self) -> bool:
         """Version sécurisée du polling avec gestion d'erreurs"""
         try:
@@ -768,6 +1232,10 @@ class IntelligentPollingManager:
         
         for transaction in transactions:
             try:
+                # AJOUT: Log détaillé pour les transactions pump.fun
+                if any(inst.programId == self.pumpfun_program_id for inst in transaction.instructions):
+                    self.data_processor.log_pump_instruction_details(transaction)
+                
                 # Filtrer les micro-transactions pour économiser le traitement
                 if not self._is_transaction_worth_processing(transaction):
                     continue
