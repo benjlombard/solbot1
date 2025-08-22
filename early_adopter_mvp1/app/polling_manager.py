@@ -7,7 +7,6 @@ from collections import defaultdict
 import json
 
 from .models import HeliusTransaction, HeliusInstruction
-from .data_processor import processor
 from .early_adopter_scorer import scorer
 from .config import settings
 from .database import db
@@ -670,6 +669,7 @@ class IntelligentPollingManager:
     
     async def _process_transaction_batch(self, transactions: List[HeliusTransaction]):
         """Traite un lot de transactions"""
+        from .data_processor import processor
         logger.info(f"Processing batch of {len(transactions)} transactions")
         
         tokens_created = 0
@@ -909,7 +909,7 @@ class IntelligentPollingManager:
             # Fetch data from HTTP API and on-chain concurrently
             async with aiohttp.ClientSession() as session:
                 http_api_tasks = [self.pump_fun_client.get_token_data(session, t['address']) for t in tokens_to_enrich]
-                on_chain_tasks = [get_pump_progress_correct(t['address'], t.get('bonding_curve'), t.get('associated_bonding_curve')) for t in tokens_to_enrich]
+                on_chain_tasks = [get_pump_progress_correct(t['address'], t.get('bonding_curve'), t.get('associated_bonding_curve'), self.helius_api_key) for t in tokens_to_enrich]
                 rugcheck_tasks = [self.rugcheck_client.get_token_report_async(session, t['address']) for t in tokens_to_enrich]
                 
                 all_tasks = http_api_tasks + on_chain_tasks + rugcheck_tasks
@@ -929,6 +929,9 @@ class IntelligentPollingManager:
                 # Combine the data
                 if on_chain_data.get('success'):
                     pump_data['bonding_curve_progress'] = on_chain_data.get('bonding_curve_progress')
+
+                # Create a snapshot before updating
+                db.create_snapshot(token_address)
 
                 # Update the database if we got any new data
                 if pump_data:

@@ -1,504 +1,951 @@
 import logging
-import json
-import base64
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple
-import struct
+import asyncio
 import httpx
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Set
 from collections import defaultdict
-import base58
+import json
 
-from .models import PumpToken, EarlyPurchase, HeliusTransaction
-from .database import db
+from .models import HeliusTransaction, HeliusInstruction
+from .data_processor import processor
+from .early_adopter_scorer import scorer
 from .config import settings
+from .database import db
+from .pump_fun_client import PumpFunClient
+from .rugcheck_client import RugCheckClient
+from .sutils2 import get_pump_progress_correct
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
-class OptimizedPumpFunDataProcessor:
-    def __init__(self):
+class IntelligentPollingManager:
+    def __init__(self, system_monitor: 'SystemMonitor'):
+        self.system_monitor = system_monitor
+        self.helius_api_key = settings.helius_api_key
+        self.helius_rpc_url = "https://mainnet.helius-rpc.com"
         self.pumpfun_program_id = settings.pumpfun_program_id
-        self.processed_signatures = set()
-        self.httpx_client = httpx.AsyncClient(timeout=settings.httpx_timeout_seconds)
         
-        # Cache pour les métadonnées des tokens
-        self.token_metadata_cache = {}
-        self.cache_cleanup_counter = 0
+        self.httpx_client = httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0))
+        self.pump_fun_client = PumpFunClient(logger_instance=logger, system_monitor=self.system_monitor)
+        self.rugcheck_client = RugCheckClient(logger=logger, system_monitor=self.system_monitor)
+        self.polling_task = None
+        self.is_running = False
         
-        # Statistiques de performance
-        self.processing_stats = defaultdict(int)
-        self.last_stats_reset = datetime.now()
+        # Timer for enrichment task
+        self.last_enrichment_run = datetime.now() - timedelta(minutes=10) # Run on first loop
+        
+        # Cache pour éviter les doublons
+        self.processed_signatures: Set[str] = set()
+        self.last_signature_cleanup = datetime.now()
+        
+        # Statistiques
+        self.daily_stats = defaultdict(int)
+        self.last_reset_date = datetime.now().date()
+        self.credits_used_today = 0
+        
+        # Paramètres de polling adaptatif
+        self.base_polling_interval = settings.base_polling_interval_seconds
+        self.min_polling_interval = settings.min_polling_interval_seconds
+        self.max_polling_interval = settings.max_polling_interval_seconds
+        self.current_polling_interval = self.base_polling_interval
+        
+        # Historique pour polling adaptatif
+        self.recent_activity_levels = []
+        self.last_activity_time = datetime.now()
+        
+        # Surveillance de la santé de l'API
+        self.consecutive_failures = 0
+        self.last_successful_poll = datetime.now()
+        self.api_health_status = "unknown"
+        
+        # Détection pump.fun pour workaround v0 transactions
+        self._last_detected_pumpfun = False
     
-    async def process_helius_transaction(self, transaction: HeliusTransaction) -> Dict[str, Any]:
-        """
-        Traite une transaction Helius de manière optimisée pour le polling
-        """
-        result = {
-            'processed': False,
-            'token_created': None,
-            'purchases': [],
-            'errors': [],
-            'processing_time_ms': 0
-        }
+    def start_polling(self):
+        """Démarre le polling intelligent"""
+        if not self.polling_task or self.polling_task.done():
+            self.is_running = True
+            self.polling_task = asyncio.create_task(self._polling_loop())
+            logger.info("Intelligent polling started")
+    
+    async def _polling_loop(self):
+        """Boucle principale de polling avec gestion d'erreurs robuste"""
+        logger.info("Starting intelligent polling loop")
         
-        start_time = datetime.now()
-        
+        while self.is_running:
+            try:
+                # Vérifier et réinitialiser les stats quotidiennes
+                self._check_daily_reset()
+                
+                # Vérifier les limites de crédits
+                if self.system_monitor.get_helius_credits_today() >= settings.max_daily_credits * 0.95:
+                    logger.warning("Credit limit nearly reached, pausing polling")
+                    await asyncio.sleep(3600)  # Attendre 1h
+                    continue
+                
+                # Vérifier la santé de l'API avant de continuer
+                if self.consecutive_failures >= 3:
+                    logger.warning(f"API health degraded ({self.consecutive_failures} failures), extending polling interval")
+                    self.current_polling_interval = min(self.current_polling_interval * 1.5, self.max_polling_interval * 2)
+                
+                # Exécuter un cycle de polling
+                success = await self._poll_recent_transactions_safe()
+                
+                if success:
+                    self.consecutive_failures = 0
+                    self.last_successful_poll = datetime.now()
+                    self.api_health_status = "healthy"
+                else:
+                    self.consecutive_failures += 1
+                    self.api_health_status = "degraded" if self.consecutive_failures < 5 else "critical"
+                
+                # Nettoyer le cache périodiquement
+                await self._cleanup_cache()
+
+                # Exécuter l'enrichissement des métadonnées périodiquement
+                if settings.enable_metadata_enrichment and (datetime.now() - self.last_enrichment_run).total_seconds() > settings.enrichment_interval_seconds:
+                    await self._enrich_token_metadata()
+                
+                # Adapter l'intervalle de polling
+                self._adapt_polling_interval()
+                
+                # Attendre avant le prochain cycle avec backoff si nécessaire
+                wait_time = self.current_polling_interval
+                if self.consecutive_failures > 0:
+                    wait_time = min(wait_time * (1 + self.consecutive_failures * 0.5), 1800)  # Max 30 min
+                
+                logger.debug(f"Waiting {wait_time}s before next poll (failures: {self.consecutive_failures})")
+                await asyncio.sleep(wait_time)
+                
+            except Exception as e:
+                logger.error(f"Error in polling loop: {e}")
+                self.consecutive_failures += 1
+                await asyncio.sleep(60)  # Attendre 1 minute en cas d'erreur
+    
+    async def _poll_recent_transactions_safe(self) -> bool:
+        """Version sécurisée du polling avec gestion d'erreurs"""
         try:
-            logger.info(f"🔄 Processing transaction: {transaction.signature[:20]}...")
-            logger.info(f"   Type: {transaction.type}")
-            logger.info(f"   Instructions: {len(transaction.instructions)}")
-            logger.info(f"   Token transfers: {len(transaction.tokenTransfers)}")
-            
-            # Compter et log les instructions pump.fun
-            pumpfun_instructions = []
-            for i, instruction in enumerate(transaction.instructions):
-                logger.info(f"   Instruction {i}: {instruction.programId}")
-                if instruction.programId == self.pumpfun_program_id:
-                    pumpfun_instructions.append(i)
-                    logger.info(f"     🎯 PUMP.FUN INSTRUCTION #{i}")
-            
-            logger.info(f"   Pump.fun instructions found: {len(pumpfun_instructions)}")
-            
-            # Éviter les doublons avec cache optimisé
-            if transaction.signature in self.processed_signatures:
-                logger.debug(f"Transaction already processed: {transaction.signature}")
-                return result
-            
-            # Vérification rapide si c'est une transaction pump.fun
-            if not self._is_pumpfun_transaction_fast(transaction):
-                logger.info(f"   ❌ No pump.fun instructions detected in final check")
-                return result
-            
-            # Pré-filtrage pour optimiser les crédits
-            if not self._should_process_transaction(transaction):
-                logger.debug(f"Transaction filtered out: {transaction.signature}")
-                return result
-            
-            # Traitement selon le type de transaction avec optimisations
-            processed_something = False
-            
-            if transaction.type == "UNKNOWN":
-                logger.info(f"   🔍 Processing as potential token creation...")
-                # Potentielle création de token
-                token = await self._process_token_creation_optimized(transaction)
-                if token:
-                    result['token_created'] = token
-                    processed_something = True
-                    self.processing_stats['tokens_created'] += 1
-                    logger.info(f"   ✅ Token created: {token.address}")
-                else:
-                    logger.info(f"   ❌ No token creation detected")
-            
-            elif transaction.type == "SWAP":
-                logger.info(f"   🔍 Processing as potential token purchase...")
-                # Potentiel achat de token
-                purchase = await self._process_token_purchase_optimized(transaction)
-                if purchase:
-                    result['purchases'].append(purchase)
-                    processed_something = True
-                    self.processing_stats['purchases_detected'] += 1
-                    logger.info(f"   ✅ Purchase detected: {purchase.buyer_address[:20]}... -> {purchase.token_address[:20]}...")
-                else:
-                    logger.info(f"   ❌ No token purchase detected")
-            
-            # Marquer comme traité seulement si traitement réussi
-            if processed_something:
-                self.processed_signatures.add(transaction.signature)
-                result['processed'] = True
-                logger.info(f"   ✅ Transaction processing completed successfully")
-            else:
-                logger.info(f"   ⚠️ Transaction processed but no pump.fun activity detected")
-            
-            # Nettoyage périodique optimisé du cache
-            self._periodic_cache_cleanup()
-            
-        except Exception as e:
-            logger.error(f"Error processing transaction {transaction.signature}: {e}")
-            result['errors'].append(str(e))
-            self.processing_stats['errors'] += 1
-        
-        # Calcul du temps de traitement
-        processing_time = (datetime.now() - start_time).total_seconds() * 1000
-        result['processing_time_ms'] = round(processing_time, 2)
-        
-        self.processing_stats['total_processed'] += 1
-        
-        return result
-    
-    def _is_pumpfun_transaction_fast(self, transaction: HeliusTransaction) -> bool:
-        """Vérification rapide si la transaction concerne pump.fun - CORRIGÉE"""
-        # Vérification optimisée - compter toutes les instructions
-        pumpfun_count = 0
-        for instruction in transaction.instructions:
-            if instruction.programId == self.pumpfun_program_id:
-                pumpfun_count += 1
-                logger.info(f"   ✅ Found pump.fun instruction with programId: {instruction.programId}")
-        
-        logger.info(f"   Final pump.fun check: {pumpfun_count} instructions found")
-        return pumpfun_count > 0
-    
-    def _should_process_transaction(self, transaction: HeliusTransaction) -> bool:
-        """
-        Détermine si une transaction mérite d'être traitée (optimisation crédits)
-        """
-        # Filtrer les micro-transactions
-        if transaction.type == "SWAP":
-            total_value = 0
-            
-            if transaction.tokenTransfers:
-                for transfer in transaction.tokenTransfers:
-                    try:
-                        amount = float(transfer.get('tokenAmount', 0))
-                        # Convertir en SOL si c'est en lamports
-                        if transfer.get('mint') == 'So11111111111111111111111111111111111111112':
-                            amount = amount / 1e9
-                        total_value += amount
-                    except (ValueError, TypeError):
-                        continue
-            
-            # Ignorer les transactions trop petites
-            if total_value < settings.min_transaction_value_sol:
-                return False
-        
-        # Toujours traiter les créations potentielles
-        if transaction.type == "UNKNOWN":
+            await self._poll_recent_transactions()
             return True
-        
-        # Vérifier s'il y a des comptes intéressants
-        interesting_accounts = set()
-        for instruction in transaction.instructions:
-            if instruction.programId == self.pumpfun_program_id:
-                interesting_accounts.update(instruction.accounts[:5])  # Limiter à 5 comptes
-        
-        return len(interesting_accounts) > 2  # Au moins 3 comptes impliqués
-    
-    async def _process_token_creation_optimized(self, transaction: HeliusTransaction) -> Optional[PumpToken]:
-        """
-        Traite une création de token de manière optimisée avec logs détaillés
-        """
-        try:
-            logger.info(f"     🔍 Analyzing transaction for token creation...")
-            
-            token_address = self._extract_token_address_fast(transaction)
-            
-            if not token_address:
-                logger.info(f"     ❌ No token creation instruction found in transaction.")
-                return None
-
-            # Vérifier si ce token existe déjà
-            existing_token = db.get_token_by_address(token_address)
-            if existing_token:
-                logger.info(f"     ⚠️ Token already exists: {token_address}")
-                return None
-            
-            # Créer un token avec métadonnées minimales
-            token = PumpToken(
-                address=token_address,
-                name=None,  # À enrichir plus tard si nécessaire
-                symbol=None,
-                description=None,
-                creator=transaction.feePayer,
-                created_at=transaction.timestamp,
-                market_cap_discovery=None
-            )
-            
-            logger.info(f"     💾 Saving new token to database...")
-            
-            # Sauvegarder immédiatement
-            if db.insert_pump_token(token):
-                logger.info(f"     ✅ New pump.fun token created: {token.address}")
-                return token
-            else:
-                logger.info(f"     ❌ Failed to save token to database")
-                
         except Exception as e:
-            logger.error(f"     💥 Error processing token creation {transaction.signature}: {e}")
-        
-        return None
+            logger.error(f"Error in polling cycle: {e}")
+            return False
     
-    def _extract_token_address_fast(self, transaction: HeliusTransaction) -> Optional[str]:
-        """
-        Extracts the token mint address by finding the 'create' instruction in a pump.fun transaction.
-        """
-        # Discriminator for the 'create' instruction on pump.fun program
-        # sighash('global:create') -> 0xaf23ab6c82ce0561
-        CREATE_DISCRIMINATOR = b'\xaf\x23\xab\x6c\x82\xce\x05\x61'
-
+    async def _poll_recent_transactions(self):
+        """Récupère et traite les transactions récentes avec debug amélioré"""
         try:
-            for instruction in transaction.instructions:
-                if instruction.programId == self.pumpfun_program_id:
-                    # Instruction data is base58 encoded
-                    try:
-                        data = base58.b58decode(instruction.data)
-                        # Check for discriminator
-                        if data.startswith(CREATE_DISCRIMINATOR):
-                            # The mint address is the first account in the create instruction
-                            if instruction.accounts:
-                                token_address = instruction.accounts[0]
-                                logger.info(f"Found 'create' instruction, token mint: {token_address}")
-                                return token_address
-                    except Exception:
-                        # Not a valid base58 string, or other error, just skip
-                        continue
-            return None
+            # Calculer la période à scanner (dernières X minutes)
+            lookback_minutes = max(self.current_polling_interval / 60 * 1.2, 3)  # 20% de marge
+            since_time = datetime.now() - timedelta(minutes=lookback_minutes)
             
-        except Exception as e:
-            logger.error(f"Error extracting token address: {e}")
-            return None
-    
-    async def _process_token_purchase_optimized(self, transaction: HeliusTransaction) -> Optional[EarlyPurchase]:
-        """
-        Traite un achat de token pump.fun - VERSION CORRIGÉE pour pump.fun
-        """
-        try:
-            logger.info(f"     🔍 Analyzing token transfers for purchase detection...")
-            logger.info(f"     Token transfers count: {len(transaction.tokenTransfers)}")
+            logger.info(f"Polling transactions since {since_time.isoformat()} (lookback: {lookback_minutes:.1f}min)")
             
-            if not transaction.tokenTransfers:
-                logger.info(f"     ❌ No token transfers found")
-                return None
+            # Récupérer les transactions pump.fun récentes
+            transactions = await self._get_recent_pumpfun_transactions(since_time)
             
-            # Log tous les transferts
-            for i, transfer in enumerate(transaction.tokenTransfers):
-                logger.info(f"     Transfer {i}: {transfer}")
-            
-            # CORRECTION: Pour pump.fun, si on a une instruction pump.fun ET un transfert de token,
-            # alors c'est probablement un achat pump.fun, peu importe le nom du token
-            
-            pump_token_transfer = None
-            
-            for i, transfer in enumerate(transaction.tokenTransfers):
-                amount = float(transfer.get('tokenAmount', 0))
-                mint = transfer.get('mint', '')
-                to_account = transfer.get('toUserAccount', '')
-                
-                logger.info(f"     Analyzing transfer {i}:")
-                logger.info(f"       Mint: {mint}")
-                logger.info(f"       Amount: {amount}")
-                logger.info(f"       To: {to_account}")
-                
-                # Si on a une instruction pump.fun, alors tout transfert de token peut être un achat pump.fun
-                if amount > 0 and to_account and len(mint) >= 32:
-                    # Vérifier que ce n'est pas SOL
-                    if mint != 'So11111111111111111111111111111111111111112':
-                        logger.info(f"       ✅ Token transfer detected (likely pump.fun)")
-                        pump_token_transfer = transfer
-                        break
-                else:
-                    logger.info(f"       ❌ Invalid transfer data")
-            
-            if not pump_token_transfer:
-                logger.info(f"     ❌ No valid token transfer found")
-                return None
-            
-            # Extraction des données de l'achat pump.fun
-            buyer_address = pump_token_transfer.get('toUserAccount')
-            token_address = pump_token_transfer.get('mint')
-            token_amount = float(pump_token_transfer.get('tokenAmount', 0))
-            
-            # Pour pump.fun, estimer le montant SOL depuis la fee ou utiliser une valeur par défaut
-            estimated_sol_amount = transaction.fee / 1e9 if transaction.fee > 0 else 0.01  # Estimation minimale
-            
-            logger.info(f"     Extracted pump.fun purchase data:")
-            logger.info(f"       Buyer: {buyer_address}")
-            logger.info(f"       Token address: {token_address}")
-            logger.info(f"       Token amount: {token_amount}")
-            logger.info(f"       Estimated SOL: {estimated_sol_amount}")
-            
-            if not all([buyer_address, token_address, token_amount > 0]):
-                logger.info(f"     ❌ Missing or invalid data")
-                return None
-            
-            # Vérifier si le token existe, sinon le créer
-            logger.info(f"     🔍 Checking if token exists in database...")
-            token = db.get_token_by_address(token_address)
-            if not token:
-                logger.info(f"     ❌ Token not found, creating new token: {token_address}")
-                # Créer le token automatiquement
-                from .models import PumpToken
-                new_token = PumpToken(
-                    address=token_address,
-                    name=None,
-                    symbol=None,
-                    description=None,
-                    creator=transaction.feePayer,
-                    created_at=transaction.timestamp,
-                    market_cap_discovery=None
-                )
-                
-                if db.insert_pump_token(new_token):
-                    logger.info(f"     ✅ New token created: {token_address}")
-                    token = new_token
-                else:
-                    logger.info(f"     ❌ Failed to create token")
-                    return None
-            else:
-                logger.info(f"     ✅ Token found: {token.address}")
-            
-            # Calcul du timing
-            time_diff = transaction.timestamp - token.created_at
-            minutes_after = int(time_diff.total_seconds() / 60)
-            
-            logger.info(f"     Timing analysis:")
-            logger.info(f"       Transaction time: {transaction.timestamp}")
-            logger.info(f"       Token created: {token.created_at}")
-            logger.info(f"       Minutes after creation: {minutes_after}")
-            
-            # Pour le debug, on accepte même les achats tardifs pour l'instant
-            if minutes_after < 0:
-                # Le token a été créé après cette transaction, ce qui est normal
-                # On va ajuster le timing
-                minutes_after = 0
-                logger.info(f"       ⚠️ Adjusted timing to 0 (token created after transaction)")
-            
-            # Création de l'achat
-            purchase = EarlyPurchase(
-                signature=transaction.signature,
-                token_address=token_address,
-                buyer_address=buyer_address,
-                sol_amount=estimated_sol_amount,
-                token_amount=token_amount,
-                timestamp=transaction.timestamp,
-                minutes_after_creation=minutes_after,
-                market_cap_at_purchase=None
-            )
-            
-            logger.info(f"     💾 Saving purchase to database...")
-            
-            # Sauvegarde
-            if db.insert_early_purchase(purchase):
-                logger.info(f"     ✅ Early purchase saved: {buyer_address[:20]}... -> {token.symbol or token_address[:20]}... ({minutes_after}min)")
-                return purchase
-            else:
-                logger.info(f"     ❌ Failed to save purchase")
-                return None
-                
-        except Exception as e:
-            logger.error(f"     💥 Error processing token purchase {transaction.signature}: {e}")
-            import traceback
-            logger.error(f"     Traceback: {traceback.format_exc()}")
-        
-        return None
-    
-    async def _enrich_token_metadata_async(self, token_address: str):
-        """
-        Enrichit les métadonnées d'un token en arrière-plan
-        """
-        try:
-            # Vérifier le cache
-            if token_address in self.token_metadata_cache:
+            if not transactions:
+                logger.debug("No new pump.fun transactions found")
+                self.recent_activity_levels.append(0)
                 return
             
-            # Marquer comme en cours de traitement
-            self.token_metadata_cache[token_address] = {"status": "processing"}
+            # Filtrer les doublons avec debug
+            new_transactions = []
+            for tx in transactions:
+                if tx.signature not in self.processed_signatures:
+                    new_transactions.append(tx)
+                    self.processed_signatures.add(tx.signature)
+                else:
+                    logger.debug(f"Duplicate transaction filtered: {tx.signature[:20]}...")
             
-            # Récupérer les métadonnées (optionnel, coûte des crédits)
-            metadata = await self._fetch_token_metadata(token_address)
+            if not new_transactions:
+                logger.info(f"Found {len(transactions)} transactions but all already processed")
+                self.recent_activity_levels.append(0)
+                return
             
-            if metadata:
-                # Mettre à jour en base
-                token = db.get_token_by_address(token_address)
-                if token:
-                    token.name = metadata.get('name') or token.name
-                    token.symbol = metadata.get('symbol') or token.symbol
-                    token.description = metadata.get('description') or token.description
-                    db.insert_pump_token(token)  # Upsert
-                
-                # Mettre en cache
-                self.token_metadata_cache[token_address] = metadata
-                
+            logger.info(f"Processing {len(new_transactions)} new transactions")
+            
+            # Debug: analyser les transactions
+            pumpfun_count = 0
+            for tx in new_transactions:
+                has_pumpfun = any(inst.programId == self.pumpfun_program_id for inst in tx.instructions)
+                if has_pumpfun:
+                    pumpfun_count += 1
+                    logger.info(f"🎯 Pump.fun transaction: {tx.signature[:20]}... - Type: {tx.type}")
+            
+            logger.info(f"📊 Transactions with pump.fun instructions: {pumpfun_count}/{len(new_transactions)}")
+            
+            self.recent_activity_levels.append(len(new_transactions))
+            self.last_activity_time = datetime.now()
+            
+            # Traiter les transactions par lots
+            await self._process_transaction_batch(new_transactions)
+            
+            # Mettre à jour les statistiques
+            self._update_daily_stats(len(new_transactions))
+            
         except Exception as e:
-            logger.error(f"Error enriching metadata for {token_address}: {e}")
-            # Marquer comme erreur dans le cache
-            self.token_metadata_cache[token_address] = {"status": "error"}
+            logger.error(f"Error polling recent transactions: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
-    async def _fetch_token_metadata(self, token_address: str) -> Optional[Dict[str, Any]]:
+    async def _get_recent_pumpfun_transactions(self, since_time: datetime) -> List[HeliusTransaction]:
         """
-        Récupère les métadonnées d'un token (utilise des crédits)
+        Récupère les transactions pump.fun récentes avec retry et logging détaillé
         """
-        try:
-            # Cette fonction est optionnelle et peut être désactivée pour économiser les crédits
-            if not settings.enable_metadata_enrichment:
+        max_retries = 3
+        retry_delay = 5  # secondes
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"🔍 Attempt {attempt + 1}/{max_retries} to fetch pump.fun transactions")
+                
+                # OPTIMISATION: Un seul appel par polling cycle
+                url = f"{self.helius_rpc_url}/?api-key={self.helius_api_key}"
+                
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "getSignaturesForAddress",
+                    "params": [
+                        self.pumpfun_program_id,
+                        {
+                            "limit": 20,  # RÉDUIT de 100 à 20 pour économiser
+                            "commitment": "confirmed"
+                        }
+                    ]
+                }
+                
+                logger.info(f"📤 Sending request to Helius:")
+                logger.info(f"   URL: {url}")
+                logger.info(f"   Payload: {json.dumps(payload, indent=2)}")
+                
+                # Utiliser un timeout plus court et retry
+                async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=10.0)) as client:
+                    response = await client.post(url, json=payload)
+                    
+                    logger.info(f"📥 Response from Helius:")
+                    logger.info(f"   Status: {response.status_code}")
+                    logger.info(f"   Headers: {dict(response.headers)}")
+                    
+                    response.raise_for_status()
+                
+                data = response.json()
+                logger.info(f"📋 Response data:")
+                logger.info(f"   Raw response: {json.dumps(data, indent=2)}")
+                
+                if 'error' in data:
+                    logger.error(f"❌ Helius API error: {data['error']}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    return []
+                
+                if 'result' not in data:
+                    logger.warning(f"⚠️ No 'result' field in response")
+                    return []
+                
+                if not data['result']:
+                    logger.info(f"ℹ️ Empty result - no signatures found for pump.fun program")
+                    return []
+                
+                signatures = data['result']
+                logger.info(f"📊 Found {len(signatures)} signatures for pump.fun program")
+                
+                # Log détails des signatures
+                for i, sig_info in enumerate(signatures[:3]):  # Log les 3 premières
+                    logger.info(f"   Signature {i+1}: {json.dumps(sig_info, indent=4)}")
+                
+                # OPTIMISATION: Traiter seulement les 5 plus récentes
+                recent_signatures = signatures[:5]  # RÉDUIT drastiquement
+                transactions = []
+                
+                # OPTIMISATION: Récupérer les détails
+                if recent_signatures:
+                    recent_sigs = []
+                    for sig_info in recent_signatures:
+                        signature = sig_info['signature']
+                        block_time = sig_info.get('blockTime')
+                        
+                        logger.info(f"🔍 Processing signature: {signature}")
+                        logger.info(f"   Block time: {block_time}")
+                        
+                        if not block_time:
+                            logger.warning(f"   ⚠️ No block time for signature {signature[:20]}...")
+                            continue
+                        
+                        # Vérifier si la transaction est dans la fenêtre de temps
+                        tx_time = datetime.fromtimestamp(block_time)
+                        time_diff = datetime.now() - tx_time
+                        
+                        logger.info(f"   Transaction time: {tx_time.isoformat()}")
+                        logger.info(f"   Time diff: {time_diff.total_seconds():.1f} seconds ago")
+                        logger.info(f"   Since time: {since_time.isoformat()}")
+                        logger.info(f"   In window: {tx_time >= since_time}")
+                        
+                        if tx_time >= since_time:
+                            recent_sigs.append(signature)
+                            logger.info(f"   ✅ Added to recent signatures")
+                        else:
+                            logger.info(f"   ❌ Too old, skipped")
+                    
+                    logger.info(f"📈 Processing {len(recent_sigs)} recent signatures")
+                    
+                    # Récupérer les détails des transactions récentes (max 3)
+                    for signature in recent_sigs[:3]:  # LIMITE à 3 max
+                        logger.info(f"🔍 Fetching transaction details for: {signature[:20]}...")
+                        tx_detail = await self._get_transaction_details_with_retry(signature, max_retries=2)
+                        if tx_detail:
+                            logger.info(f"   ✅ Transaction details retrieved")
+                            transactions.append(tx_detail)
+                        else:
+                            logger.warning(f"   ❌ Failed to get transaction details")
+                
+                # Record Helius API calls
+                self.system_monitor.record_helius_call('getSignaturesForAddress', 10)
+                if transactions:
+                    self.system_monitor.record_helius_call('getTransaction', 10 * len(transactions))
+
+                logger.info(f"✅ Retrieved {len(transactions)} pump.fun transactions")
+                
+                return transactions
+                
+            except httpx.TimeoutException as e:
+                logger.warning(f"⏱️ Timeout on attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    logger.error("❌ All retry attempts failed due to timeout")
+                    return []
+                    
+            except httpx.ConnectError as e:
+                logger.warning(f"🔌 Connection error on attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    logger.error("❌ All retry attempts failed due to connection error")
+                    return []
+                    
+            except httpx.HTTPError as e:
+                logger.error(f"🌐 HTTP error fetching transactions: {e}")
+                logger.error(f"   Response content: {getattr(e.response, 'text', 'No response content') if hasattr(e, 'response') else 'No response'}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    return []
+                    
+            except Exception as e:
+                logger.error(f"💥 Unexpected error fetching transactions: {e}")
+                logger.error(f"   Exception type: {type(e).__name__}")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    return []
+        
+        return []
+    
+    async def _get_transaction_details_with_retry(self, signature: str, max_retries: int = 2) -> Optional[HeliusTransaction]:
+        """Récupère les détails d'une transaction avec retry et logging détaillé"""
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"📄 Getting transaction details - attempt {attempt + 1}/{max_retries}")
+                
+                url = f"{self.helius_rpc_url}/?api-key={self.helius_api_key}"
+                
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": "1",
+                    "method": "getTransaction",
+                    "params": [
+                        signature,
+                        {
+                            "encoding": "json",
+                            "maxSupportedTransactionVersion": 0,
+                            "commitment": "confirmed"
+                        }
+                    ]
+                }
+                
+                logger.info(f"📤 Sending getTransaction request:")
+                logger.info(f"   Signature: {signature}")
+                logger.info(f"   Payload: {json.dumps(payload, indent=2)}")
+                
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+                    response = await client.post(url, json=payload)
+                    
+                    logger.info(f"📥 getTransaction response:")
+                    logger.info(f"   Status: {response.status_code}")
+                    
+                    response.raise_for_status()
+                
+                data = response.json()
+                logger.info(f"📋 Transaction details response:")
+                logger.info(f"   Has result: {'result' in data}")
+                logger.info(f"   Has error: {'error' in data}")
+                
+                if 'error' in data:
+                    logger.error(f"   Error: {data['error']}")
+                    return None
+                
+                if not data.get('result'):
+                    logger.warning(f"   ⚠️ No result for transaction {signature[:20]}...")
+                    return None
+                
+                result = data['result']
+                logger.info(f"   Transaction exists: {result is not None}")
+                
+                if result:
+                    # Log structure de la transaction
+                    logger.info(f"   Transaction structure:")
+                    logger.info(f"     - signature: {result.get('signature', 'N/A')}")
+                    logger.info(f"     - slot: {result.get('slot', 'N/A')}")
+                    logger.info(f"     - blockTime: {result.get('blockTime', 'N/A')}")
+                    logger.info(f"     - has transaction: {'transaction' in result}")
+                    
+                    if 'transaction' in result:
+                        tx_data = result['transaction']
+                        logger.info(f"     - has message: {'message' in tx_data}")
+                        
+                        if 'message' in tx_data:
+                            message = tx_data['message']
+                            logger.info(f"       - accountKeys count: {len(message.get('accountKeys', []))}")
+                            logger.info(f"       - instructions count: {len(message.get('instructions', []))}")
+                            
+                            # Log les premiers account keys
+                            account_keys = message.get('accountKeys', [])
+                            for i, key in enumerate(account_keys[:5]):  # Premier 5
+                                logger.info(f"         Account {i}: {key}")
+                            
+                            # Log les instructions
+                            instructions = message.get('instructions', [])
+                            for i, inst in enumerate(instructions):
+                                program_id_index = inst.get('programIdIndex')
+                                program_id = account_keys[program_id_index] if program_id_index < len(account_keys) else 'Unknown'
+                                logger.info(f"         Instruction {i}: program={program_id} (index={program_id_index})")
+                                logger.info(f"           accounts: {inst.get('accounts', [])}")
+                                logger.info(f"           data length: {len(inst.get('data', ''))}")
+                                
+                                # Marquer si c'est pump.fun
+                                if program_id == self.pumpfun_program_id:
+                                    logger.info(f"           🎯 PUMP.FUN INSTRUCTION DETECTED!")
+                
+                # Parser la transaction
+                parsed_tx = self._parse_helius_transaction(result)
+                
+                if parsed_tx:
+                    logger.info(f"   ✅ Transaction parsed successfully")
+                    logger.info(f"     - Type: {parsed_tx.type}")
+                    logger.info(f"     - Instructions: {len(parsed_tx.instructions)}")
+                    logger.info(f"     - Token transfers: {len(parsed_tx.tokenTransfers)}")
+                    
+                    # Compter les instructions pump.fun
+                    pumpfun_instructions = sum(1 for inst in parsed_tx.instructions if inst.programId == self.pumpfun_program_id)
+                    logger.info(f"     - Pump.fun instructions: {pumpfun_instructions}")
+                    
+                    return parsed_tx
+                else:
+                    logger.warning(f"   ❌ Failed to parse transaction")
+                    return None
+                
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPError) as e:
+                logger.warning(f"🔌 Error getting transaction {signature[:20]}... attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)
+                    continue
+                else:
+                    logger.error(f"❌ Failed to get transaction {signature[:20]}... after {max_retries} attempts")
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"💥 Unexpected error getting transaction {signature[:20]}...: {e}")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
                 return None
-            
-            url = f"{settings.helius_rpc_url}/?api-key={settings.helius_api_key}"
+        
+        return None
+    
+    async def _get_transaction_details(self, signature: str) -> Optional[HeliusTransaction]:
+        """Récupère les détails d'une transaction"""
+        try:
+            url = f"{self.helius_rpc_url}/?api-key={self.helius_api_key}"
             
             payload = {
                 "jsonrpc": "2.0",
                 "id": "1",
-                "method": "getAsset",
-                "params": {"id": token_address}
+                "method": "getTransaction",
+                "params": [
+                    signature,
+                    {
+                        "encoding": "json",
+                        "maxSupportedTransactionVersion": 0,
+                        "commitment": "confirmed"
+                    }
+                ]
             }
             
             response = await self.httpx_client.post(url, json=payload)
+            response.raise_for_status()
             
-            if response.status_code == 200:
-                data = response.json()
-                if 'result' in data:
-                    result = data['result']
-                    content = result.get('content', {})
-                    metadata = content.get('metadata', {})
-                    
-                    return {
-                        'name': metadata.get('name'),
-                        'symbol': metadata.get('symbol'),
-                        'description': metadata.get('description')
-                    }
+            data = response.json()
+            
+            if 'error' in data or not data.get('result'):
+                return None
+            
+            # Parser la transaction
+            return self._parse_helius_transaction(data['result'])
+            
         except Exception as e:
-            logger.error(f"Error fetching metadata for {token_address}: {e}")
-        
-        return None
+            logger.error(f"Error getting transaction details for {signature}: {e}")
+            return None
     
-    def _periodic_cache_cleanup(self):
-        """Nettoyage périodique optimisé des caches"""
-        self.cache_cleanup_counter += 1
-        
-        # Nettoyer toutes les 100 transactions
-        if self.cache_cleanup_counter >= 100:
-            self.cache_cleanup_counter = 0
+    def _parse_helius_transaction(self, tx_data: Dict[str, Any]) -> Optional[HeliusTransaction]:
+        """Parse une transaction depuis les données Helius - CORRECTION INDEX COMPTES"""
+        try:
+            # Vérifier les champs requis
+            if not all(key in tx_data for key in ['slot']):
+                logger.error(f"Missing required fields in transaction data")
+                return None
             
-            # Nettoyer le cache des signatures
-            if len(self.processed_signatures) > 5000:
-                # Garder les 3000 plus récents (approximation)
-                signatures_list = list(self.processed_signatures)
-                self.processed_signatures = set(signatures_list[-3000:])
-                logger.info(f"Cleaned signature cache: {len(signatures_list)} -> {len(self.processed_signatures)}")
+            # Récupérer le timestamp avec gestion des timestamps futurs
+            block_time = tx_data.get('blockTime')
+            timestamp = datetime.now()  # Toujours utiliser le timestamp actuel
             
-            # Nettoyer le cache des métadonnées
-            if len(self.token_metadata_cache) > 1000:
-                # Garder les 500 plus récents
-                items = list(self.token_metadata_cache.items())
-                self.token_metadata_cache = dict(items[-500:])
-                logger.info(f"Cleaned metadata cache: {len(items)} -> {len(self.token_metadata_cache)}")
+            # Récupérer la signature
+            signature = tx_data.get('signature', '')
+            if not signature:
+                tx_inner = tx_data.get('transaction', {})
+                signatures = tx_inner.get('signatures', [])
+                if signatures:
+                    signature = signatures[0]
+                else:
+                    signature = f"unknown_{tx_data.get('slot', 'nosig')}"
+            
+            # Parser les instructions avec la bonne structure
+            instructions = []
+            transaction_data = tx_data.get('transaction', {})
+            message = transaction_data.get('message', {})
+            
+            # Récupérer les comptes et instructions
+            account_keys = message.get('accountKeys', [])
+            raw_instructions = message.get('instructions', [])
+            
+            logger.debug(f"Parsing transaction: {len(account_keys)} accounts, {len(raw_instructions)} instructions")
+            
+            # CORRECTION: Gérer l'expansion des comptes avec addressTableLookups
+            expanded_account_keys = account_keys.copy()
+            
+            # Vérifier s'il y a des address table lookups (v0 transactions)
+            address_table_lookups = message.get('addressTableLookups', [])
+            if address_table_lookups:
+                logger.info(f"Found {len(address_table_lookups)} address table lookups - expanding account keys")
+                # Pour l'instant, on va juste noter qu'il y en a
+                # Dans un vrai système, il faudrait résoudre ces lookups
+            
+            for inst_idx, inst_data in enumerate(raw_instructions):
+                try:
+                    # Récupérer l'index du programme
+                    program_id_index = inst_data.get('programIdIndex')
+                    if program_id_index is None:
+                        logger.warning(f"Instruction {inst_idx}: no programIdIndex")
+                        continue
+                    
+                    # CORRECTION: Vérifier l'index ET essayer de récupérer depuis stackHeight si nécessaire
+                    program_id = None
+                    if program_id_index < len(account_keys):
+                        program_id = account_keys[program_id_index]
+                    else:
+                        # L'index dépasse les comptes de base, probablement une v0 transaction
+                        # Pour l'instant, on va ignorer ces instructions
+                        logger.warning(f"Instruction {inst_idx}: programIdIndex {program_id_index} >= {len(account_keys)} (v0 transaction?)")
+                        
+                        # WORKAROUND: Si on a vu du pump.fun dans les logs précédents, on va créer une instruction factice
+                        if hasattr(self, '_last_detected_pumpfun') and self._last_detected_pumpfun:
+                            program_id = self.pumpfun_program_id
+                            logger.info(f"Using pump.fun program ID from previous detection")
+                        else:
+                            continue
+                    
+                    # Récupérer les comptes de l'instruction (avec validation)
+                    account_indexes = inst_data.get('accounts', [])
+                    instruction_accounts = []
+                    for idx in account_indexes:
+                        if idx < len(account_keys):
+                            instruction_accounts.append(account_keys[idx])
+                        # Ignorer silencieusement les index invalides pour les v0 transactions
+                    
+                    # Créer l'instruction
+                    instruction = HeliusInstruction(
+                        accounts=instruction_accounts,
+                        data=inst_data.get('data', ''),
+                        innerInstructions=[],
+                        programId=program_id
+                    )
+                    instructions.append(instruction)
+                    
+                    # Log et mémoriser si c'est pump.fun
+                    if program_id == self.pumpfun_program_id:
+                        logger.info(f"✅ Pump.fun instruction successfully parsed in instruction {inst_idx}!")
+                        self._last_detected_pumpfun = True
+                    
+                except Exception as e:
+                    logger.error(f"Error parsing instruction {inst_idx}: {e}")
+                    continue
+            
+            # Parser les transferts de tokens depuis meta
+            token_transfers = []
+            meta = tx_data.get('meta', {})
+            
+            if meta:
+                # Analyser les changements de balances pour détecter les transferts
+                pre_token_balances = meta.get('preTokenBalances', [])
+                post_token_balances = meta.get('postTokenBalances', [])
+                
+                # Créer des transferts simplifiés basés sur les changements de balance
+                for post_balance in post_token_balances:
+                    mint = post_balance.get('mint')
+                    owner = post_balance.get('owner')
+                    ui_amount = post_balance.get('uiTokenAmount', {})
+                    amount = ui_amount.get('amount', '0')
+                    
+                    if mint and owner and amount != '0':
+                        token_transfers.append({
+                            'mint': mint,
+                            'toUserAccount': owner,
+                            'tokenAmount': amount,
+                            'fromUserAccount': None
+                        })
+            
+            # Déterminer le fee payer
+            fee_payer = transaction_data.get('feePayer', '')
+            if not fee_payer and account_keys:
+                fee_payer = account_keys[0]
+            
+            # Créer l'objet transaction
+            transaction = HeliusTransaction(
+                signature=signature,
+                slot=tx_data.get('slot', 0),
+                timestamp=timestamp,
+                type=self._determine_transaction_type(instructions, token_transfers),
+                source='helius',
+                fee=meta.get('fee', 0),
+                feePayer=fee_payer,
+                instructions=instructions,
+                nativeTransfers=[],
+                tokenTransfers=token_transfers,
+                accountData=[]
+            )
+            
+            # Compter les instructions pump.fun pour vérification
+            pumpfun_count = sum(1 for inst in instructions if inst.programId == self.pumpfun_program_id)
+            
+            logger.info(f"✅ Transaction parsed: {len(instructions)} instructions, {len(token_transfers)} transfers")
+            logger.info(f"   Pump.fun instructions in final transaction: {pumpfun_count}")
+            
+            return transaction
+            
+        except Exception as e:
+            logger.error(f"💥 Error parsing transaction: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return None
     
-    def get_processing_stats(self) -> Dict[str, Any]:
-        """Retourne les statistiques de traitement"""
+    def _determine_transaction_type(self, instructions: List, token_transfers: List) -> str:
+        """Détermine le type de transaction"""
+        # Si il y a des instructions pump.fun et des transferts de tokens, c'est probablement un SWAP
+        has_pumpfun = any(inst.programId == self.pumpfun_program_id for inst in instructions)
+        has_transfers = len(token_transfers) > 0
+        
+        if has_pumpfun:
+            if has_transfers:
+                return "SWAP"
+            else:
+                return "UNKNOWN"  # Possible création de token
+        
+        return "UNKNOWN"
+    
+    async def _process_transaction_batch(self, transactions: List[HeliusTransaction]):
+        """Traite un lot de transactions"""
+        logger.info(f"Processing batch of {len(transactions)} transactions")
+        
+        tokens_created = 0
+        purchases_detected = 0
+        
+        for transaction in transactions:
+            try:
+                # Filtrer les micro-transactions pour économiser le traitement
+                if not self._is_transaction_worth_processing(transaction):
+                    continue
+                
+                # Traiter la transaction
+                result = await processor.process_helius_transaction(transaction)
+                
+                if result['processed']:
+                    if result['token_created']:
+                        tokens_created += 1
+                        logger.info(f"New token created: {result['token_created'].address}")
+                    
+                    purchases_detected += len(result['purchases'])
+                    
+                    if result['purchases']:
+                        logger.info(f"Early purchases detected: {len(result['purchases'])}")
+                
+            except Exception as e:
+                logger.error(f"Error processing transaction {transaction.signature}: {e}")
+        
+        # Logs de résumé
+        if tokens_created > 0 or purchases_detected > 0:
+            logger.info(f"Batch processed: {tokens_created} tokens created, {purchases_detected} purchases detected")
+        
+        # Déclencher la mise à jour des scores si nécessaire
+        if purchases_detected > 0:
+            asyncio.create_task(self._trigger_scoring_update())
+    
+    def _is_transaction_worth_processing(self, transaction: HeliusTransaction) -> bool:
+        """Détermine si une transaction mérite d'être traitée (optimisation)"""
+        # Vérifier s'il y a des transferts significatifs
+        if transaction.tokenTransfers:
+            for transfer in transaction.tokenTransfers:
+                amount = float(transfer.get('tokenAmount', 0))
+                if amount >= settings.min_sol_amount_filter:
+                    return True
+        
+        # Vérifier s'il y a des transferts natifs significatifs
+        if transaction.nativeTransfers:
+            for transfer in transaction.nativeTransfers:
+                amount = transfer.get('amount', 0)
+                if amount >= settings.min_sol_amount_filter * 1e9:  # Conversion lamports
+                    return True
+        
+        # Toujours traiter les transactions UNKNOWN (potentielles créations de tokens)
+        if transaction.type == "UNKNOWN":
+            return True
+        
+        return False
+    
+    async def _trigger_scoring_update(self):
+        """Déclenche une mise à jour du scoring des early adopters"""
+        try:
+            await scorer.update_all_early_adopters()
+            logger.info("Early adopter scoring updated")
+        except Exception as e:
+            logger.error(f"Error updating early adopter scores: {e}")
+    
+    def _adapt_polling_interval(self):
+        """Adapte l'intervalle de polling selon l'activité"""
+        # Garder seulement les 10 dernières mesures
+        if len(self.recent_activity_levels) > 10:
+            self.recent_activity_levels = self.recent_activity_levels[-10:]
+        
+        if not self.recent_activity_levels:
+            return
+        
+        # Calculer l'activité moyenne récente
+        avg_activity = sum(self.recent_activity_levels) / len(self.recent_activity_levels)
+        
+        # Adapter l'intervalle selon l'activité
+        if avg_activity > 50:  # Haute activité
+            self.current_polling_interval = self.min_polling_interval
+        elif avg_activity > 20:  # Activité moyenne
+            self.current_polling_interval = self.base_polling_interval
+        elif avg_activity > 5:   # Faible activité
+            self.current_polling_interval = min(self.base_polling_interval * 1.5, self.max_polling_interval)
+        else:  # Très faible activité
+            self.current_polling_interval = self.max_polling_interval
+        
+        # Log les changements significatifs
+        if abs(self.current_polling_interval - self.base_polling_interval) > 30:
+            logger.info(f"Polling interval adapted to {self.current_polling_interval}s (avg activity: {avg_activity:.1f})")
+    
+    async def _cleanup_cache(self):
+        """Nettoie le cache des signatures traitées"""
         now = datetime.now()
-        uptime_seconds = (now - self.last_stats_reset).total_seconds()
         
-        stats = dict(self.processing_stats)
-        stats.update({
-            'cache_sizes': {
-                'processed_signatures': len(self.processed_signatures),
-                'token_metadata': len(self.token_metadata_cache)
-            },
-            'uptime_seconds': uptime_seconds,
-            'transactions_per_minute': (stats.get('total_processed', 0) / max(uptime_seconds / 60, 1)),
-            'success_rate': (stats.get('total_processed', 0) - stats.get('errors', 0)) / max(stats.get('total_processed', 1), 1),
-            'last_reset': self.last_stats_reset.isoformat()
-        })
+        # Nettoyer toutes les heures
+        if (now - self.last_signature_cleanup).total_seconds() > 3600:
+            # Garder seulement les signatures des 6 dernières heures
+            if len(self.processed_signatures) > 5000:
+                logger.info(f"Cleaning signature cache: {len(self.processed_signatures)} -> limiting to recent ones")
+                # Pour simplifier, on vide complètement le cache
+                # Dans un vrai système, on utiliserait un cache avec TTL
+                self.processed_signatures.clear()
+            
+            self.last_signature_cleanup = now
+    
+    def _check_daily_reset(self):
+        """Vérifie et réinitialise les stats quotidiennes"""
+        current_date = datetime.now().date()
         
-        return stats
+        if current_date != self.last_reset_date:
+            self.daily_stats.clear()
+            self.credits_used_today = 0
+            self.last_reset_date = current_date
+            logger.info("Daily stats reset")
     
-    def reset_stats(self):
-        """Remet à zéro les statistiques"""
-        self.processing_stats.clear()
-        self.last_stats_reset = datetime.now()
-        logger.info("Processing stats reset")
+    def _update_daily_stats(self, transaction_count: int):
+        """Met à jour les statistiques quotidiennes"""
+        self.daily_stats['transactions_processed'] += transaction_count
+        self.daily_stats['polling_cycles'] += 1
+        
+        # Alerte si proche de la limite
+        if self.credits_used_today > settings.max_daily_credits * 0.8:
+            logger.warning(f"High credit usage: {self.credits_used_today}/{settings.max_daily_credits}")
     
-    async def cleanup(self):
-        """Nettoyage des ressources"""
+    def get_stats(self) -> Dict[str, Any]:
+        """Retourne les statistiques du polling avec santé API"""
+        return {
+            'is_running': self.is_running,
+            'current_polling_interval': self.current_polling_interval,
+            'credits_used_today': self.credits_used_today,
+            'max_daily_credits': settings.max_daily_credits,
+            'daily_stats': dict(self.daily_stats),
+            'cache_size': len(self.processed_signatures),
+            'recent_activity_avg': sum(self.recent_activity_levels[-5:]) / min(len(self.recent_activity_levels), 5) if self.recent_activity_levels else 0,
+            'last_activity_time': self.last_activity_time.isoformat(),
+            'last_reset_date': self.last_reset_date.isoformat(),
+            'api_health': {
+                'status': self.api_health_status,
+                'consecutive_failures': self.consecutive_failures,
+                'last_successful_poll': self.last_successful_poll.isoformat(),
+                'time_since_success_minutes': (datetime.now() - self.last_successful_poll).total_seconds() / 60
+            }
+        }
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Vérifie la santé du système de polling"""
+        health = {
+            'status': 'healthy',
+            'issues': []
+        }
+        
+        # Vérifier si le polling tourne
+        if not self.is_running or not self.polling_task or self.polling_task.done():
+            health['issues'].append("Polling not running")
+            health['status'] = 'degraded'
+        
+        # Vérifier l'utilisation des crédits
+        credit_usage_pct = (self.credits_used_today / settings.max_daily_credits) * 100
+        if credit_usage_pct > 90:
+            health['issues'].append(f"Credit usage critical: {credit_usage_pct:.1f}%")
+            health['status'] = 'warning'
+        
+        # Vérifier la dernière activité
+        time_since_activity = (datetime.now() - self.last_activity_time).total_seconds()
+        if time_since_activity > 1800:  # Plus de 30 minutes
+            health['issues'].append(f"No activity for {time_since_activity/60:.1f} minutes")
+            if health['status'] == 'healthy':
+                health['status'] = 'warning'
+        
+        health['credit_usage_percent'] = credit_usage_pct
+        health['time_since_last_activity_minutes'] = time_since_activity / 60
+        health['polling_interval'] = self.current_polling_interval
+        
+        return health
+    
+    async def force_poll_now(self) -> Dict[str, Any]:
+        """Force un polling immédiat (pour debug/test)"""
+        try:
+            logger.info("Force polling triggered")
+            await self._poll_recent_transactions()
+            return {
+                'status': 'success',
+                'message': 'Force polling completed',
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error in force polling: {e}")
+            return {
+                'status': 'error',
+                'message': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+    
+    async def shutdown(self):
+        """Arrêt propre du polling"""
+        self.is_running = False
+        
+        if self.polling_task and not self.polling_task.done():
+            self.polling_task.cancel()
+            try:
+                await self.polling_task
+            except asyncio.CancelledError:
+                pass
+        
         await self.httpx_client.aclose()
-        logger.info("Data processor cleanup completed")
+        logger.info("Polling manager shutdown complete")
 
-# Instance globale
-processor = OptimizedPumpFunDataProcessor()
+    async def _enrich_token_metadata(self):
+        """Tâche de fond pour enrichir les métadonnées des tokens."""
+        logger.info("Starting token metadata enrichment task...")
+        self.last_enrichment_run = datetime.now()
+        
+        try:
+            # Note: get_tokens_to_enrich returns addresses, but we need the full token object
+            # to get the bonding curve addresses. Let's get the full objects.
+            token_addresses_to_enrich = db.get_tokens_to_enrich(
+                limit=settings.enrichment_batch_size,
+                update_interval_minutes=settings.enrichment_update_interval_minutes
+            )
+            
+            if not token_addresses_to_enrich:
+                logger.info("No tokens require metadata enrichment at this time.")
+                return
+
+            tokens_to_enrich_obj = [db.get_token_by_address(addr) for addr in token_addresses_to_enrich]
+            tokens_to_enrich_obj = [t for t in tokens_to_enrich_obj if t is not None]
+            
+            tokens_to_enrich = [t.__dict__ for t in tokens_to_enrich_obj]
+
+            if not tokens_to_enrich:
+                logger.info("No valid token objects to enrich.")
+                return
+
+            logger.info(f"Found {len(tokens_to_enrich)} tokens to enrich.")
+            
+            # Fetch data from HTTP API and on-chain concurrently
+            async with aiohttp.ClientSession() as session:
+                http_api_tasks = [self.pump_fun_client.get_token_data(session, t['address']) for t in tokens_to_enrich]
+                on_chain_tasks = [get_pump_progress_correct(t['address'], t.get('bonding_curve'), t.get('associated_bonding_curve'), self.helius_api_key) for t in tokens_to_enrich]
+                rugcheck_tasks = [self.rugcheck_client.get_token_report_async(session, t['address']) for t in tokens_to_enrich]
+                
+                all_tasks = http_api_tasks + on_chain_tasks + rugcheck_tasks
+                results = await asyncio.gather(*all_tasks, return_exceptions=True)
+
+            http_api_results = results[:len(tokens_to_enrich)]
+            on_chain_results = results[len(tokens_to_enrich):2*len(tokens_to_enrich)]
+            rugcheck_results = results[2*len(tokens_to_enrich):]
+
+            updated_count = 0
+            for i, token in enumerate(tokens_to_enrich):
+                token_address = token['address']
+                pump_data = http_api_results[i] if isinstance(http_api_results[i], dict) else {}
+                on_chain_data = on_chain_results[i] if isinstance(on_chain_results[i], dict) else {}
+                rugcheck_report = rugcheck_results[i] if isinstance(rugcheck_results[i], dict) else None
+
+                # Combine the data
+                if on_chain_data.get('success'):
+                    pump_data['bonding_curve_progress'] = on_chain_data.get('bonding_curve_progress')
+
+                # Create a snapshot before updating
+                db.create_snapshot(token_address)
+
+                # Update the database if we got any new data
+                if pump_data:
+                    success = db.update_token_pumpfun_data(token_address, pump_data)
+                    if success:
+                        updated_count += 1
+                
+                if rugcheck_report:
+                    db.upsert_rugcheck_report(token_address, rugcheck_report)
+            
+            logger.info(f"Enrichment task complete. Updated {updated_count}/{len(tokens_to_enrich)} tokens.")
+
+        except Exception as e:
+            logger.error(f"An error occurred during the enrichment task: {e}", exc_info=True)
+
+# This will be instantiated in main.py
+polling_manager = None

@@ -43,7 +43,8 @@ def get_associated_bonding_curve_address(bonding_curve_address: str, token_mint_
 async def get_pump_progress_correct(
     token_address: str, 
     db_bonding_curve: Optional[str],
-    db_associated_bonding_curve: Optional[str]
+    db_associated_bonding_curve: Optional[str],
+    helius_api_key: str
 ) -> Optional[Dict]:
     """
     Version simplifiée qui utilise l'API HTTP au lieu de l'accès on-chain direct.
@@ -65,7 +66,7 @@ async def get_pump_progress_correct(
         logger.info(f"Associated bonding curve: {associated_bonding_curve}")
         
         # Version HTTP : utiliser l'API RPC Solana via HTTP
-        rpc_url = "https://api.mainnet-beta.solana.com"  # Endpoint public
+        rpc_url = f"https://mainnet.helius-rpc.com/?api-key={helius_api_key}"
         
         # Payload pour getAccountInfo
         payload = {

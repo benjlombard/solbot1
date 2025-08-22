@@ -74,6 +74,68 @@ class DatabaseManager:
                     row_created_at TIMESTAMP
                 )
             """)
+
+            # Table pump_tokens_history
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS pump_tokens_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_timestamp TIMESTAMP,
+                    token_address TEXT,
+                    name TEXT,
+                    symbol TEXT,
+                    description TEXT,
+                    creator TEXT,
+                    created_at TIMESTAMP,
+                    market_cap_discovery REAL,
+                    usd_market_cap REAL,
+                    holders_count INTEGER,
+                    bonding_curve_progress REAL,
+                    logo_uri TEXT,
+                    is_verified BOOLEAN,
+                    last_updated_pumpfun TIMESTAMP,
+                    twitter TEXT,
+                    telegram TEXT,
+                    website TEXT,
+                    total_supply REAL,
+                    nsfw BOOLEAN,
+                    bonding_curve TEXT,
+                    king_of_the_hill_timestamp TIMESTAMP,
+                    metadata_uri TEXT,
+                    associated_bonding_curve TEXT,
+                    raydium_pool TEXT,
+                    virtual_sol_reserves REAL,
+                    virtual_token_reserves REAL,
+                    hidden BOOLEAN,
+                    show_name BOOLEAN,
+                    last_trade_timestamp TIMESTAMP,
+                    market_cap REAL,
+                    market_id TEXT,
+                    inverted BOOLEAN,
+                    real_sol_reserves REAL,
+                    real_token_reserves REAL,
+                    livestream_ban_expiry TIMESTAMP,
+                    last_reply TIMESTAMP,
+                    reply_count INTEGER,
+                    is_banned BOOLEAN,
+                    is_currently_live BOOLEAN,
+                    initialized BOOLEAN,
+                    video_uri TEXT,
+                    updated_at TIMESTAMP,
+                    pump_swap_pool TEXT,
+                    ath_market_cap REAL,
+                    ath_market_cap_timestamp TIMESTAMP,
+                    banner_uri TEXT,
+                    hide_banner BOOLEAN,
+                    livestream_downrank_score REAL,
+                    row_created_at TIMESTAMP,
+                    creator_reputation_score REAL DEFAULT NULL,
+                    creator_risk_score REAL DEFAULT NULL,
+                    creator_is_blacklisted BOOLEAN DEFAULT FALSE,
+                    creator_total_previous_tokens INTEGER DEFAULT 0,
+                    creator_success_rate REAL DEFAULT NULL,
+                    FOREIGN KEY (token_address) REFERENCES pump_tokens(address)
+                )
+            """)
             
             # Table early_purchases
             cursor.execute("""
@@ -245,6 +307,41 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting token {address}: {e}")
             return None
+
+    def create_snapshot(self, token_address: str):
+        """Crée un snapshot d'un token dans la table d'historique."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Récupérer les noms de colonnes de la table source
+                cursor.execute("PRAGMA table_info(pump_tokens)")
+                source_columns = [row['name'] for row in cursor.fetchall() if row['name'] != 'address']
+                
+                # Récupérer l'état actuel du token
+                cursor.execute(f"SELECT {', '.join(source_columns)} FROM pump_tokens WHERE address = ?", (token_address,))
+                token_row = cursor.fetchone()
+                
+                if not token_row:
+                    logger.warning(f"Token {token_address} not found for snapshot.")
+                    return
+
+                # Préparer les données pour l'insertion
+                history_columns = ['snapshot_timestamp', 'token_address'] + source_columns
+                history_values = [datetime.now().isoformat(), token_address] + list(token_row)
+                
+                # Construire la requête d'insertion
+                query = f"""
+                    INSERT INTO pump_tokens_history ({', '.join(history_columns)})
+                    VALUES ({', '.join(['?'] * len(history_columns))})
+                """
+                
+                cursor.execute(query, tuple(history_values))
+                conn.commit()
+                logger.info(f"Created snapshot for token: {token_address}")
+
+        except Exception as e:
+            logger.error(f"Error creating snapshot for token {token_address}: {e}", exc_info=True)
     
     def get_early_adopters(self, min_confidence_score: float = 0.6, limit: int = 50) -> List[EarlyAdopter]:
         """Récupère les early adopters classés par score de confiance"""
