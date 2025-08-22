@@ -59,7 +59,7 @@ def check_requirements():
     
     if missing_packages:
         logger.error(f"Packages manquants: {missing_packages}")
-        logger.info("Installez-les avec: pip install " + " ".join(missing_packages))
+        logger.debug("Installez-les avec: pip install " + " ".join(missing_packages))
         return False
     
     return True
@@ -96,28 +96,28 @@ LOG_LEVEL=INFO
         with open(env_file, 'w') as f:
             f.write(env_content)
         
-        logger.info("Fichier .env créé. Veuillez configurer votre HELIUS_API_KEY")
+        logger.debug("Fichier .env créé. Veuillez configurer votre HELIUS_API_KEY")
         return False
     
     # Vérifier si la clé API est configurée
     helius_key = os.getenv('HELIUS_API_KEY', '').strip()
     
     # Debug: afficher ce qui est lu
-    logger.info(f"HELIUS_API_KEY lu: '{helius_key[:10]}...' (longueur: {len(helius_key)})")
+    logger.debug(f"HELIUS_API_KEY lu: '{helius_key[:10]}...' (longueur: {len(helius_key)})")
     
     if not helius_key or helius_key == 'your_helius_api_key_here':
         logger.error("HELIUS_API_KEY non configurée ou invalide dans .env")
-        logger.info("Veuillez éditer le fichier .env et définir votre clé API Helius")
+        logger.debug("Veuillez éditer le fichier .env et définir votre clé API Helius")
         return False
     
-    logger.info("Configuration environnement OK")
+    logger.debug("Configuration environnement OK")
     return True
 
 def initialize_database():
     """Initialise la base de données"""
     try:
         from .database import db
-        logger.info("Base de données initialisée avec succès")
+        logger.debug("Base de données initialisée avec succès")
         return True
     except Exception as e:
         logger.error(f"Erreur initialisation base de données: {e}")
@@ -125,7 +125,7 @@ def initialize_database():
 
 def start_api_server():
     """Démarre le serveur API"""
-    logger.info("Démarrage du serveur API...")
+    logger.debug("Démarrage du serveur API...")
     
     try:
         # Import de l'application
@@ -137,7 +137,7 @@ def start_api_server():
         port = int(os.getenv('API_PORT', 8000))
         debug = os.getenv('DEBUG', 'False').lower() == 'true'
         
-        logger.info(f"Serveur API démarré sur http://{host}:{port}")
+        logger.debug(f"Serveur API démarré sur http://{host}:{port}")
         
         # Démarrage
         # NOTE: The app string must be "app.main:app" for reload to work correctly
@@ -158,7 +158,7 @@ def start_api_server():
 
 def start_streamlit():
     """Démarre l'interface Streamlit"""
-    logger.info("Démarrage de l'interface Streamlit...")
+    logger.debug("Démarrage de l'interface Streamlit...")
     
     try:
         streamlit_port = int(os.getenv('STREAMLIT_PORT', 8501))
@@ -178,18 +178,18 @@ def start_streamlit():
 
 def main():
     """Fonction principale"""
-    logger.info("🚀 Démarrage PumpFun Early Adopters Tracker - Version Polling")
+    logger.debug("🚀 Démarrage PumpFun Early Adopters Tracker - Version Polling")
     
     # Vérifications préalables
-    logger.info("1. Vérification des dépendances...")
+    logger.debug("1. Vérification des dépendances...")
     if not check_requirements():
         sys.exit(1)
     
-    logger.info("2. Vérification de l'environnement...")
+    logger.debug("2. Vérification de l'environnement...")
     if not check_environment():
         sys.exit(1)
     
-    logger.info("3. Initialisation de la base de données...")
+    logger.debug("3. Initialisation de la base de données...")
     if not initialize_database():
         sys.exit(1)
     
@@ -218,8 +218,8 @@ def main():
     if mode in ["api", "both"]:
         if mode == "both":
             # Démarrer l'API en arrière-plan pour le mode combiné
-            logger.info("Mode combiné sélectionné")
-            logger.info("Pour arrêter, utilisez Ctrl+C")
+            logger.debug("Mode combiné sélectionné")
+            logger.debug("Pour arrêter, utilisez Ctrl+C")
             
             import threading
             api_thread = threading.Thread(target=start_api_server, daemon=True)

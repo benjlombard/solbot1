@@ -907,19 +907,19 @@ class IntelligentPollingManager:
             
             # 2. Traitement des nouveaux tokens
             if result['new_tokens']:
-                logger.info(f"🎯 {len(result['new_tokens'])} NEW TOKENS → Starting enrichment")
+                logger.info(f"📊 {len(result['new_tokens'])} NEW TOKENS (LATEST) → Starting enrichment")
                 
                 for token in result['new_tokens']:
                     try:
-                        await self._full_immediate_enrichment(token.address, token.creator)
+                        await self._full_immediate_enrichment(token.address, token.creator, "LATEST")
                     except Exception as e:
-                        logger.error(f"❌ ENRICHMENT FAILED: {token.address[:8]}... → {e}")
+                        logger.error(f"❌ ENRICHMENT FAILED (LATEST): {token.address[:8]}... → {e}")
                 
                 # Statistiques
                 self._update_daily_stats_latest_discovery(result['tokens_discovered'])
                 logger.info(f"✅ LATEST DISCOVERY COMPLETE → {result['tokens_discovered']} tokens processed")
             else:
-                logger.info("📭 LATEST DISCOVERY → No new tokens")
+                logger.info("✅ LATEST DISCOVERY COMPLETE → No new tokens found")
             
             # Erreurs
             if result['errors']:
@@ -943,19 +943,19 @@ class IntelligentPollingManager:
             
             # 2. Traitement des nouveaux tokens
             if result['new_tokens']:
-                logger.info(f"📊 {len(result['new_tokens'])} NEW TOKENS → Starting enrichment")
+                logger.info(f"📊 {len(result['new_tokens'])} NEW TOKENS (API) → Starting enrichment")
                 
                 for token in result['new_tokens']:
                     try:
-                        await self._full_immediate_enrichment(token.address, token.creator)
+                        await self._full_immediate_enrichment(token.address, token.creator, "API")
                     except Exception as e:
-                        logger.error(f"❌ ENRICHMENT FAILED: {token.address[:8]}... → {e}")
+                        logger.error(f"❌ ENRICHMENT FAILED (API): {token.address[:8]}... → {e}")
                 
                 # Statistiques
                 self._update_daily_stats_general_discovery(result['tokens_discovered'])
                 logger.info(f"✅ API DISCOVERY COMPLETE → {result['tokens_discovered']} tokens processed")
             else:
-                logger.info("📭 API DISCOVERY → No new tokens")
+                logger.info("✅ API DISCOVERY COMPLETE → No new tokens found")
             
             # Erreurs
             if result['errors']:
@@ -970,10 +970,10 @@ class IntelligentPollingManager:
             logger.error(f"❌ API DISCOVERY CRITICAL FAILURE: {e}")
             self.last_general_discovery = datetime.now() + timedelta(minutes=5)
 
-    async def _full_immediate_enrichment(self, token_address: str, creator_address: str):
+    async def _full_immediate_enrichment(self, token_address: str, creator_address: str, source: str = "UNKNOWN"):
         """Enrichissement complet immédiat : Pump.fun + RugCheck + Analyse créateur"""
         try:
-            logger.info(f"🔄 ENRICHING: {token_address[:8]}...")
+            logger.info(f"🔄 Enriching {token_address[:8]}... (from {source})")
             
             # 1. Snapshot
             db.create_snapshot(token_address)
@@ -1020,11 +1020,12 @@ class IntelligentPollingManager:
             asyncio.create_task(self._analyze_creator_async(creator_address, token_address))
             
             # Log de succès
-            status_str = " | ".join(enrichment_status) if enrichment_status else "Basic"
-            logger.info(f"✅ ENRICHED: {token_address[:8]}... → {status_str}")
+            pump_progress = pumpfun_data.get('bonding_curve_progress', 0)
+            rug_score = rugcheck_data.get('score_normalised', 0) if rugcheck_data else 0
+            logger.info(f"✅ Enriched {token_address[:8]}: Pump {pump_progress:.2f}%, Rug {rug_score:.0f}")
             
         except Exception as e:
-            logger.error(f"❌ ENRICHMENT FAILED: {token_address[:8]}... → {e}")
+            logger.error(f"❌ Enrichment failed for {token_address[:8]}: {e}")
 
     async def _analyze_creator_async(self, creator_address: str, token_address: str = ""):
         """Analyse le créateur de manière asynchrone"""
@@ -1042,12 +1043,12 @@ class IntelligentPollingManager:
                 
                 # Log simple
                 if performance.is_blacklisted:
-                    logger.warning(f"🚨 CREATOR BLACKLISTED: {creator_address[:8]}... → {performance.blacklist_reason}")
+                    logger.warning(f"🚨 Blacklisted creator {creator_address[:8]}: {performance.blacklist_reason}")
                 else:
-                    logger.info(f"👤 CREATOR ANALYZED: {creator_address[:8]}... → Score:{performance.reputation_score:.0f}")
+                    logger.info(f"👤 Creator {creator_address[:8]} analyzed: Score {performance.reputation_score:.0f}")
                 
         except Exception as e:
-            logger.error(f"❌ CREATOR ANALYSIS FAILED: {creator_address[:8]}... → {e}")
+            logger.error(f"❌ Creator analysis failed for {creator_address[:8]}: {e}")
 
     def _check_daily_reset(self):
         """Vérifie et réinitialise les stats quotidiennes"""

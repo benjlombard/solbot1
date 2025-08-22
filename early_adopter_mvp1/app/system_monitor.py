@@ -100,9 +100,8 @@ class SystemMonitor:
 
         return dict(metrics)
 
-    def generate_report(self) -> str:
-        """Generates a text-based table report of the current metrics."""
-        metrics = self.collect_metrics()
+    def generate_report_from_metrics(self, metrics: Dict[str, Any]) -> str:
+        """Generates a text-based table report from pre-collected metrics."""
         now = datetime.now().isoformat()
 
         header = f"System Monitor Report - {now}\n"
@@ -126,21 +125,36 @@ class SystemMonitor:
 
         return header + table
 
+    def generate_report(self) -> str:
+        """Generates a text-based table report of the current metrics."""
+        metrics = self.collect_metrics()
+        return self.generate_report_from_metrics(metrics)
+
     def run(self):
         """
-        Runs the monitoring loop.
+        Runs the monitoring loop with improved logging.
         """
         self.logger.info("Starting system monitor...")
         while True:
             try:
-                report = self.generate_report()
+                metrics = self.collect_metrics()
+                report = self.generate_report_from_metrics(metrics)
                 self.logger.info("System Monitor Report:\n%s", report)
-                # In a real application, this report could be written to a file,
-                # sent to a monitoring service, etc.
+                
+                # Concise INFO log
+                new_tokens_24h = metrics.get('new_tokens', {}).get('24h', 0)
+                pump_updates_1h = metrics.get('pump_tokens_updates', {}).get('1h', 0)
+                api_calls_1h = metrics.get('helius_calls', {}).get('1h', 0) + \
+                               metrics.get('rugcheck_calls', {}).get('1h', 0) + \
+                               metrics.get('pumpfun_calls', {}).get('1h', 0)
+                
+                summary = f"📊 System Stats (24h): {new_tokens_24h} new tokens. (1h): {pump_updates_1h} updates, {api_calls_1h} API calls."
+                self.logger.info(summary)
+                
             except Exception as e:
                 self.logger.error(f"Error generating system monitor report: {e}", exc_info=True)
             
-            time.sleep(30)
+            time.sleep(30) # Report every 5 minutes
 
 if __name__ == '__main__':
     import sys

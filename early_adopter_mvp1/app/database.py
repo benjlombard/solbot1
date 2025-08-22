@@ -236,7 +236,7 @@ class DatabaseManager:
                     datetime.now().isoformat()
                 ))
                 conn.commit()
-                logger.info(f"Inserted token: {token.address}")
+                logger.debug(f"Inserted token: {token.address}")
                 return True
         except Exception as e:
             logger.error(f"Error inserting token {token.address}: {e}")
@@ -258,7 +258,7 @@ class DatabaseManager:
                     purchase.minutes_after_creation, purchase.market_cap_at_purchase
                 ))
                 conn.commit()
-                logger.info(f"Inserted early purchase: {purchase.signature}")
+                logger.debug(f"Inserted early purchase: {purchase.signature}")
                 return True
         except Exception as e:
             logger.error(f"Error inserting purchase {purchase.signature}: {e}")
@@ -280,7 +280,7 @@ class DatabaseManager:
                     adopter.confidence_score, adopter.last_activity
                 ))
                 conn.commit()
-                logger.info(f"Updated early adopter: {adopter.wallet_address}")
+                logger.debug(f"Updated early adopter: {adopter.wallet_address}")
                 return True
         except Exception as e:
             logger.error(f"Error updating early adopter {adopter.wallet_address}: {e}")
@@ -338,7 +338,7 @@ class DatabaseManager:
                 
                 cursor.execute(query, tuple(history_values))
                 conn.commit()
-                logger.info(f"Created snapshot for token: {token_address}")
+                logger.debug(f"Created snapshot for token: {token_address}")
 
         except Exception as e:
             logger.error(f"Error creating snapshot for token {token_address}: {e}", exc_info=True)
@@ -553,7 +553,7 @@ class DatabaseManager:
                     token_address
                 ))
                 conn.commit()
-                logger.info(f"Enriched token data comprehensively for {token_address}")
+                logger.debug(f"Enriched token data comprehensively for {token_address}")
                 return True
         except Exception as e:
             logger.error(f"Error updating token {token_address} with comprehensive pump.fun data: {e}", exc_info=True)
@@ -580,7 +580,7 @@ class DatabaseManager:
                     datetime.now().isoformat()
                 ))
                 conn.commit()
-                logger.info(f"Upserted rugcheck report for {token_address}")
+                logger.debug(f"Upserted rugcheck report for {token_address}")
                 return True
         except Exception as e:
             logger.error(f"Error upserting rugcheck report for {token_address}: {e}")

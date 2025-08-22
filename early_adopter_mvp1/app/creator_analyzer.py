@@ -162,6 +162,10 @@ class CreatorAnalyzer:
         except Exception as e:
             logger.error(f"Error fetching tokens for creator {creator_address}: {e}")
             return []
+
+    def get_tokens_for_creator(self, creator_address: str) -> List[Dict[str, Any]]:
+        """Récupère tous les tokens d'un créateur."""
+        return self._get_creator_tokens(creator_address)
     
     def _analyze_token_outcome(self, token: Dict[str, Any]) -> TokenOutcome:
         """Analyse le résultat d'un token individuel"""
@@ -600,6 +604,28 @@ class CreatorAnalyzer:
                 
         except Exception as e:
             logger.error(f"Error getting top creators: {e}")
+            return []
+    
+    def get_creators_by_filter(self, min_reputation: float = 0, min_success_rate: float = 0, limit: int = 50, min_tokens: int = 1) -> List[CreatorPerformance]:
+        """Récupère les créateurs selon des filtres"""
+        try:
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT creator_address
+                    FROM creator_performance
+                    WHERE reputation_score >= ? AND success_rate >= ? AND total_tokens_created >= ? AND is_blacklisted = FALSE
+                    ORDER BY reputation_score DESC
+                    LIMIT ?
+                """, (min_reputation, min_success_rate, min_tokens, limit))
+                
+                creator_addresses = [row['creator_address'] for row in cursor.fetchall()]
+                
+                return [self.analyze_creator(addr) for addr in creator_addresses]
+                
+        except Exception as e:
+            logger.error(f"Error getting creators by filter: {e}")
             return []
     
     def get_blacklisted_creators(self) -> List[CreatorPerformance]:

@@ -46,7 +46,7 @@ class PumpFunClient:
         
         try:
             async with session.get(url, headers=headers, timeout=20) as response:
-                self.logger.info(f"Response for {token_address}: status={response.status}, content-type='{response.headers.get('content-type')}'")
+                self.logger.debug(f"Response for {token_address}: status={response.status}, content-type='{response.headers.get('content-type')}'")
                 
                 # Read the response text
                 response_text = await response.text()

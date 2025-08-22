@@ -395,7 +395,7 @@ def main():
                 st.plotly_chart(fig_credits, use_container_width=True)
     
     # Onglets pour organiser le contenu
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Vue d'ensemble", "🏆 Top Performers", "🆕 Nouveaux Tokens", "🎯 Signaux Trading", "🔍 Analyse Tokens", "🔧 Système"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📊 Vue d'ensemble", "🏆 Top Performers", "🆕 Nouveaux Tokens", "🎯 Signaux Trading", "🔍 Analyse Tokens", "🔧 Système", "👥 Créateurs"])
     
     with tab1:
         st.header("📊 Vue d'ensemble du système")
@@ -767,6 +767,110 @@ def main():
             if st.button("🗑️ Clear Cache", use_container_width=True, key="system_clear_cache"):
                 st.cache_data.clear()
                 st.success("✅ Cache vidé")
+
+    with tab7:
+        st.header("👥 Analyse des Créateurs")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            min_rep = st.slider("Score de réputation min.", 0.0, 100.0, 50.0, 1.0)
+        with col2:
+            min_success = st.slider("Taux de succès min.", 0.0, 1.0, 0.3, 0.05)
+        with col3:
+            min_tokens_created = st.slider("Nombre de tokens min.", 1, 20, 3, 1)
+
+        # Fetch data from API
+        @st.cache_data(ttl=60)
+        def fetch_creators_data(min_rep, min_success, min_tokens):
+            try:
+                params = {
+                    "min_reputation": min_rep,
+                    "min_success_rate": min_success,
+                    "min_tokens": min_tokens,
+                    "limit": 100
+                }
+                response = requests.get(f"{API_BASE_URL}/creators", params=params, timeout=10)
+                if response.status_code == 200:
+                    return response.json().get('creators', [])
+                st.error(f"Erreur API: {response.status_code}")
+                return []
+            except requests.exceptions.RequestException as e:
+                st.error(f"Erreur de connexion: {e}")
+                return []
+
+        creators_data = fetch_creators_data(min_rep, min_success, min_tokens_created)
+        
+        if not creators_data:
+            st.info("Aucun créateur ne correspond aux filtres.")
+        else:
+            df_creators = pd.DataFrame(creators_data)
+            
+            # Format dataframe for display
+            df_display = df_creators[[
+                'creator_address', 'reputation_score', 'success_rate', 
+                'total_tokens', 'avg_roi', 'risk_score', 'confidence_level'
+            ]].copy()
+            
+            df_display['creator_address'] = df_display['creator_address'].apply(format_wallet_address)
+            df_display['reputation_score'] = df_display['reputation_score'].apply(lambda x: f"{x:.1f}")
+            df_display['success_rate'] = df_display['success_rate'].apply(format_percentage)
+            df_display['avg_roi'] = df_display['avg_roi'].apply(format_roi)
+            df_display['risk_score'] = df_display['risk_score'].apply(lambda x: f"{x:.1f}")
+
+            df_display.rename(columns={
+                'creator_address': 'Créateur',
+                'reputation_score': 'Réputation',
+                'success_rate': 'Taux Succès',
+                'total_tokens': 'Nb Tokens',
+                'avg_roi': 'ROI Moyen',
+                'risk_score': 'Score Risque',
+                'confidence_level': 'Confiance'
+            }, inplace=True)
+
+            st.dataframe(df_display, use_container_width=True)
+
+            st.subheader("Historique des lancements d'un créateur")
+            
+            # Selectbox pour choisir un créateur
+            creator_options = df_creators['creator_address'].tolist()
+            selected_creator = st.selectbox(
+                "Sélectionner un créateur pour voir son historique:",
+                options=creator_options,
+                format_func=format_wallet_address
+            )
+
+            if selected_creator:
+                # Fetch token history for the selected creator
+                @st.cache_data(ttl=60)
+                def fetch_creator_tokens(creator_address):
+                    try:
+                        response = requests.get(f"{API_BASE_URL}/creator/{creator_address}/tokens", timeout=10)
+                        if response.status_code == 200:
+                            return response.json().get('tokens', [])
+                        return []
+                    except:
+                        return []
+
+                token_history = fetch_creator_tokens(selected_creator)
+
+                if not token_history:
+                    st.info("Aucun historique de token trouvé pour ce créateur.")
+                else:
+                    df_history = pd.DataFrame(token_history)
+                    df_history_display = df_history[[
+                        'created_at', 'symbol', 'name', 'usd_market_cap', 'bonding_curve_progress', 'rugcheck_score'
+                    ]].copy()
+                    df_history_display.rename(columns={
+                        'created_at': 'Date Création',
+                        'symbol': 'Symbole',
+                        'name': 'Nom',
+                        'usd_market_cap': 'Market Cap (USD)',
+                        'bonding_curve_progress': 'Progrès BC (%)',
+                        'rugcheck_score': 'Score Rug'
+                    }, inplace=True)
+                    
+                    st.dataframe(df_history_display, use_container_width=True)
     
     # Footer avec informations système
     st.divider()

@@ -542,6 +542,54 @@ async def get_early_adopters(
         logger.error(f"Error getting early adopters: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving early adopters")
 
+@app.get("/api/creators")
+async def get_creators(
+    min_reputation: float = 0,
+    min_success_rate: float = 0,
+    limit: int = 50,
+    min_tokens: int = 1
+):
+    """Récupère la liste des créateurs avec filtres"""
+    try:
+        creators = creator_analyzer.get_creators_by_filter(
+            min_reputation=min_reputation,
+            min_success_rate=min_success_rate,
+            limit=limit,
+            min_tokens=min_tokens
+        )
+        
+        # Convert to dict for JSON response
+        result = [c.__dict__ for c in creators]
+        
+        return {
+            "creators": result,
+            "count": len(result),
+            "filters": {
+                "min_reputation": min_reputation,
+                "min_success_rate": min_success_rate,
+                "limit": limit,
+                "min_tokens": min_tokens
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting creators: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving creators")
+
+@app.get("/api/creator/{creator_address}/tokens")
+async def get_creator_tokens(creator_address: str):
+    """Récupère tous les tokens pour un créateur spécifique."""
+    try:
+        tokens = creator_analyzer.get_tokens_for_creator(creator_address)
+        return {
+            "creator_address": creator_address,
+            "tokens": tokens,
+            "count": len(tokens)
+        }
+    except Exception as e:
+        logger.error(f"Error getting tokens for creator {creator_address}: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving creator tokens")
+
 @app.get("/api/recent-tokens")
 async def get_recent_tokens(hours_back: int = 24, limit: int = 100):
     """Récupère les tokens récents avec early adopter signals"""
