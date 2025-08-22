@@ -6,16 +6,107 @@ from typing import Dict, Any, List, Optional, Set
 from collections import defaultdict
 import json
 
-from .models import HeliusTransaction, HeliusInstruction
+from .models import HeliusTransaction, HeliusInstruction, PumpToken, EarlyPurchase
 from .early_adopter_scorer import scorer
 from .config import settings
 from .database import db
 from .pump_fun_client import PumpFunClient
 from .rugcheck_client import RugCheckClient
 from .sutils2 import get_pump_progress_correct
+from .creator_analyzer import creator_analyzer
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+
+class DataProcessor:
+    async def process_helius_transaction(self, transaction: HeliusTransaction) -> Dict[str, Any]:
+        result = {
+            'processed': False,
+            'token_created': None,
+            'purchases': []
+        }
+
+        is_pump_fun_tx = any(
+            inst.programId == settings.pumpfun_program_id for inst in transaction.instructions
+        )
+
+        if not is_pump_fun_tx:
+            return result
+
+        if self._is_token_creation(transaction):
+            token_info = self._extract_token_info(transaction)
+            if token_info:
+                db.insert_pump_token(token_info)
+                result['token_created'] = token_info
+                result['processed'] = True
+                await creator_analyzer.analyze_creator(token_info.creator)
+        elif self._is_purchase(transaction):
+            purchases = self._extract_purchase_info(transaction)
+            for purchase in purchases:
+                db.insert_early_purchase(purchase)
+                result['purchases'].append(purchase)
+            if purchases:
+                result['processed'] = True
+        
+        return result
+
+    def _is_token_creation(self, transaction: HeliusTransaction) -> bool:
+        return not transaction.tokenTransfers
+
+    def _extract_token_info(self, transaction: HeliusTransaction) -> PumpToken | None:
+        try:
+            token_address = transaction.instructions[0].accounts[0]
+            creator = transaction.feePayer
+            
+            return PumpToken(
+                address=token_address,
+                name=None,
+                symbol=None,
+                description=None,
+                creator=creator,
+                created_at=transaction.timestamp,
+                market_cap_discovery=0
+            )
+        except Exception as e:
+            logger.error(f"Error extracting token info: {e}")
+            return None
+
+    def _is_purchase(self, transaction: HeliusTransaction) -> bool:
+        return bool(transaction.tokenTransfers)
+
+    def _extract_purchase_info(self, transaction: HeliusTransaction) -> List[EarlyPurchase]:
+        purchases = []
+        for transfer in transaction.tokenTransfers:
+            try:
+                if transfer.get('mint') == 'So11111111111111111111111111111111111111112':
+                    continue
+
+                buyer = transfer.get('toUserAccount')
+                if not buyer:
+                    continue
+                
+                sol_amount = 0
+                if transaction.nativeTransfers:
+                    for native_transfer in transaction.nativeTransfers:
+                        # This logic is a guess, might need refinement
+                        if native_transfer.get('toUserAccount') == settings.pumpfun_program_id:
+                             sol_amount = native_transfer.get('amount', 0) / 1e9
+                             break
+
+                purchases.append(EarlyPurchase(
+                    signature=transaction.signature,
+                    token_address=transfer.get('mint'),
+                    buyer_address=buyer,
+                    sol_amount=sol_amount,
+                    token_amount=float(transfer.get('tokenAmount', 0)),
+                    timestamp=transaction.timestamp,
+                    minutes_after_creation=0
+                ))
+            except Exception as e:
+                logger.error(f"Error extracting purchase info from transfer: {e}")
+        return purchases
+
 
 class IntelligentPollingManager:
     def __init__(self, system_monitor: 'SystemMonitor'):
@@ -27,6 +118,7 @@ class IntelligentPollingManager:
         self.httpx_client = httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0))
         self.pump_fun_client = PumpFunClient(logger_instance=logger, system_monitor=self.system_monitor)
         self.rugcheck_client = RugCheckClient(logger=logger, system_monitor=self.system_monitor)
+        self.data_processor = DataProcessor()
         self.polling_task = None
         self.is_running = False
         
@@ -669,7 +761,6 @@ class IntelligentPollingManager:
     
     async def _process_transaction_batch(self, transactions: List[HeliusTransaction]):
         """Traite un lot de transactions"""
-        from .data_processor import processor
         logger.info(f"Processing batch of {len(transactions)} transactions")
         
         tokens_created = 0
@@ -682,7 +773,7 @@ class IntelligentPollingManager:
                     continue
                 
                 # Traiter la transaction
-                result = await processor.process_helius_transaction(transaction)
+                result = await self.data_processor.process_helius_transaction(transaction)
                 
                 if result['processed']:
                     if result['token_created']:
