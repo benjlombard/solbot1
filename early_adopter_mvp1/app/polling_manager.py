@@ -1029,5 +1029,40 @@ class IntelligentPollingManager:
         except Exception as e:
             logger.error(f"Error getting rugcheck data for {token_address}: {e}")
             return None
+
+    def _log_enrichment_stats(self):
+        """
+        Log des statistiques d'enrichissement
+        """
+        try:
+            # Récupérer les statistiques depuis la base de données
+            updated_counts = db.get_updated_tokens_counts()
+            
+            logger.info("📈 Enrichment Statistics:")
+            logger.info(f"   • Tokens updated in last 5m: {updated_counts.get('5m', 0)}")
+            logger.info(f"   • Tokens updated in last 30m: {updated_counts.get('30m', 0)}")
+            logger.info(f"   • Tokens updated in last 1h: {updated_counts.get('1h', 0)}")
+            logger.info(f"   • Tokens updated in last 6h: {updated_counts.get('6h', 0)}")
+            
+            # Calculer le taux d'enrichissement
+            total_tokens_to_enrich = len(db.get_tokens_to_enrich(
+                limit=1000,
+                update_interval_minutes=settings.enrichment_update_interval_minutes
+            ))
+            
+            logger.info(f"   • Tokens still needing enrichment: {total_tokens_to_enrich}")
+            
+            # Estimation du progrès
+            if total_tokens_to_enrich == 0:
+                logger.info("   • ✅ All tokens are up-to-date!")
+            else:
+                estimated_time = (total_tokens_to_enrich / settings.enrichment_batch_size) * (settings.enrichment_interval_seconds / 60)
+                logger.info(f"   • Estimated time to complete: {estimated_time:.1f} minutes")
+            
+        except Exception as e:
+            logger.error(f"Error logging enrichment stats: {e}")
+
+
+
 # This will be instantiated in main.py
 polling_manager = None

@@ -7,7 +7,6 @@ from collections import defaultdict
 import json
 
 from .models import HeliusTransaction, HeliusInstruction
-from .data_processor import processor
 from .early_adopter_scorer import scorer
 from .config import settings
 from .database import db
@@ -677,6 +676,8 @@ class IntelligentPollingManager:
         
         for transaction in transactions:
             try:
+                from .data_processor import DataProcessor
+                data_processor = DataProcessor()
                 # Filtrer les micro-transactions pour économiser le traitement
                 if not self._is_transaction_worth_processing(transaction):
                     continue
