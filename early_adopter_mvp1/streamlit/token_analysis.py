@@ -31,9 +31,44 @@ def parse_datetime_safe(dt_str):
     if not dt_str or not isinstance(dt_str, str):
         return None
     try:
-        return pd.to_datetime(dt_str)
-    except (ValueError, TypeError):
+        # Gérer le format de votre base de données : 2025-08-22T09:17:18.721812
+        if 'T' in dt_str:
+            # Enlever les microsecondes si présentes
+            if '.' in dt_str:
+                dt_str = dt_str.split('.')[0]
+            # Parser avec le format ISO
+            parsed_dt = datetime.fromisoformat(dt_str)
+            return parsed_dt
+        else:
+            # Fallback pour d'autres formats
+            return pd.to_datetime(dt_str)
+    except (ValueError, TypeError) as e:
+        print(f"Erreur parsing date: {dt_str} -> {e}")
         return None
+
+def format_datetime_for_display(dt_str):
+    """Formate une datetime string pour l'affichage dans le tableau."""
+    if not dt_str or dt_str == 'N/A':
+        return "N/A"
+    
+    try:
+        # Format de votre DB : 2025-08-22T09:17:18.721812
+        if 'T' in dt_str:
+            # Enlever les microsecondes si présentes
+            if '.' in dt_str:
+                dt_str = dt_str.split('.')[0]
+            
+            # Parser la date
+            parsed_dt = datetime.fromisoformat(dt_str)
+            
+            # Retourner au format lisible
+            return parsed_dt.strftime("%d/%m/%Y %H:%M")
+        else:
+            return dt_str
+            
+    except (ValueError, TypeError) as e:
+        print(f"Erreur formatting date: {dt_str} -> {e}")
+        return "Date invalide"
 
 # Configuration API
 API_BASE_URL = "http://localhost:8010/api"
@@ -481,7 +516,7 @@ def main():
 
             # Définir toutes les colonnes possibles
             ALL_COLUMNS = [
-                "Détails", "Pump.fun", "DexScreener", "Solscan", "RugCheck", "Symbole", "Nom", "Dernière MàJ", "Âge (h)", "Market Cap ($)", "MC/Liq Ratio", "Holders", "Volume (SOL)",
+                "Détails", "🚀 Pump", "📊 DexScreener", "🔍 Solscan", "🛡️ RugCheck", "Symbole", "Nom", "Dernière MàJ", "Âge (h)", "Market Cap ($)", "MC/Liq Ratio", "Holders", "Volume (SOL)",
                 "Progression Bonding Curve","Créateur Badge", "Score Créateur", "Créateur Risque", "Créateur Tokens", "Créateur Succès", "Score Rugcheck", "Risque", "Opportunité", "Recommandation", "Twitter", "Website", "Telegram",
                 "Metadata", "Total Supply", "Description", "Créateur", "NSFW", "Vérifié",
                 "Bonding Curve", "KOTH Timestamp", "Assoc. Bonding Curve", "Raydium Pool",
@@ -509,10 +544,14 @@ def main():
             for _, token in df.iterrows():
                 row_data = {
                     "Détails": f"/?page=token_details&address={get_safe(token, 'address', '')}",
+                    "🚀 Pump": f"https://pump.fun/{get_safe(token, 'address', '')}",
+                    "📊 DexScreener": f"https://dexscreener.com/solana/{get_safe(token, 'address', '')}",
+                    "🔍 Solscan": f"https://solscan.io/token/{get_safe(token, 'address', '')}",
+                    "🛡️ RugCheck": f"https://rugcheck.xyz/tokens/{get_safe(token, 'address', '')}",
                     "Lien": f"https://pump.fun/{get_safe(token, 'address', '')}",
                     "Symbole": get_safe(token, 'symbol', 'UNK'),
                     "Nom": get_safe(token, 'name', 'N/A'),
-                    "Dernière MàJ": parse_datetime_safe(get_safe(token, 'last_updated_pumpfun', None)),
+                    "Dernière MàJ": format_datetime_for_display(get_safe(token, 'last_updated_pumpfun', None)),
                     "Âge (h)": get_safe(token, 'age_hours', 0),
                     "Market Cap ($)": get_safe(token, 'usd_market_cap', 0),
                     "MC/Liq Ratio": format_mc_liq_ratio(token.get('mc_liq_ratio', float('inf'))),
@@ -585,14 +624,40 @@ def main():
                     display_df,
                     column_config={
                         "Détails": st.column_config.LinkColumn("Détails", display_text="📄"),
-                        "Lien": st.column_config.LinkColumn("Pump.fun", display_text="🚀"),
+                        "🚀 Pump": st.column_config.LinkColumn(
+                            "🚀 Pump",
+                            help="Ouvrir sur Pump.fun",
+                            display_text="🚀",
+                            width="small"
+                        ),
+                        "📊 DexScreener": st.column_config.LinkColumn(
+                            "📊 DexScreener", 
+                            help="Voir sur DexScreener",
+                            display_text="📊",
+                            width="small"
+                        ),
+                        "🔍 Solscan": st.column_config.LinkColumn(
+                            "🔍 Solscan",
+                            help="Explorer sur Solscan", 
+                            display_text="🔍",
+                            width="small"
+                        ),
+                        "🛡️ RugCheck": st.column_config.LinkColumn(
+                            "🛡️ RugCheck",
+                            help="Vérifier sur RugCheck",
+                            display_text="🛡️", 
+                            width="small"
+                        ),
                         "Twitter": st.column_config.LinkColumn("Twitter"),
                         "Website": st.column_config.LinkColumn("Website"),
                         "Telegram": st.column_config.LinkColumn("Telegram"),
                         "Metadata": st.column_config.LinkColumn("Metadata"),
                         "Banner": st.column_config.LinkColumn("Banner"),
                         "Video": st.column_config.LinkColumn("Video"),
-                        "Dernière MàJ": st.column_config.DatetimeColumn("Dernière MàJ", format="relative"),
+                        "Dernière MàJ": st.column_config.TextColumn(
+                            "Dernière MàJ", 
+                            help="Date de dernière mise à jour sur Pump.fun"
+                        ),
                         "Market Cap ($)": st.column_config.NumberColumn(format="$ %.2f"),
                         "Market Cap (Native)": st.column_config.NumberColumn(format="%.2f"),
                         "ATH Market Cap": st.column_config.NumberColumn(format="$ %.2f"),
