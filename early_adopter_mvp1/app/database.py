@@ -214,7 +214,7 @@ class DatabaseManager:
     @contextmanager
     def get_connection(self):
         """Context manager pour les connexions à la base de données"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15)
         conn.row_factory = sqlite3.Row
         try:
             yield conn
@@ -642,7 +642,7 @@ class DatabaseManager:
                 cursor.execute("SELECT COUNT(*) FROM pump_tokens WHERE row_created_at >= ?", (since.isoformat(),))
                 return cursor.fetchone()[0]
         except Exception as e:
-            self.logger.error(f"Error counting new tokens: {e}")
+            logger.error(f"Error counting new tokens: {e}")
             return 0
 
     def get_new_early_adopters_count(self, since: datetime) -> int:
@@ -654,7 +654,7 @@ class DatabaseManager:
                 cursor.execute("SELECT COUNT(*) FROM early_adopters WHERE last_activity >= ?", (since.isoformat(),))
                 return cursor.fetchone()[0]
         except Exception as e:
-            self.logger.error(f"Error counting new early adopters: {e}")
+            logger.error(f"Error counting new early adopters: {e}")
             return 0
 
     def get_pump_tokens_updates_count(self, since: datetime) -> int:
@@ -665,7 +665,7 @@ class DatabaseManager:
                 cursor.execute("SELECT COUNT(*) FROM pump_tokens WHERE last_updated_pumpfun >= ?", (since.isoformat(),))
                 return cursor.fetchone()[0]
         except Exception as e:
-            self.logger.error(f"Error counting pump_tokens updates: {e}")
+            logger.error(f"Error counting pump_tokens updates: {e}")
             return 0
 
 # Instance globale
