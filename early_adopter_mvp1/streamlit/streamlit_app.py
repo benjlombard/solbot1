@@ -447,7 +447,7 @@ def main():
         
         if recent_tokens:
             df_tokens = pd.DataFrame(recent_tokens)
-            df_tokens['created_at'] = pd.to_datetime(df_tokens['created_at'])
+            df_tokens['created_at'] = pd.to_datetime(df_tokens['created_at'], format='mixed', errors='coerce')
             df_tokens['early_adopter_signal'] = df_tokens['early_adopter_buyers'].apply(len)
             
             fig_timeline = px.scatter(

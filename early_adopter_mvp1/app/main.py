@@ -952,7 +952,7 @@ async def get_tokens_analysis():
     """Récupère les données d'analyse des tokens directement depuis la base de données."""
     try:
         # 1. Récupérer les tokens, maintenant enrichis, depuis la DB
-        recent_tokens = db.get_recent_tokens(hours_back=48, limit=200)
+        recent_tokens = db.get_recent_tokens(hours_back=10000, limit=10000)
         
         # 2. La plupart de la logique d'enrichissement est maintenant en DB ou dans le service de fond.
         #    On peut simplifier cette section pour se concentrer sur les calculs qui doivent
