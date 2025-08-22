@@ -97,6 +97,355 @@ async def root():
         "timestamp": datetime.now().isoformat()
     }
 
+
+@app.post("/api/force-latest-discovery")
+async def force_latest_discovery():
+    """Force la découverte latest immédiate (pour debug/test)"""
+    try:
+        result = await polling_manager.force_latest_discovery()
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in force latest discovery: {e}")
+        raise HTTPException(status_code=500, detail="Error forcing latest discovery")
+
+@app.get("/api/discovery-stats")
+async def get_discovery_stats():
+    """Statistiques détaillées de la découverte de tokens"""
+    try:
+        stats = polling_manager.get_stats()
+        
+        # Extraire les données de découverte
+        discovery_stats = stats.get('discovery', {})
+        
+        # Ajouter des métriques calculées
+        latest_stats = discovery_stats.get('latest_discovery', {})
+        general_stats = discovery_stats.get('general_discovery', {})
+        
+        return {
+            "latest_discovery": {
+                **latest_stats,
+                "avg_tokens_per_call": (
+                    latest_stats.get('tokens_discovered_today', 0) / 
+                    max(latest_stats.get('calls_today', 1), 1)
+                ),
+                "next_run_in_seconds": max(0, 
+                    latest_stats.get('interval_seconds', 60) - 
+                    (latest_stats.get('time_since_last_minutes', 0) * 60)
+                )
+            },
+            "general_discovery": {
+                **general_stats,
+                "avg_tokens_per_call": (
+                    general_stats.get('tokens_discovered_today', 0) / 
+                    max(general_stats.get('calls_today', 1), 1)
+                ),
+                "next_run_in_seconds": max(0, 
+                    general_stats.get('interval_seconds', 300) - 
+                    (general_stats.get('time_since_last_minutes', 0) * 60)
+                )
+            },
+            "total_tokens_discovered_today": (
+                latest_stats.get('tokens_discovered_today', 0) + 
+                general_stats.get('tokens_discovered_today', 0)
+            ),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting discovery stats: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving discovery stats")
+
+@app.get("/api/latest-tokens")
+async def get_latest_tokens_discovered(limit: int = 20):
+    """Récupère les tokens les plus récemment découverts"""
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Récupérer les tokens les plus récents avec leurs données d'enrichissement
+            cursor.execute("""
+                SELECT 
+                    pt.*,
+                    rr.score as rugcheck_score,
+                    rr.is_rugged as rugcheck_rugged
+                FROM pump_tokens pt
+                LEFT JOIN rugcheck_reports rr ON pt.address = rr.token_address
+                ORDER BY pt.row_created_at DESC
+                LIMIT ?
+            """, (limit,))
+            
+            tokens = []
+            for row in cursor.fetchall():
+                token_data = dict(row)
+                
+                # Calculer l'âge
+                created_at = datetime.fromisoformat(token_data['created_at'])
+                age_minutes = (datetime.now() - created_at).total_seconds() / 60
+                token_data['age_minutes'] = round(age_minutes, 1)
+                
+                # Ajouter des métriques
+                token_data['discovery_method'] = 'latest_api'  # Indiquer la méthode de découverte
+                
+                tokens.append(token_data)
+            
+            return {
+                "tokens": tokens,
+                "count": len(tokens),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting latest tokens: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving latest tokens")
+
+@app.get("/api/discovery-performance")
+async def get_discovery_performance():
+    """Analyse des performances de découverte"""
+    try:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Statistiques des dernières 24h
+            since_24h = (datetime.now() - timedelta(hours=24)).isoformat()
+            
+            # Tokens découverts par heure
+            cursor.execute("""
+                SELECT 
+                    strftime('%H', row_created_at) as hour,
+                    COUNT(*) as tokens_count
+                FROM pump_tokens
+                WHERE row_created_at >= ?
+                GROUP BY strftime('%H', row_created_at)
+                ORDER BY hour
+            """, (since_24h,))
+            
+            hourly_distribution = {
+                row['hour']: row['tokens_count'] 
+                for row in cursor.fetchall()
+            }
+            
+            # Top créateurs découverts
+            cursor.execute("""
+                SELECT 
+                    creator,
+                    COUNT(*) as tokens_created,
+                    MIN(row_created_at) as first_token,
+                    MAX(row_created_at) as latest_token
+                FROM pump_tokens
+                WHERE row_created_at >= ?
+                GROUP BY creator
+                HAVING tokens_created > 1
+                ORDER BY tokens_created DESC
+                LIMIT 10
+            """, (since_24h,))
+            
+            top_creators = []
+            for row in cursor.fetchall():
+                top_creators.append({
+                    'creator': row['creator'],
+                    'tokens_created': row['tokens_created'],
+                    'first_token': row['first_token'],
+                    'latest_token': row['latest_token'],
+                    'creator_short': row['creator'][:10] + "..."
+                })
+            
+            # Tokens avec bonding curve progress élevé
+            cursor.execute("""
+                SELECT 
+                    address, symbol, creator, bonding_curve_progress,
+                    row_created_at, usd_market_cap
+                FROM pump_tokens
+                WHERE row_created_at >= ?
+                AND bonding_curve_progress > 50
+                ORDER BY bonding_curve_progress DESC
+                LIMIT 10
+            """, (since_24h,))
+            
+            high_progress_tokens = [dict(row) for row in cursor.fetchall()]
+            
+            # Statistiques globales
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total_discovered,
+                    AVG(bonding_curve_progress) as avg_progress,
+                    AVG(usd_market_cap) as avg_market_cap,
+                    COUNT(CASE WHEN bonding_curve_progress > 10 THEN 1 END) as tokens_with_activity
+                FROM pump_tokens
+                WHERE row_created_at >= ?
+            """, (since_24h,))
+            
+            global_stats = dict(cursor.fetchone())
+            
+            return {
+                "performance_24h": {
+                    "total_discovered": global_stats['total_discovered'],
+                    "avg_progress": round(global_stats['avg_progress'] or 0, 2),
+                    "avg_market_cap": round(global_stats['avg_market_cap'] or 0, 2),
+                    "tokens_with_activity": global_stats['tokens_with_activity'],
+                    "activity_rate": round(
+                        (global_stats['tokens_with_activity'] / max(global_stats['total_discovered'], 1)) * 100, 1
+                    )
+                },
+                "hourly_distribution": hourly_distribution,
+                "top_creators": top_creators,
+                "high_progress_tokens": high_progress_tokens,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting discovery performance: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving discovery performance")
+
+@app.get("/api/config")
+async def get_current_config():
+    """Retourne la configuration actuelle du système"""
+    try:
+        config_info = {
+            "discovery": {
+                "use_latest_discovery": getattr(settings, 'use_latest_discovery', False),
+                "latest_discovery_interval_seconds": getattr(settings, 'latest_discovery_interval_seconds', 60),
+                "latest_discovery_limit": getattr(settings, 'latest_discovery_limit', 20),
+                "use_api_discovery": getattr(settings, 'use_api_discovery', False),
+                "api_discovery_interval_seconds": getattr(settings, 'api_discovery_interval_seconds', 300),
+                "api_discovery_limit": getattr(settings, 'api_discovery_limit', 50),
+                "use_transaction_detection": getattr(settings, 'use_transaction_token_detection', False),
+                "token_discovery_method": getattr(settings, 'token_discovery_method', 'latest')
+            },
+            "polling": {
+                "base_polling_interval_seconds": settings.base_polling_interval_seconds,
+                "min_polling_interval_seconds": settings.min_polling_interval_seconds,
+                "max_polling_interval_seconds": settings.max_polling_interval_seconds,
+                "adaptive_polling_enabled": settings.adaptive_polling_enabled
+            },
+            "budget": {
+                "max_daily_credits": settings.max_daily_credits,
+                "min_sol_amount_filter": settings.min_sol_amount_filter,
+                "credit_warning_threshold": settings.credit_warning_threshold,
+                "credit_pause_threshold": settings.credit_pause_threshold
+            },
+            "enrichment": {
+                "enable_metadata_enrichment": settings.enable_metadata_enrichment,
+                "enrichment_interval_seconds": settings.enrichment_interval_seconds,
+                "enrichment_batch_size": settings.enrichment_batch_size,
+                "enrichment_update_interval_minutes": settings.enrichment_update_interval_minutes
+            }
+        }
+        
+        return config_info
+        
+    except Exception as e:
+        logger.error(f"Error getting config: {e}")
+        raise HTTPException(status_code=500, detail="Error retrieving configuration")
+
+@app.get("/api/health-detailed")
+async def get_detailed_health():
+    """Vérification de santé détaillée incluant la découverte"""
+    try:
+        # Health check de base
+        base_health = await health_check()
+        
+        # Stats de découverte
+        discovery_stats = polling_manager.get_stats().get('discovery', {})
+        
+        # Vérifications spécifiques à la découverte
+        discovery_health = {
+            "latest_discovery": {
+                "enabled": discovery_stats.get('latest_discovery', {}).get('enabled', False),
+                "last_run_minutes_ago": discovery_stats.get('latest_discovery', {}).get('time_since_last_minutes', 0),
+                "status": "healthy" if discovery_stats.get('latest_discovery', {}).get('time_since_last_minutes', 0) < 5 else "warning"
+            },
+            "general_discovery": {
+                "enabled": discovery_stats.get('general_discovery', {}).get('enabled', False),
+                "last_run_minutes_ago": discovery_stats.get('general_discovery', {}).get('time_since_last_minutes', 0),
+                "status": "healthy" if discovery_stats.get('general_discovery', {}).get('time_since_last_minutes', 0) < 15 else "warning"
+            }
+        }
+        
+        # Déterminer le statut global de découverte
+        discovery_status = "healthy"
+        if not discovery_stats.get('latest_discovery', {}).get('enabled', False) and not discovery_stats.get('general_discovery', {}).get('enabled', False):
+            discovery_status = "warning"
+        elif discovery_health['latest_discovery']['status'] == "warning" and discovery_health['general_discovery']['status'] == "warning":
+            discovery_status = "degraded"
+        
+        # Combiner avec le health check de base
+        detailed_health = {
+            **base_health,
+            "discovery": {
+                "status": discovery_status,
+                **discovery_health
+            },
+            "components": {
+                "database": base_health.get('database', {}).get('status', 'unknown'),
+                "polling": base_health.get('polling_manager', {}).get('status', 'unknown'),
+                "discovery": discovery_status,
+                "enrichment": "healthy" if settings.enable_metadata_enrichment else "disabled"
+            }
+        }
+        
+        # Déterminer le statut global
+        component_statuses = list(detailed_health['components'].values())
+        if 'error' in component_statuses or 'critical' in component_statuses:
+            detailed_health['status'] = 'critical'
+        elif 'degraded' in component_statuses:
+            detailed_health['status'] = 'degraded'
+        elif 'warning' in component_statuses:
+            detailed_health['status'] = 'warning'
+        
+        return detailed_health
+        
+    except Exception as e:
+        logger.error(f"Detailed health check failed: {e}")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }
+
+# Ajouter également cette fonction utilitaire pour tester la découverte
+@app.post("/api/test-latest-endpoint")
+async def test_latest_endpoint():
+    """Test direct de l'endpoint /coins/latest de pump.fun"""
+    try:
+        import aiohttp
+        
+        async with aiohttp.ClientSession() as session:
+            url = "https://frontend-api-v3.pump.fun/coins/latest"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'application/json'
+            }
+            
+            async with session.get(url, headers=headers, timeout=30) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    return {
+                        "status": "success",
+                        "endpoint": url,
+                        "response_status": response.status,
+                        "tokens_count": len(data) if isinstance(data, list) else 0,
+                        "sample_token": data[0] if isinstance(data, list) and len(data) > 0 else None,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "endpoint": url,
+                        "response_status": response.status,
+                        "error": f"HTTP {response.status}",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+    except Exception as e:
+        logger.error(f"Error testing latest endpoint: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+        
 @app.get("/api/health")
 async def health_check():
     """Vérification de la santé du système"""
