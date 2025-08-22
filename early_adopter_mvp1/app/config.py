@@ -89,7 +89,7 @@ class Settings:
         self.token_discovery_method = os.getenv("TOKEN_DISCOVERY_METHOD", "latest")  # "latest", "api", ou "transaction"
         # ===== NOUVEAU: Configuration endpoint /coins/latest =====
         self.use_latest_discovery = os.getenv("USE_LATEST_DISCOVERY", "True").lower() == "true"
-        self.latest_discovery_interval_seconds = int(os.getenv("LATEST_DISCOVERY_INTERVAL_SECONDS", "60"))  # 1 minute (plus fréquent)
+        self.latest_discovery_interval_seconds = int(os.getenv("LATEST_DISCOVERY_INTERVAL_SECONDS", "15"))  # 1 minute (plus fréquent)
         self.latest_discovery_limit = int(os.getenv("LATEST_DISCOVERY_LIMIT", "20"))  # Plus petit car plus fréquent
 
          # Méthodes de découverte de tokens
@@ -97,11 +97,11 @@ class Settings:
         
         self.use_transaction_token_detection = os.getenv("USE_TRANSACTION_TOKEN_DETECTION", "False").lower() == "true"
         # Configuration découverte générale via API
-        self.api_discovery_interval_seconds = int(os.getenv("API_DISCOVERY_INTERVAL_SECONDS", "300"))  # 5 minutes
+        self.api_discovery_interval_seconds = int(os.getenv("API_DISCOVERY_INTERVAL_SECONDS", "60"))  # 5 minutes
         self.api_discovery_limit = int(os.getenv("API_DISCOVERY_LIMIT", "50"))
         self.use_api_discovery = os.getenv("USE_API_DISCOVERY", "True").lower() == "true"
 
         # Backwards compatibility
         self.use_transaction_detection = self.token_discovery_method == "transaction"
-        
+
 settings = Settings()
