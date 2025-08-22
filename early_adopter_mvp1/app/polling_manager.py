@@ -46,16 +46,16 @@ class PumpFunLatestTokensDiscovery:
                     'Referer': 'https://pump.fun/'
                 }
                 
-                logger.info(f"🔍 Fetching latest tokens from: {url}")
+                logger.debug(f"🔍 Fetching latest tokens from: {url}")
                 
                 async with session.get(url, headers=headers, timeout=30) as response:
-                    logger.info(f"📥 Response status: {response.status}")
-                    logger.info(f"📥 Response headers: {dict(response.headers)}")
+                    logger.debug(f"📥 Response status: {response.status}")
+                    logger.debug(f"📥 Response headers: {dict(response.headers)}")
                     if response.status == 200:
                         data = await response.json()
                         
-                        logger.info(f"📊 Received response from latest endpoint")
-                        logger.info(f"📊 Response type: {type(data)}")
+                        logger.debug(f"📊 Received response from latest endpoint")
+                        logger.debug(f"📊 Response type: {type(data)}")
                         
                         # L'endpoint /coins/latest retourne UN SEUL token, pas une liste
                         tokens = []
@@ -63,35 +63,35 @@ class PumpFunLatestTokensDiscovery:
                         if isinstance(data, dict) and 'mint' in data:
                             # C'est un seul token directement
                             tokens = [data]
-                            logger.info(f"📊 Single token received: {data.get('mint', 'NO_MINT')} - {data.get('name', 'NO_NAME')}")
+                            logger.debug(f"📊 Single token received: {data.get('mint', 'NO_MINT')} - {data.get('name', 'NO_NAME')}")
                         elif isinstance(data, list):
                             # C'est une liste de tokens
                             tokens = data
-                            logger.info(f"📊 Token list received with {len(tokens)} tokens")
+                            logger.debug(f"📊 Token list received with {len(tokens)} tokens")
                         elif isinstance(data, dict):
                             # Peut-être que les tokens sont dans une propriété
                             tokens = data.get('data', data.get('coins', data.get('tokens', [])))
-                            logger.info(f"📊 Tokens extracted from nested structure: {len(tokens) if isinstance(tokens, list) else 'Not a list'}")
+                            logger.debug(f"📊 Tokens extracted from nested structure: {len(tokens) if isinstance(tokens, list) else 'Not a list'}")
                         
                         if not tokens:
-                            logger.info(f"📊 No tokens found in response")
+                            logger.debug(f"📊 No tokens found in response")
                             return result
                         
-                        logger.info(f"📊 Processing {len(tokens)} token(s)")
+                        logger.debug(f"📊 Processing {len(tokens)} token(s)")
                         
                         # Traiter chaque token
                         for token_data in tokens:
                             try:
-                                logger.info(f"🔍 Processing token: {token_data.get('mint', 'NO_MINT')} - {token_data.get('name', 'NO_NAME')}")
+                                logger.debug(f"🔍 Processing token: {token_data.get('mint', 'NO_MINT')} - {token_data.get('name', 'NO_NAME')}")
                                 
                                 # Vérifier si c'est un nouveau token
                                 if await self._is_new_token_latest(token_data):
-                                    logger.info(f"✅ Token is new, creating...")
+                                    logger.debug(f"✅ Token is new, creating...")
                                     new_token = await self._create_token_from_latest_api(token_data)
                                     if new_token:
                                         result['new_tokens'].append(new_token)
                                         result['tokens_discovered'] += 1
-                                        logger.info(f"✅ Token successfully created: {new_token.address}")
+                                        logger.debug(f"✅ Token successfully created: {new_token.address}")
                                         
                                         # Analyser le créateur immédiatement
                                         asyncio.create_task(
@@ -100,7 +100,7 @@ class PumpFunLatestTokensDiscovery:
                                     else:
                                         logger.warning(f"❌ Failed to create token from data")
                                 else:
-                                    logger.info(f"⏭️ Token already exists, skipping")
+                                    logger.debug(f"⏭️ Token already exists, skipping")
                                     
                             except Exception as e:
                                 logger.error(f"Error processing token from latest: {e}")
@@ -110,7 +110,7 @@ class PumpFunLatestTokensDiscovery:
                         # Mettre à jour le timestamp de traitement
                         self.last_processed_time = datetime.now()
                         
-                        logger.info(f"✅ Latest tokens discovery: {result['tokens_discovered']} new tokens found")
+                        logger.debug(f"✅ Latest tokens discovery: {result['tokens_discovered']} new tokens found")
                         
                     else:
                         error_msg = f"HTTP {response.status} from latest endpoint"
@@ -127,7 +127,7 @@ class PumpFunLatestTokensDiscovery:
     async def _is_new_token_latest(self, token_data: dict) -> bool:
         """Vérifie si le token est nouveau dans notre base"""
         mint_address = token_data.get('mint')
-        logger.info(f"🔍 Checking if token is new: {mint_address}")
+        logger.debug(f"🔍 Checking if token is new: {mint_address}")
 
         if not mint_address:
             logger.warning(f"❌ No mint address found in token data: {list(token_data.keys())}")
@@ -137,22 +137,22 @@ class PumpFunLatestTokensDiscovery:
         existing_token = self.db.get_token_by_address(mint_address)
         
         if existing_token:
-            logger.info(f"❌ Token {mint_address[:10]}... already exists in database")
+            logger.debug(f"❌ Token {mint_address[:10]}... already exists in database")
             return False
 
-        logger.info(f"✅ Token {mint_address[:10]}... is new!")
+        logger.debug(f"✅ Token {mint_address[:10]}... is new!")
   
         # Vérification supplémentaire par timestamp si disponible
         created_timestamp = token_data.get('created_timestamp')
         if created_timestamp and self.last_processed_time:
             try:
                 token_created_at = datetime.fromtimestamp(created_timestamp / 1000)
-                logger.info(f"🕐 Token created at: {token_created_at}")
-                logger.info(f"🕐 Last processed: {self.last_processed_time}")
+                logger.debug(f"🕐 Token created at: {token_created_at}")
+                logger.debug(f"🕐 Last processed: {self.last_processed_time}")
                 
                 # Ne traiter que les tokens créés après notre dernière vérification
                 if token_created_at <= self.last_processed_time:
-                    logger.info(f"⏭️ Token {mint_address[:10]}... already processed based on timestamp")
+                    logger.debug(f"⏭️ Token {mint_address[:10]}... already processed based on timestamp")
                     return False
             except Exception as e:
                 logger.warning(f"⚠️ Error parsing timestamp {created_timestamp}: {e}")
@@ -190,7 +190,7 @@ class PumpFunLatestTokensDiscovery:
             
             # Insérer en base
             if self.db.insert_pump_token(token):
-                logger.info(f"🆕 NEW TOKEN via /latest: {mint_address} by {creator[:10]}...")
+                logger.debug(f"🆕 NEW TOKEN via /latest: {mint_address} by {creator[:10]}...")
                 
                 # Enregistrer l'appel API
                 if self.system_monitor:
@@ -208,7 +208,7 @@ class PumpFunLatestTokensDiscovery:
         try:
             await asyncio.sleep(1)  # Petite pause pour éviter la surcharge
             creator_analyzer.analyze_creator(creator_address)
-            logger.info(f"Creator analyzed for latest token: {creator_address[:10]}...")
+            logger.debug(f"Creator analyzed for latest token: {creator_address[:10]}...")
         except Exception as e:
             logger.error(f"Error analyzing creator {creator_address}: {e}")
 
@@ -248,7 +248,7 @@ class PumpFunTokenDiscovery:
                                     result['new_tokens'].append(new_token)
                                     result['tokens_discovered'] += 1
                         
-                        logger.info(f"API Discovery: {result['tokens_discovered']} new tokens found")
+                        logger.debug(f"API Discovery: {result['tokens_discovered']} new tokens found")
                         
         except Exception as e:
             logger.error(f"Error in API discovery: {e}")
@@ -298,7 +298,7 @@ class PumpFunTokenDiscovery:
             
             # Insérer en base
             if self.db.insert_pump_token(token):
-                logger.info(f"NEW TOKEN via API: {mint_address} by {creator}")
+                logger.debug(f"NEW TOKEN via API: {mint_address} by {creator}")
                 return token
             
         except Exception as e:
@@ -328,7 +328,7 @@ class DataProcessor:
                 result['purchases'].append(purchase)
             if purchases:
                 result['processed'] = True
-                logger.info(f"Purchase detected: {len(purchases)} purchases")
+                logger.debug(f"Purchase detected: {len(purchases)} purchases")
 
         return result
 
@@ -393,11 +393,11 @@ class DataProcessor:
                         bonding_curve = instruction.accounts[2] if len(instruction.accounts) > 2 else None
                         associated_bonding_curve = instruction.accounts[3] if len(instruction.accounts) > 3 else None
                         
-                        logger.info(f"🔍 Extracting token creation:")
-                        logger.info(f"   Creator: {creator}")
-                        logger.info(f"   Token: {token_address}")
-                        logger.info(f"   Bonding curve: {bonding_curve}")
-                        logger.info(f"   Associated BC: {associated_bonding_curve}")
+                        logger.debug(f"🔍 Extracting token creation:")
+                        logger.debug(f"   Creator: {creator}")
+                        logger.debug(f"   Token: {token_address}")
+                        logger.debug(f"   Bonding curve: {bonding_curve}")
+                        logger.debug(f"   Associated BC: {associated_bonding_curve}")
                         
                         return PumpToken(
                             address=token_address,
@@ -509,10 +509,10 @@ class DataProcessor:
         """
         for i, instruction in enumerate(transaction.instructions):
             if instruction.programId == settings.pumpfun_program_id:
-                logger.info(f"🔍 Pump.fun instruction {i}:")
-                logger.info(f"   Program: {instruction.programId}")
-                logger.info(f"   Data length: {len(instruction.data)}")
-                logger.info(f"   Accounts count: {len(instruction.accounts)}")
+                logger.debug(f"🔍 Pump.fun instruction {i}:")
+                logger.debug(f"   Program: {instruction.programId}")
+                logger.debug(f"   Data length: {len(instruction.data)}")
+                logger.debug(f"   Accounts count: {len(instruction.accounts)}")
                 
                 # Log les premiers bytes (discriminator)
                 if len(instruction.data) >= 8:
@@ -526,25 +526,25 @@ class DataProcessor:
                         except:
                             discriminator = str(instruction.data)[:16]
                     
-                    logger.info(f"   Discriminator: {discriminator}")
+                    logger.debug(f"   Discriminator: {discriminator}")
                 
                 # Log quelques comptes
                 for j, account in enumerate(instruction.accounts[:5]):
-                    logger.info(f"   Account {j}: {account}")
+                    logger.debug(f"   Account {j}: {account}")
                 
                 # Analyser le contexte
                 has_token_transfers = bool(transaction.tokenTransfers)
                 has_native_transfers = bool(transaction.nativeTransfers)
                 
-                logger.info(f"   Context: transfers={has_token_transfers}, native={has_native_transfers}")
+                logger.debug(f"   Context: transfers={has_token_transfers}, native={has_native_transfers}")
                 
                 # Hypothèse sur le type
                 if not has_token_transfers and len(instruction.accounts) >= 8:
-                    logger.info(f"   🎯 LIKELY TOKEN CREATION (no transfers, many accounts)")
+                    logger.debug(f"   🎯 LIKELY TOKEN CREATION (no transfers, many accounts)")
                 elif has_token_transfers:
-                    logger.info(f"   🎯 LIKELY SWAP/TRADE (has transfers)")
+                    logger.debug(f"   🎯 LIKELY SWAP/TRADE (has transfers)")
                 else:
-                    logger.info(f"   🎯 UNKNOWN TYPE")
+                    logger.debug(f"   🎯 UNKNOWN TYPE")
 
 class IntelligentPollingManager:
     def __init__(self, system_monitor: 'SystemMonitor'):
@@ -613,11 +613,11 @@ class IntelligentPollingManager:
         if not self.polling_task or self.polling_task.done():
             self.is_running = True
             self.polling_task = asyncio.create_task(self._polling_loop())
-            logger.info("🚀 Intelligent polling started with latest tokens discovery")
+            logger.debug("🚀 Intelligent polling started with latest tokens discovery")
     
     # async def _polling_loop(self):
     #     """Boucle principale de polling avec découverte multi-méthodes"""
-    #     logger.info("🔥 Starting intelligent polling loop with LATEST tokens discovery")
+    #     logger.debug("🔥 Starting intelligent polling loop with LATEST tokens discovery")
         
     #     while self.is_running:
     #         try:
@@ -690,139 +690,365 @@ class IntelligentPollingManager:
     # Ajoutez ces logs de debug dans la boucle de polling (_polling_loop) 
 # pour identifier où le processus se bloque
 
+    # async def _polling_loop(self):
+    #     """Boucle principale de polling avec debug amélioré"""
+    #     logger.debug("🔥 Starting intelligent polling loop with LATEST tokens discovery")
+        
+    #     cycle_count = 0
+        
+    #     while self.is_running:
+    #         try:
+    #             cycle_count += 1
+    #             logger.debug(f"🔄 Starting polling cycle #{cycle_count}")
+                
+    #             # Vérifier et réinitialiser les stats quotidiennes
+    #             logger.debug(f"📅 Checking daily reset...")
+    #             self._check_daily_reset()
+                
+    #             # Vérifier les limites de crédits
+    #             logger.debug(f"💳 Checking credit limits...")
+    #             helius_credits = self.system_monitor.get_helius_credits_today() if self.system_monitor else 0
+    #             if helius_credits >= settings.max_daily_credits * 0.95:
+    #                 logger.warning("Credit limit nearly reached, pausing polling")
+    #                 await asyncio.sleep(3600)  # Attendre 1h
+    #                 continue
+                
+    #             # Vérifier la santé de l'API avant de continuer
+    #             logger.debug(f"🩺 Checking API health...")
+    #             if self.consecutive_failures >= 3:
+    #                 logger.warning(f"API health degraded ({self.consecutive_failures} failures), extending polling interval")
+    #                 self.current_polling_interval = min(self.current_polling_interval * 1.5, self.max_polling_interval * 2)
+                
+    #             # ===== DÉCOUVERTE TOKENS =====
+    #             logger.debug(f"🔍 Checking discovery schedules...")
+                
+    #             # NOUVEAU: Découverte prioritaire via /coins/latest
+    #             try:
+    #                 if (self.use_latest_discovery and 
+    #                     (datetime.now() - self.last_latest_discovery).total_seconds() > self.latest_discovery_interval_seconds):
+                        
+    #                     logger.debug(f"🔥 Running LATEST tokens discovery...")
+    #                     await self._run_latest_tokens_discovery()
+    #                     logger.debug(f"✅ LATEST discovery completed")
+    #                 else:
+    #                     logger.debug(f"⏭️ LATEST discovery not due yet")
+    #             except Exception as e:
+    #                 logger.error(f"❌ Error in LATEST discovery: {e}")
+                
+    #             # Découverte générale (moins fréquente)
+    #             try:
+    #                 if (self.use_api_discovery and 
+    #                     (datetime.now() - self.last_general_discovery).total_seconds() > self.general_discovery_interval_seconds):
+                        
+    #                     logger.debug(f"📡 Running general API discovery...")
+    #                     await self._run_general_api_discovery()
+    #                     logger.debug(f"✅ General discovery completed")
+    #                 else:
+    #                     logger.debug(f"⏭️ General discovery not due yet")
+    #             except Exception as e:
+    #                 logger.error(f"❌ Error in general discovery: {e}")
+                
+    #             # ===== TRAITEMENT TRANSACTIONS (si activé) =====
+    #             logger.debug(f"📊 Checking transaction processing...")
+    #             success = True  # Par défaut, pas de polling de transactions
+                
+    #             try:
+    #                 # DÉSACTIVÉ : Traitement des transactions
+    #                 # if getattr(settings, 'use_transaction_token_detection', False):
+    #                 #     success = await self._poll_recent_transactions_safe()
+    #                 # else:
+    #                 #     success = await self._poll_transactions_for_purchases_only_safe()
+                    
+    #                 logger.debug(f"📊 Transaction processing skipped (disabled)")
+    #             except Exception as e:
+    #                 logger.error(f"❌ Error in transaction processing: {e}")
+    #                 success = False
+                
+    #             # ===== MISE À JOUR STATUTS =====
+    #             logger.debug(f"📈 Updating statuses...")
+                
+    #             if success:
+    #                 self.consecutive_failures = 0
+    #                 self.last_successful_poll = datetime.now()
+    #                 self.api_health_status = "healthy"
+    #             else:
+    #                 self.consecutive_failures += 1
+    #                 self.api_health_status = "degraded" if self.consecutive_failures < 5 else "critical"
+                
+    #             # Nettoyer le cache périodiquement
+    #             logger.debug(f"🧹 Cleaning cache...")
+    #             try:
+    #                 await self._cleanup_cache()
+    #             except Exception as e:
+    #                 logger.error(f"❌ Error cleaning cache: {e}")
+
+    #             # Exécuter l'enrichissement des métadonnées périodiquement
+    #             logger.debug(f"✨ Checking enrichment schedule...")
+    #             try:
+    #                 if settings.enable_metadata_enrichment and (datetime.now() - self.last_enrichment_run).total_seconds() > settings.enrichment_interval_seconds:
+    #                     logger.debug(f"🔄 Starting enrichment task...")
+    #                     await self._enrich_token_metadata()
+    #                     logger.debug(f"✅ Enrichment completed")
+    #                 else:
+    #                     logger.debug(f"⏭️ Enrichment not due yet")
+    #             except Exception as e:
+    #                 logger.error(f"❌ Error in enrichment: {e}")
+                
+    #             # Adapter l'intervalle de polling
+    #             logger.debug(f"⚙️ Adapting polling interval...")
+    #             try:
+    #                 self._adapt_polling_interval()
+    #             except Exception as e:
+    #                 logger.error(f"❌ Error adapting interval: {e}")
+                
+    #             # Attendre avant le prochain cycle
+    #             wait_time = self.current_polling_interval
+    #             if self.consecutive_failures > 0:
+    #                 wait_time = min(wait_time * (1 + self.consecutive_failures * 0.5), 1800)  # Max 30 min
+                
+    #             logger.debug(f"😴 Cycle #{cycle_count} completed. Waiting {wait_time}s before next cycle...")
+    #             logger.debug(f"📊 Cycle stats: failures={self.consecutive_failures}, health={self.api_health_status}")
+                
+    #             await asyncio.sleep(wait_time)
+                
+    #         except asyncio.CancelledError:
+    #             logger.debug("🛑 Polling loop cancelled")
+    #             break
+    #         except Exception as e:
+    #             logger.error(f"💥 Critical error in polling loop cycle #{cycle_count}: {e}")
+    #             import traceback
+    #             logger.error(f"📋 Traceback: {traceback.format_exc()}")
+    #             self.consecutive_failures += 1
+    #             await asyncio.sleep(60)  # Attendre 1 minute en cas d'erreur
+        
+    #     logger.debug("🏁 Polling loop ended")
+    
+
+
     async def _polling_loop(self):
-        """Boucle principale de polling avec debug amélioré"""
-        logger.info("🔥 Starting intelligent polling loop with LATEST tokens discovery")
+        """Boucle principale de polling avec découverte optimisée"""
+        logger.info("🚀 DISCOVERY ENGINE STARTED - Latest: 30s | API: 60s")
         
         cycle_count = 0
+        
+        # Configuration des intervalles optimisés
+        LATEST_DISCOVERY_INTERVAL_SECONDS = 30  # Toutes les 30 secondes
+        API_DISCOVERY_INTERVAL_SECONDS = 60     # Toutes les 60 secondes
         
         while self.is_running:
             try:
                 cycle_count += 1
-                logger.info(f"🔄 Starting polling cycle #{cycle_count}")
                 
-                # Vérifier et réinitialiser les stats quotidiennes
-                logger.debug(f"📅 Checking daily reset...")
+                # Vérifications système (silencieuses)
                 self._check_daily_reset()
-                
-                # Vérifier les limites de crédits
-                logger.debug(f"💳 Checking credit limits...")
                 helius_credits = self.system_monitor.get_helius_credits_today() if self.system_monitor else 0
                 if helius_credits >= settings.max_daily_credits * 0.95:
-                    logger.warning("Credit limit nearly reached, pausing polling")
-                    await asyncio.sleep(3600)  # Attendre 1h
+                    logger.warning("💳 CREDIT LIMIT REACHED - Pausing discovery")
+                    await asyncio.sleep(3600)
                     continue
                 
-                # Vérifier la santé de l'API avant de continuer
-                logger.debug(f"🩺 Checking API health...")
-                if self.consecutive_failures >= 3:
-                    logger.warning(f"API health degraded ({self.consecutive_failures} failures), extending polling interval")
-                    self.current_polling_interval = min(self.current_polling_interval * 1.5, self.max_polling_interval * 2)
-                
-                # ===== DÉCOUVERTE TOKENS =====
-                logger.debug(f"🔍 Checking discovery schedules...")
-                
-                # NOUVEAU: Découverte prioritaire via /coins/latest
-                try:
-                    if (self.use_latest_discovery and 
-                        (datetime.now() - self.last_latest_discovery).total_seconds() > self.latest_discovery_interval_seconds):
-                        
-                        logger.info(f"🔥 Running LATEST tokens discovery...")
-                        await self._run_latest_tokens_discovery()
-                        logger.info(f"✅ LATEST discovery completed")
-                    else:
-                        logger.debug(f"⏭️ LATEST discovery not due yet")
-                except Exception as e:
-                    logger.error(f"❌ Error in LATEST discovery: {e}")
-                
-                # Découverte générale (moins fréquente)
-                try:
-                    if (self.use_api_discovery and 
-                        (datetime.now() - self.last_general_discovery).total_seconds() > self.general_discovery_interval_seconds):
-                        
-                        logger.info(f"📡 Running general API discovery...")
-                        await self._run_general_api_discovery()
-                        logger.info(f"✅ General discovery completed")
-                    else:
-                        logger.debug(f"⏭️ General discovery not due yet")
-                except Exception as e:
-                    logger.error(f"❌ Error in general discovery: {e}")
-                
-                # ===== TRAITEMENT TRANSACTIONS (si activé) =====
-                logger.debug(f"📊 Checking transaction processing...")
-                success = True  # Par défaut, pas de polling de transactions
-                
-                try:
-                    # DÉSACTIVÉ : Traitement des transactions
-                    # if getattr(settings, 'use_transaction_token_detection', False):
-                    #     success = await self._poll_recent_transactions_safe()
-                    # else:
-                    #     success = await self._poll_transactions_for_purchases_only_safe()
+                # ===== 1. DÉCOUVERTE LATEST (30 secondes) =====
+                if (self.use_latest_discovery and 
+                    (datetime.now() - self.last_latest_discovery).total_seconds() > LATEST_DISCOVERY_INTERVAL_SECONDS):
                     
-                    logger.debug(f"📊 Transaction processing skipped (disabled)")
-                except Exception as e:
-                    logger.error(f"❌ Error in transaction processing: {e}")
-                    success = False
+                    logger.info("🔥 LATEST DISCOVERY START")
+                    try:
+                        await self._run_latest_discovery_with_enrichment()
+                    except Exception as e:
+                        logger.error(f"❌ LATEST DISCOVERY FAILED: {e}")
                 
-                # ===== MISE À JOUR STATUTS =====
-                logger.debug(f"📈 Updating statuses...")
+                # ===== 2. DÉCOUVERTE API GÉNÉRALE (60 secondes) =====
+                if (self.use_api_discovery and 
+                    (datetime.now() - self.last_general_discovery).total_seconds() > API_DISCOVERY_INTERVAL_SECONDS):
+                    
+                    logger.info("📡 API DISCOVERY START")
+                    try:
+                        await self._run_api_discovery_with_enrichment()
+                    except Exception as e:
+                        logger.error(f"❌ API DISCOVERY FAILED: {e}")
                 
-                if success:
-                    self.consecutive_failures = 0
-                    self.last_successful_poll = datetime.now()
-                    self.api_health_status = "healthy"
-                else:
-                    self.consecutive_failures += 1
-                    self.api_health_status = "degraded" if self.consecutive_failures < 5 else "critical"
+                # ===== 3. ENRICHISSEMENT DIFFÉRÉ (silencieux) =====
+                if settings.enable_metadata_enrichment and (datetime.now() - self.last_enrichment_run).total_seconds() > settings.enrichment_interval_seconds:
+                    try:
+                        await self._enrich_token_metadata()
+                    except Exception as e:
+                        logger.error(f"❌ BACKGROUND ENRICHMENT FAILED: {e}")
                 
-                # Nettoyer le cache périodiquement
-                logger.debug(f"🧹 Cleaning cache...")
+                # Nettoyage (silencieux)
                 try:
                     await self._cleanup_cache()
-                except Exception as e:
-                    logger.error(f"❌ Error cleaning cache: {e}")
-
-                # Exécuter l'enrichissement des métadonnées périodiquement
-                logger.debug(f"✨ Checking enrichment schedule...")
-                try:
-                    if settings.enable_metadata_enrichment and (datetime.now() - self.last_enrichment_run).total_seconds() > settings.enrichment_interval_seconds:
-                        logger.info(f"🔄 Starting enrichment task...")
-                        await self._enrich_token_metadata()
-                        logger.info(f"✅ Enrichment completed")
-                    else:
-                        logger.debug(f"⏭️ Enrichment not due yet")
-                except Exception as e:
-                    logger.error(f"❌ Error in enrichment: {e}")
+                except:
+                    pass
                 
-                # Adapter l'intervalle de polling
-                logger.debug(f"⚙️ Adapting polling interval...")
-                try:
-                    self._adapt_polling_interval()
-                except Exception as e:
-                    logger.error(f"❌ Error adapting interval: {e}")
+                # Mise à jour des statuts
+                self.consecutive_failures = 0
+                self.last_successful_poll = datetime.now()
+                self.api_health_status = "healthy"
                 
                 # Attendre avant le prochain cycle
-                wait_time = self.current_polling_interval
-                if self.consecutive_failures > 0:
-                    wait_time = min(wait_time * (1 + self.consecutive_failures * 0.5), 1800)  # Max 30 min
-                
-                logger.info(f"😴 Cycle #{cycle_count} completed. Waiting {wait_time}s before next cycle...")
-                logger.debug(f"📊 Cycle stats: failures={self.consecutive_failures}, health={self.api_health_status}")
-                
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep(10)
                 
             except asyncio.CancelledError:
-                logger.info("🛑 Polling loop cancelled")
+                logger.info("🛑 DISCOVERY ENGINE STOPPED")
                 break
             except Exception as e:
-                logger.error(f"💥 Critical error in polling loop cycle #{cycle_count}: {e}")
-                import traceback
-                logger.error(f"📋 Traceback: {traceback.format_exc()}")
+                logger.error(f"💥 CRITICAL ERROR: {e}")
                 self.consecutive_failures += 1
-                await asyncio.sleep(60)  # Attendre 1 minute en cas d'erreur
+                await asyncio.sleep(60)
         
-        logger.info("🏁 Polling loop ended")
-        
+        logger.info("🏁 DISCOVERY ENGINE SHUTDOWN")
+
+    async def _run_latest_discovery_with_enrichment(self):
+        """Découverte LATEST avec enrichissement immédiat complet"""
+        try:
+            # 1. Découverte des nouveaux tokens
+            discovery_limit = getattr(settings, 'latest_discovery_limit', 20)
+            result = await self.latest_tokens_discovery.discover_latest_tokens(limit=discovery_limit)
+            
+            # 2. Traitement des nouveaux tokens
+            if result['new_tokens']:
+                logger.info(f"🎯 {len(result['new_tokens'])} NEW TOKENS → Starting enrichment")
+                
+                for token in result['new_tokens']:
+                    try:
+                        await self._full_immediate_enrichment(token.address, token.creator)
+                    except Exception as e:
+                        logger.error(f"❌ ENRICHMENT FAILED: {token.address[:8]}... → {e}")
+                
+                # Statistiques
+                self._update_daily_stats_latest_discovery(result['tokens_discovered'])
+                logger.info(f"✅ LATEST DISCOVERY COMPLETE → {result['tokens_discovered']} tokens processed")
+            else:
+                logger.info("📭 LATEST DISCOVERY → No new tokens")
+            
+            # Erreurs
+            if result['errors']:
+                logger.warning(f"⚠️ LATEST DISCOVERY ERRORS: {len(result['errors'])}")
+            
+            # Finalisation
+            self.last_latest_discovery = datetime.now()
+            if self.system_monitor:
+                self.system_monitor.record_api_call('pumpfun_latest')
+            
+        except Exception as e:
+            logger.error(f"❌ LATEST DISCOVERY CRITICAL FAILURE: {e}")
+            self.last_latest_discovery = datetime.now()
+
+    async def _run_api_discovery_with_enrichment(self):
+        """Découverte API générale avec enrichissement immédiat complet"""
+        try:
+            # 1. Découverte des nouveaux tokens
+            discovery_limit = getattr(settings, 'api_discovery_limit', 50)
+            result = await self.general_token_discovery.discover_new_tokens(limit=discovery_limit)
+            
+            # 2. Traitement des nouveaux tokens
+            if result['new_tokens']:
+                logger.info(f"📊 {len(result['new_tokens'])} NEW TOKENS → Starting enrichment")
+                
+                for token in result['new_tokens']:
+                    try:
+                        await self._full_immediate_enrichment(token.address, token.creator)
+                    except Exception as e:
+                        logger.error(f"❌ ENRICHMENT FAILED: {token.address[:8]}... → {e}")
+                
+                # Statistiques
+                self._update_daily_stats_general_discovery(result['tokens_discovered'])
+                logger.info(f"✅ API DISCOVERY COMPLETE → {result['tokens_discovered']} tokens processed")
+            else:
+                logger.info("📭 API DISCOVERY → No new tokens")
+            
+            # Erreurs
+            if result['errors']:
+                logger.warning(f"⚠️ API DISCOVERY ERRORS: {len(result['errors'])}")
+            
+            # Finalisation
+            self.last_general_discovery = datetime.now()
+            if self.system_monitor:
+                self.system_monitor.record_api_call('pumpfun_general')
+            
+        except Exception as e:
+            logger.error(f"❌ API DISCOVERY CRITICAL FAILURE: {e}")
+            self.last_general_discovery = datetime.now() + timedelta(minutes=5)
+
+    async def _full_immediate_enrichment(self, token_address: str, creator_address: str):
+        """Enrichissement complet immédiat : Pump.fun + RugCheck + Analyse créateur"""
+        try:
+            logger.info(f"🔄 ENRICHING: {token_address[:8]}...")
+            
+            # 1. Snapshot
+            db.create_snapshot(token_address)
+            
+            # 2. Enrichissement parallèle
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                token_obj = db.get_token_by_address(token_address)
+                
+                tasks = [
+                    self._enrich_single_token_pumpfun(session, token_address),
+                    self._enrich_single_token_onchain(token_address, token_obj),
+                    self._enrich_single_token_rugcheck(session, token_address)
+                ]
+                
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Traitement des résultats
+                pumpfun_data = results[0] if isinstance(results[0], dict) else {}
+                onchain_data = results[1] if isinstance(results[1], dict) else {}
+                rugcheck_data = results[2] if isinstance(results[2], dict) else None
+                
+                # Fusion des données
+                if onchain_data.get('success'):
+                    pumpfun_data.update({
+                        'bonding_curve_progress': onchain_data.get('bonding_curve_progress', 0),
+                        'virtual_sol_reserves': onchain_data.get('virtual_sol_reserves', 0),
+                        'virtual_token_reserves': onchain_data.get('virtual_token_reserves', 0)
+                    })
+                
+                # Mise à jour base de données
+                enrichment_status = []
+                
+                if pumpfun_data:
+                    if db.update_token_pumpfun_data(token_address, pumpfun_data):
+                        progress = pumpfun_data.get('bonding_curve_progress', 'N/A')
+                        enrichment_status.append(f"Pump:{progress}%")
+                
+                if rugcheck_data:
+                    db.upsert_rugcheck_report(token_address, rugcheck_data)
+                    score = rugcheck_data.get('score_normalised', 'N/A')
+                    enrichment_status.append(f"Rug:{score}")
+            
+            # 3. Analyse créateur (asynchrone)
+            asyncio.create_task(self._analyze_creator_async(creator_address, token_address))
+            
+            # Log de succès
+            status_str = " | ".join(enrichment_status) if enrichment_status else "Basic"
+            logger.info(f"✅ ENRICHED: {token_address[:8]}... → {status_str}")
+            
+        except Exception as e:
+            logger.error(f"❌ ENRICHMENT FAILED: {token_address[:8]}... → {e}")
+
+    async def _analyze_creator_async(self, creator_address: str, token_address: str = ""):
+        """Analyse le créateur de manière asynchrone"""
+        try:
+            # Analyse dans un thread séparé
+            def analyze_creator_sync():
+                return creator_analyzer.analyze_creator(creator_address, force_refresh=True)
+            
+            loop = asyncio.get_event_loop()
+            performance = await loop.run_in_executor(None, analyze_creator_sync)
+            
+            # Mise à jour base
+            if performance:
+                creator_analyzer.update_creator_in_database(performance)
+                
+                # Log simple
+                if performance.is_blacklisted:
+                    logger.warning(f"🚨 CREATOR BLACKLISTED: {creator_address[:8]}... → {performance.blacklist_reason}")
+                else:
+                    logger.info(f"👤 CREATOR ANALYZED: {creator_address[:8]}... → Score:{performance.reputation_score:.0f}")
+                
+        except Exception as e:
+            logger.error(f"❌ CREATOR ANALYSIS FAILED: {creator_address[:8]}... → {e}")
+
     def _check_daily_reset(self):
         """Vérifie et réinitialise les stats quotidiennes"""
         current_date = datetime.now().date()
@@ -831,7 +1057,7 @@ class IntelligentPollingManager:
             self.daily_stats.clear()
             self.credits_used_today = 0
             self.last_reset_date = current_date
-            logger.info("Daily stats reset")
+            logger.debug("Daily stats reset")
 
     def _adapt_polling_interval(self):
         """Adapte l'intervalle de polling selon l'activité"""
@@ -857,7 +1083,7 @@ class IntelligentPollingManager:
         
         # Log les changements significatifs
         if abs(self.current_polling_interval - self.base_polling_interval) > 30:
-            logger.info(f"Polling interval adapted to {self.current_polling_interval}s (avg activity: {avg_activity:.1f})")
+            logger.debug(f"Polling interval adapted to {self.current_polling_interval}s (avg activity: {avg_activity:.1f})")
 
     async def _cleanup_cache(self):
         """Nettoie le cache des signatures traitées"""
@@ -867,7 +1093,7 @@ class IntelligentPollingManager:
         if (now - self.last_signature_cleanup).total_seconds() > 3600:
             # Garder seulement les signatures des 6 dernières heures
             if len(self.processed_signatures) > 5000:
-                logger.info(f"Cleaning signature cache: {len(self.processed_signatures)} -> limiting to recent ones")
+                logger.debug(f"Cleaning signature cache: {len(self.processed_signatures)} -> limiting to recent ones")
                 # Pour simplifier, on vide complètement le cache
                 # Dans un vrai système, on utiliserait un cache avec TTL
                 self.processed_signatures.clear()
@@ -909,7 +1135,7 @@ class IntelligentPollingManager:
         """Déclenche une mise à jour du scoring des early adopters"""
         try:
             await scorer.update_all_early_adopters()
-            logger.info("Early adopter scoring updated")
+            logger.debug("Early adopter scoring updated")
         except Exception as e:
             logger.error(f"Error updating early adopter scores: {e}")
 
@@ -917,7 +1143,7 @@ class IntelligentPollingManager:
         """Récupère les détails d'une transaction avec retry et logging détaillé"""
         for attempt in range(max_retries):
             try:
-                logger.info(f"📄 Getting transaction details - attempt {attempt + 1}/{max_retries}")
+                logger.debug(f"📄 Getting transaction details - attempt {attempt + 1}/{max_retries}")
                 
                 url = f"{self.helius_rpc_url}/?api-key={self.helius_api_key}"
                 
@@ -935,22 +1161,22 @@ class IntelligentPollingManager:
                     ]
                 }
                 
-                logger.info(f"📤 Sending getTransaction request:")
-                logger.info(f"   Signature: {signature}")
-                logger.info(f"   Payload: {json.dumps(payload, indent=2)}")
+                logger.debug(f"📤 Sending getTransaction request:")
+                logger.debug(f"   Signature: {signature}")
+                logger.debug(f"   Payload: {json.dumps(payload, indent=2)}")
                 
                 async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
                     response = await client.post(url, json=payload)
                     
-                    logger.info(f"📥 getTransaction response:")
-                    logger.info(f"   Status: {response.status_code}")
+                    logger.debug(f"📥 getTransaction response:")
+                    logger.debug(f"   Status: {response.status_code}")
                     
                     response.raise_for_status()
                 
                 data = response.json()
-                logger.info(f"📋 Transaction details response:")
-                logger.info(f"   Has result: {'result' in data}")
-                logger.info(f"   Has error: {'error' in data}")
+                logger.debug(f"📋 Transaction details response:")
+                logger.debug(f"   Has result: {'result' in data}")
+                logger.debug(f"   Has error: {'error' in data}")
                 
                 if 'error' in data:
                     logger.error(f"   Error: {data['error']}")
@@ -961,55 +1187,55 @@ class IntelligentPollingManager:
                     return None
                 
                 result = data['result']
-                logger.info(f"   Transaction exists: {result is not None}")
+                logger.debug(f"   Transaction exists: {result is not None}")
                 
                 if result:
                     # Log structure de la transaction
-                    logger.info(f"   Transaction structure:")
-                    logger.info(f"     - signature: {result.get('signature', 'N/A')}")
-                    logger.info(f"     - slot: {result.get('slot', 'N/A')}")
-                    logger.info(f"     - blockTime: {result.get('blockTime', 'N/A')}")
-                    logger.info(f"     - has transaction: {'transaction' in result}")
+                    logger.debug(f"   Transaction structure:")
+                    logger.debug(f"     - signature: {result.get('signature', 'N/A')}")
+                    logger.debug(f"     - slot: {result.get('slot', 'N/A')}")
+                    logger.debug(f"     - blockTime: {result.get('blockTime', 'N/A')}")
+                    logger.debug(f"     - has transaction: {'transaction' in result}")
                     
                     if 'transaction' in result:
                         tx_data = result['transaction']
-                        logger.info(f"     - has message: {'message' in tx_data}")
+                        logger.debug(f"     - has message: {'message' in tx_data}")
                         
                         if 'message' in tx_data:
                             message = tx_data['message']
-                            logger.info(f"       - accountKeys count: {len(message.get('accountKeys', []))}")
-                            logger.info(f"       - instructions count: {len(message.get('instructions', []))}")
+                            logger.debug(f"       - accountKeys count: {len(message.get('accountKeys', []))}")
+                            logger.debug(f"       - instructions count: {len(message.get('instructions', []))}")
                             
                             # Log les premiers account keys
                             account_keys = message.get('accountKeys', [])
                             for i, key in enumerate(account_keys[:5]):  # Premier 5
-                                logger.info(f"         Account {i}: {key}")
+                                logger.debug(f"         Account {i}: {key}")
                             
                             # Log les instructions
                             instructions = message.get('instructions', [])
                             for i, inst in enumerate(instructions):
                                 program_id_index = inst.get('programIdIndex')
                                 program_id = account_keys[program_id_index] if program_id_index < len(account_keys) else 'Unknown'
-                                logger.info(f"         Instruction {i}: program={program_id} (index={program_id_index})")
-                                logger.info(f"           accounts: {inst.get('accounts', [])}")
-                                logger.info(f"           data length: {len(inst.get('data', ''))}")
+                                logger.debug(f"         Instruction {i}: program={program_id} (index={program_id_index})")
+                                logger.debug(f"           accounts: {inst.get('accounts', [])}")
+                                logger.debug(f"           data length: {len(inst.get('data', ''))}")
                                 
                                 # Marquer si c'est pump.fun
                                 if program_id == self.pumpfun_program_id:
-                                    logger.info(f"           🎯 PUMP.FUN INSTRUCTION DETECTED!")
+                                    logger.debug(f"           🎯 PUMP.FUN INSTRUCTION DETECTED!")
                 
                 # Parser la transaction
                 parsed_tx = self._parse_helius_transaction(result)
                 
                 if parsed_tx:
-                    logger.info(f"   ✅ Transaction parsed successfully")
-                    logger.info(f"     - Type: {parsed_tx.type}")
-                    logger.info(f"     - Instructions: {len(parsed_tx.instructions)}")
-                    logger.info(f"     - Token transfers: {len(parsed_tx.tokenTransfers)}")
+                    logger.debug(f"   ✅ Transaction parsed successfully")
+                    logger.debug(f"     - Type: {parsed_tx.type}")
+                    logger.debug(f"     - Instructions: {len(parsed_tx.instructions)}")
+                    logger.debug(f"     - Token transfers: {len(parsed_tx.tokenTransfers)}")
                     
                     # Compter les instructions pump.fun
                     pumpfun_instructions = sum(1 for inst in parsed_tx.instructions if inst.programId == self.pumpfun_program_id)
-                    logger.info(f"     - Pump.fun instructions: {pumpfun_instructions}")
+                    logger.debug(f"     - Pump.fun instructions: {pumpfun_instructions}")
                     
                     return parsed_tx
                 else:
@@ -1072,7 +1298,7 @@ class IntelligentPollingManager:
             # Vérifier s'il y a des address table lookups (v0 transactions)
             address_table_lookups = message.get('addressTableLookups', [])
             if address_table_lookups:
-                logger.info(f"Found {len(address_table_lookups)} address table lookups - expanding account keys")
+                logger.debug(f"Found {len(address_table_lookups)} address table lookups - expanding account keys")
                 # Pour l'instant, on va juste noter qu'il y en a
                 # Dans un vrai système, il faudrait résoudre ces lookups
             
@@ -1096,7 +1322,7 @@ class IntelligentPollingManager:
                         # WORKAROUND: Si on a vu du pump.fun dans les logs précédents, on va créer une instruction factice
                         if hasattr(self, '_last_detected_pumpfun') and self._last_detected_pumpfun:
                             program_id = self.pumpfun_program_id
-                            logger.info(f"Using pump.fun program ID from previous detection")
+                            logger.debug(f"Using pump.fun program ID from previous detection")
                         else:
                             continue
                     
@@ -1120,7 +1346,7 @@ class IntelligentPollingManager:
                     
                     # Log et mémoriser si c'est pump.fun
                     if program_id == self.pumpfun_program_id:
-                        logger.info(f"✅ Pump.fun instruction successfully parsed in instruction {inst_idx}!")
+                        logger.debug(f"✅ Pump.fun instruction successfully parsed in instruction {inst_idx}!")
                         self._last_detected_pumpfun = True
                     
                 except Exception as e:
@@ -1175,8 +1401,8 @@ class IntelligentPollingManager:
             # Compter les instructions pump.fun pour vérification
             pumpfun_count = sum(1 for inst in instructions if inst.programId == self.pumpfun_program_id)
             
-            logger.info(f"✅ Transaction parsed: {len(instructions)} instructions, {len(token_transfers)} transfers")
-            logger.info(f"   Pump.fun instructions in final transaction: {pumpfun_count}")
+            logger.debug(f"✅ Transaction parsed: {len(instructions)} instructions, {len(token_transfers)} transfers")
+            logger.debug(f"   Pump.fun instructions in final transaction: {pumpfun_count}")
             
             return transaction
             
@@ -1202,7 +1428,7 @@ class IntelligentPollingManager:
 
     async def _enrich_token_metadata(self):
         """Tâche de fond pour enrichir les métadonnées des tokens."""
-        logger.info("Starting token metadata enrichment task...")
+        logger.debug("Starting token metadata enrichment task...")
         self.last_enrichment_run = datetime.now()
         
         try:
@@ -1214,7 +1440,7 @@ class IntelligentPollingManager:
             )
             
             if not token_addresses_to_enrich:
-                logger.info("No tokens require metadata enrichment at this time.")
+                logger.debug("No tokens require metadata enrichment at this time.")
                 return
 
             tokens_to_enrich_obj = [db.get_token_by_address(addr) for addr in token_addresses_to_enrich]
@@ -1223,10 +1449,10 @@ class IntelligentPollingManager:
             tokens_to_enrich = [t.__dict__ for t in tokens_to_enrich_obj]
 
             if not tokens_to_enrich:
-                logger.info("No valid token objects to enrich.")
+                logger.debug("No valid token objects to enrich.")
                 return
 
-            logger.info(f"Found {len(tokens_to_enrich)} tokens to enrich.")
+            logger.debug(f"Found {len(tokens_to_enrich)} tokens to enrich.")
             
             # Fetch data from HTTP API and on-chain concurrently
             async with aiohttp.ClientSession() as session:
@@ -1264,7 +1490,7 @@ class IntelligentPollingManager:
                 if rugcheck_report:
                     db.upsert_rugcheck_report(token_address, rugcheck_report)
             
-            logger.info(f"Enrichment task complete. Updated {updated_count}/{len(tokens_to_enrich)} tokens.")
+            logger.debug(f"Enrichment task complete. Updated {updated_count}/{len(tokens_to_enrich)} tokens.")
 
         except Exception as e:
             logger.error(f"An error occurred during the enrichment task: {e}", exc_info=True)
@@ -1295,7 +1521,7 @@ class IntelligentPollingManager:
                 bonding_curve = getattr(token_obj, 'bonding_curve', None) if hasattr(token_obj, 'bonding_curve') else None
                 associated_bonding_curve = getattr(token_obj, 'associated_bonding_curve', None) if hasattr(token_obj, 'associated_bonding_curve') else None
             
-            logger.info(f"🔗 On-chain enrichment for {token_address[:10]}... - BC: {bonding_curve[:10] if bonding_curve else 'None'}...")
+            logger.debug(f"🔗 On-chain enrichment for {token_address[:10]}... - BC: {bonding_curve[:10] if bonding_curve else 'None'}...")
             
             data = await get_pump_progress_correct(
                 token_address,
@@ -1351,7 +1577,7 @@ class IntelligentPollingManager:
     async def force_poll_now(self) -> Dict[str, Any]:
         """Force un polling immédiat (pour debug/test)"""
         try:
-            logger.info("Force polling triggered")
+            logger.debug("Force polling triggered")
             await self._poll_recent_transactions()
             return {
                 'status': 'success',
@@ -1369,7 +1595,7 @@ class IntelligentPollingManager:
     async def force_latest_discovery(self) -> Dict[str, Any]:
         """Force la découverte latest immédiate (pour debug/test)"""
         try:
-            logger.info("Force latest discovery triggered")
+            logger.debug("Force latest discovery triggered")
             await self._run_latest_tokens_discovery()
             return {
                 'status': 'success',
@@ -1396,12 +1622,12 @@ class IntelligentPollingManager:
                 pass
         
         await self.httpx_client.aclose()
-        logger.info("Polling manager shutdown complete")
+        logger.debug("Polling manager shutdown complete")
 
     async def _run_latest_tokens_discovery(self):
         """Exécute la découverte via l'endpoint /coins/latest"""
         try:
-            logger.info("🔥 Running LATEST tokens discovery...")
+            logger.debug("🔥 Running LATEST tokens discovery...")
             
             # Récupérer la limite depuis la config
             discovery_limit = getattr(settings, 'latest_discovery_limit', 20)  # Plus petit car plus fréquent
@@ -1411,7 +1637,7 @@ class IntelligentPollingManager:
             
             # Traitement des résultats
             if result['tokens_discovered'] > 0:
-                logger.info(f"🎯 LATEST Discovery: {result['tokens_discovered']} new tokens found!")
+                logger.debug(f"🎯 LATEST Discovery: {result['tokens_discovered']} new tokens found!")
                 
                 # Analyser les créateurs des nouveaux tokens est déjà fait dans la méthode
                 # Mettre à jour les statistiques
@@ -1443,7 +1669,7 @@ class IntelligentPollingManager:
     async def _run_general_api_discovery(self):
         """Exécute la découverte générale via l'API pump.fun"""
         try:
-            logger.info("📡 Running general API discovery...")
+            logger.debug("📡 Running general API discovery...")
             
             # Récupérer la limite depuis la config
             discovery_limit = getattr(settings, 'api_discovery_limit', 50)
@@ -1453,14 +1679,14 @@ class IntelligentPollingManager:
             
             # Traitement des résultats
             if result['tokens_discovered'] > 0:
-                logger.info(f"📊 General Discovery: {result['tokens_discovered']} new tokens found")
+                logger.debug(f"📊 General Discovery: {result['tokens_discovered']} new tokens found")
                 
                 # Analyser les créateurs des nouveaux tokens
                 for token in result['new_tokens']:
                     try:
                         # Analyse synchrone du créateur
                         creator_analyzer.analyze_creator(token.creator)
-                        logger.info(f"Creator analyzed for general token: {token.address}")
+                        logger.debug(f"Creator analyzed for general token: {token.address}")
                     except Exception as e:
                         logger.error(f"Error analyzing creator {token.creator}: {e}")
                 
@@ -1488,7 +1714,7 @@ class IntelligentPollingManager:
     async def _priority_enrich_token(self, token_address: str):
         """Enrichissement prioritaire pour les nouveaux tokens découverts"""
         try:
-            logger.info(f"🚀 Priority enriching new token: {token_address[:10]}...")
+            logger.debug(f"🚀 Priority enriching new token: {token_address[:10]}...")
             
             # Récupérer le token depuis la DB
             token_obj = db.get_token_by_address(token_address)
@@ -1524,7 +1750,7 @@ class IntelligentPollingManager:
                 if pumpfun_data:
                     success = db.update_token_pumpfun_data(token_address, pumpfun_data)
                     if success:
-                        logger.info(f"✅ Priority enriched: {token_address[:10]}... with progress: {pumpfun_data.get('bonding_curve_progress', 'N/A')}")
+                        logger.debug(f"✅ Priority enriched: {token_address[:10]}... with progress: {pumpfun_data.get('bonding_curve_progress', 'N/A')}")
                 
                 # Mettre à jour rugcheck
                 if rugcheck_data:
@@ -1539,7 +1765,7 @@ class IntelligentPollingManager:
         self.daily_stats['latest_discovery_calls'] += 1
         
         if tokens_discovered > 0:
-            logger.info(f"📈 Daily LATEST discovery stats: {self.daily_stats['latest_tokens_discovered']} tokens via {self.daily_stats['latest_discovery_calls']} calls")
+            logger.debug(f"📈 Daily LATEST discovery stats: {self.daily_stats['latest_tokens_discovered']} tokens via {self.daily_stats['latest_discovery_calls']} calls")
 
     def _update_daily_stats_general_discovery(self, tokens_discovered: int):
         """Met à jour les statistiques pour la découverte générale"""
@@ -1547,7 +1773,7 @@ class IntelligentPollingManager:
         self.daily_stats['general_discovery_calls'] += 1
         
         if tokens_discovered > 0:
-            logger.info(f"📊 Daily general discovery stats: {self.daily_stats['general_tokens_discovered']} tokens via {self.daily_stats['general_discovery_calls']} calls")
+            logger.debug(f"📊 Daily general discovery stats: {self.daily_stats['general_tokens_discovered']} tokens via {self.daily_stats['general_discovery_calls']} calls")
 
     async def _poll_transactions_for_purchases_only_safe(self) -> bool:
         """Version sécurisée du polling pour achats uniquement"""
@@ -1565,7 +1791,7 @@ class IntelligentPollingManager:
             lookback_minutes = max(self.current_polling_interval / 60 * 1.2, 3)
             since_time = datetime.now() - timedelta(minutes=lookback_minutes)
             
-            logger.info(f"Polling transactions for purchases only since {since_time.isoformat()}")
+            logger.debug(f"Polling transactions for purchases only since {since_time.isoformat()}")
             
             # Récupérer les transactions pump.fun récentes
             transactions = await self._get_recent_pumpfun_transactions(since_time)
@@ -1583,11 +1809,11 @@ class IntelligentPollingManager:
                     self.processed_signatures.add(tx.signature)
             
             if not new_transactions:
-                logger.info(f"Found {len(transactions)} transactions but all already processed")
+                logger.debug(f"Found {len(transactions)} transactions but all already processed")
                 self.recent_activity_levels.append(0)
                 return
             
-            logger.info(f"Processing {len(new_transactions)} new transactions (purchases only)")
+            logger.debug(f"Processing {len(new_transactions)} new transactions (purchases only)")
             
             self.recent_activity_levels.append(len(new_transactions))
             self.last_activity_time = datetime.now()
@@ -1605,7 +1831,7 @@ class IntelligentPollingManager:
 
     async def _process_transaction_batch_purchases_only(self, transactions: List[HeliusTransaction]):
         """Traite un lot de transactions pour achats uniquement"""
-        logger.info(f"Processing batch of {len(transactions)} transactions (purchases only)")
+        logger.debug(f"Processing batch of {len(transactions)} transactions (purchases only)")
         
         purchases_detected = 0
         
@@ -1633,7 +1859,7 @@ class IntelligentPollingManager:
         
         # Logs de résumé
         if purchases_detected > 0:
-            logger.info(f"Batch processed: {purchases_detected} purchases detected")
+            logger.debug(f"Batch processed: {purchases_detected} purchases detected")
             
             # Déclencher la mise à jour des scores
             asyncio.create_task(self._trigger_scoring_update())
@@ -1698,7 +1924,7 @@ class IntelligentPollingManager:
             lookback_minutes = max(self.current_polling_interval / 60 * 1.2, 3)  # 20% de marge
             since_time = datetime.now() - timedelta(minutes=lookback_minutes)
             
-            logger.info(f"Polling transactions since {since_time.isoformat()} (lookback: {lookback_minutes:.1f}min)")
+            logger.debug(f"Polling transactions since {since_time.isoformat()} (lookback: {lookback_minutes:.1f}min)")
             
             # Récupérer les transactions pump.fun récentes
             transactions = await self._get_recent_pumpfun_transactions(since_time)
@@ -1718,11 +1944,11 @@ class IntelligentPollingManager:
                     logger.debug(f"Duplicate transaction filtered: {tx.signature[:20]}...")
             
             if not new_transactions:
-                logger.info(f"Found {len(transactions)} transactions but all already processed")
+                logger.debug(f"Found {len(transactions)} transactions but all already processed")
                 self.recent_activity_levels.append(0)
                 return
             
-            logger.info(f"Processing {len(new_transactions)} new transactions")
+            logger.debug(f"Processing {len(new_transactions)} new transactions")
             
             # Debug: analyser les transactions
             pumpfun_count = 0
@@ -1730,9 +1956,9 @@ class IntelligentPollingManager:
                 has_pumpfun = any(inst.programId == self.pumpfun_program_id for inst in tx.instructions)
                 if has_pumpfun:
                     pumpfun_count += 1
-                    logger.info(f"🎯 Pump.fun transaction: {tx.signature[:20]}... - Type: {tx.type}")
+                    logger.debug(f"🎯 Pump.fun transaction: {tx.signature[:20]}... - Type: {tx.type}")
             
-            logger.info(f"📊 Transactions with pump.fun instructions: {pumpfun_count}/{len(new_transactions)}")
+            logger.debug(f"📊 Transactions with pump.fun instructions: {pumpfun_count}/{len(new_transactions)}")
             
             self.recent_activity_levels.append(len(new_transactions))
             self.last_activity_time = datetime.now()
@@ -1757,7 +1983,7 @@ class IntelligentPollingManager:
         
         for attempt in range(max_retries):
             try:
-                logger.info(f"🔍 Attempt {attempt + 1}/{max_retries} to fetch pump.fun transactions")
+                logger.debug(f"🔍 Attempt {attempt + 1}/{max_retries} to fetch pump.fun transactions")
                 
                 # OPTIMISATION: Un seul appel par polling cycle
                 url = f"{self.helius_rpc_url}/?api-key={self.helius_api_key}"
@@ -1775,23 +2001,23 @@ class IntelligentPollingManager:
                     ]
                 }
                 
-                logger.info(f"📤 Sending request to Helius:")
-                logger.info(f"   URL: {url}")
-                logger.info(f"   Payload: {json.dumps(payload, indent=2)}")
+                logger.debug(f"📤 Sending request to Helius:")
+                logger.debug(f"   URL: {url}")
+                logger.debug(f"   Payload: {json.dumps(payload, indent=2)}")
                 
                 # Utiliser un timeout plus court et retry
                 async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=10.0)) as client:
                     response = await client.post(url, json=payload)
                     
-                    logger.info(f"📥 Response from Helius:")
-                    logger.info(f"   Status: {response.status_code}")
-                    logger.info(f"   Headers: {dict(response.headers)}")
+                    logger.debug(f"📥 Response from Helius:")
+                    logger.debug(f"   Status: {response.status_code}")
+                    logger.debug(f"   Headers: {dict(response.headers)}")
                     
                     response.raise_for_status()
                 
                 data = response.json()
-                logger.info(f"📋 Response data:")
-                logger.info(f"   Raw response: {json.dumps(data, indent=2)}")
+                logger.debug(f"📋 Response data:")
+                logger.debug(f"   Raw response: {json.dumps(data, indent=2)}")
                 
                 if 'error' in data:
                     logger.error(f"❌ Helius API error: {data['error']}")
@@ -1805,15 +2031,15 @@ class IntelligentPollingManager:
                     return []
                 
                 if not data['result']:
-                    logger.info(f"ℹ️ Empty result - no signatures found for pump.fun program")
+                    logger.debug(f"ℹ️ Empty result - no signatures found for pump.fun program")
                     return []
                 
                 signatures = data['result']
-                logger.info(f"📊 Found {len(signatures)} signatures for pump.fun program")
+                logger.debug(f"📊 Found {len(signatures)} signatures for pump.fun program")
                 
                 # Log détails des signatures
                 for i, sig_info in enumerate(signatures[:3]):  # Log les 3 premières
-                    logger.info(f"   Signature {i+1}: {json.dumps(sig_info, indent=4)}")
+                    logger.debug(f"   Signature {i+1}: {json.dumps(sig_info, indent=4)}")
                 
                 # OPTIMISATION: Traiter seulement les 5 plus récentes
                 recent_signatures = signatures[:5]  # RÉDUIT drastiquement
@@ -1826,8 +2052,8 @@ class IntelligentPollingManager:
                         signature = sig_info['signature']
                         block_time = sig_info.get('blockTime')
                         
-                        logger.info(f"🔍 Processing signature: {signature}")
-                        logger.info(f"   Block time: {block_time}")
+                        logger.debug(f"🔍 Processing signature: {signature}")
+                        logger.debug(f"   Block time: {block_time}")
                         
                         if not block_time:
                             logger.warning(f"   ⚠️ No block time for signature {signature[:20]}...")
@@ -1837,25 +2063,25 @@ class IntelligentPollingManager:
                         tx_time = datetime.fromtimestamp(block_time)
                         time_diff = datetime.now() - tx_time
                         
-                        logger.info(f"   Transaction time: {tx_time.isoformat()}")
-                        logger.info(f"   Time diff: {time_diff.total_seconds():.1f} seconds ago")
-                        logger.info(f"   Since time: {since_time.isoformat()}")
-                        logger.info(f"   In window: {tx_time >= since_time}")
+                        logger.debug(f"   Transaction time: {tx_time.isoformat()}")
+                        logger.debug(f"   Time diff: {time_diff.total_seconds():.1f} seconds ago")
+                        logger.debug(f"   Since time: {since_time.isoformat()}")
+                        logger.debug(f"   In window: {tx_time >= since_time}")
                         
                         if tx_time >= since_time:
                             recent_sigs.append(signature)
-                            logger.info(f"   ✅ Added to recent signatures")
+                            logger.debug(f"   ✅ Added to recent signatures")
                         else:
-                            logger.info(f"   ❌ Too old, skipped")
+                            logger.debug(f"   ❌ Too old, skipped")
                     
-                    logger.info(f"📈 Processing {len(recent_sigs)} recent signatures")
+                    logger.debug(f"📈 Processing {len(recent_sigs)} recent signatures")
                     
                     # Récupérer les détails des transactions récentes (max 3)
                     for signature in recent_sigs[:3]:  # LIMITE à 3 max
-                        logger.info(f"🔍 Fetching transaction details for: {signature[:20]}...")
+                        logger.debug(f"🔍 Fetching transaction details for: {signature[:20]}...")
                         tx_detail = await self._get_transaction_details_with_retry(signature, max_retries=2)
                         if tx_detail:
-                            logger.info(f"   ✅ Transaction details retrieved")
+                            logger.debug(f"   ✅ Transaction details retrieved")
                             transactions.append(tx_detail)
                         else:
                             logger.warning(f"   ❌ Failed to get transaction details")
@@ -1865,7 +2091,7 @@ class IntelligentPollingManager:
                 if transactions:
                     self.system_monitor.record_helius_call('getTransaction', 10 * len(transactions))
 
-                logger.info(f"✅ Retrieved {len(transactions)} pump.fun transactions")
+                logger.debug(f"✅ Retrieved {len(transactions)} pump.fun transactions")
                 
                 return transactions
                 

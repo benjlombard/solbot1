@@ -35,7 +35,7 @@ async def get_pump_progress_correct(
     Solution corrigée utilisant la vraie structure de données Pump.fun
     Basée sur https://gist.github.com/rubpy/6c57e9d12acd4b6ed84e9f205372631d
     """
-    logger.info(f"Getting progress for: {token_address}")
+    logger.debug(f"Getting progress for: {token_address}")
     
     try:
         # 1. Calculer ou utiliser l'adresse de bonding curve
@@ -44,7 +44,7 @@ async def get_pump_progress_correct(
         else:
             bonding_curve_address = get_bonding_curve_address(token_address)
         
-        logger.info(f"Bonding curve address: {bonding_curve_address}")
+        logger.debug(f"Bonding curve address: {bonding_curve_address}")
         
         # 2. Récupérer les données on-chain
         rpc_url = f"https://mainnet.helius-rpc.com/?api-key={helius_api_key}"
@@ -95,12 +95,12 @@ async def get_pump_progress_correct(
                                     token_total_supply = struct.unpack('<Q', raw_data[0x28:0x30])[0]      # 40-48
                                     complete = struct.unpack('<?', raw_data[0x30:0x31])[0]               # 48-49
                                     
-                                    logger.info(f"Bonding curve data for {token_address}:")
-                                    logger.info(f"  Virtual token reserves: {virtual_token_reserves:,}")
-                                    logger.info(f"  Virtual SOL reserves: {virtual_sol_reserves:,}")
-                                    logger.info(f"  Real token reserves: {real_token_reserves:,}")
-                                    logger.info(f"  Real SOL reserves: {real_sol_reserves:,}")
-                                    logger.info(f"  Complete: {complete}")
+                                    logger.debug(f"Bonding curve data for {token_address}:")
+                                    logger.debug(f"  Virtual token reserves: {virtual_token_reserves:,}")
+                                    logger.debug(f"  Virtual SOL reserves: {virtual_sol_reserves:,}")
+                                    logger.debug(f"  Real token reserves: {real_token_reserves:,}")
+                                    logger.debug(f"  Real SOL reserves: {real_sol_reserves:,}")
+                                    logger.debug(f"  Complete: {complete}")
                                     
                                     # Calcul du progrès selon la formule officielle Pump.fun
                                     # Source: Documentation et reverse engineering
@@ -121,11 +121,11 @@ async def get_pump_progress_correct(
                                     # Utiliser la méthode virtual par défaut
                                     final_progress = progress_virtual
                                     
-                                    logger.info(f"Progress calculation for {token_address}:")
-                                    logger.info(f"  Tokens sold (virtual): {tokens_sold_virtual:,.0f}")
-                                    logger.info(f"  Progress (virtual method): {progress_virtual:.2f}%")
-                                    logger.info(f"  Progress (real method): {progress_real:.2f}%")
-                                    logger.info(f"  Final progress: {final_progress:.2f}%")
+                                    logger.debug(f"Progress calculation for {token_address}:")
+                                    logger.debug(f"  Tokens sold (virtual): {tokens_sold_virtual:,.0f}")
+                                    logger.debug(f"  Progress (virtual method): {progress_virtual:.2f}%")
+                                    logger.debug(f"  Progress (real method): {progress_real:.2f}%")
+                                    logger.debug(f"  Final progress: {final_progress:.2f}%")
                                     
                                     # Calculer le prix et market cap
                                     price_sol = 0
@@ -137,8 +137,8 @@ async def get_pump_progress_correct(
                                         price_usd = price_sol * 180  # Approximation SOL = $180
                                         market_cap = price_usd * 1_000_000_000  # 1B total supply
                                         
-                                        logger.info(f"  Price: {price_sol:.10f} SOL (${price_usd:.10f})")
-                                        logger.info(f"  Market Cap: ${market_cap:,.2f}")
+                                        logger.debug(f"  Price: {price_sol:.10f} SOL (${price_usd:.10f})")
+                                        logger.debug(f"  Market Cap: ${market_cap:,.2f}")
                                     
                                     return {
                                         'bonding_curve_progress': round(final_progress, 2),
@@ -175,7 +175,7 @@ async def get_pump_progress_correct(
     
     # Fallback: essayer l'API Pump.fun
     try:
-        logger.info(f"Fallback to Pump.fun API for {token_address}")
+        logger.debug(f"Fallback to Pump.fun API for {token_address}")
         
         async with aiohttp.ClientSession() as session:
             url = f"https://frontend-api-v3.pump.fun/coins/{token_address}"
@@ -189,14 +189,14 @@ async def get_pump_progress_correct(
                     progress = data.get('bonding_curve_progress')
                     
                     if progress is not None:
-                        logger.info(f"Got progress from Pump.fun API: {progress}%")
+                        logger.debug(f"Got progress from Pump.fun API: {progress}%")
                         return {
                             'bonding_curve_progress': float(progress),
                             'success': True,
                             'source': 'pumpfun_api'
                         }
                 elif response.status == 404:
-                    logger.info(f"Token {token_address} not found on Pump.fun")
+                    logger.debug(f"Token {token_address} not found on Pump.fun")
                     return {
                         'bonding_curve_progress': 0.0,
                         'success': True,

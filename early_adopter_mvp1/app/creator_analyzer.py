@@ -92,7 +92,7 @@ class CreatorAnalyzer:
             logger.debug(f"Using cached analysis for creator {creator_address[:10]}...")
             return self._cache[creator_address]
         
-        logger.info(f"🔍 Analyzing creator performance: {creator_address[:10]}...")
+        logger.debug(f"🔍 Analyzing creator performance: {creator_address[:10]}...")
         
         # Récupérer les tokens du créateur
         tokens = self._get_creator_tokens(creator_address)
@@ -114,7 +114,7 @@ class CreatorAnalyzer:
         self._cache[creator_address] = performance
         self._cache_expiry[creator_address] = datetime.now() + timedelta(minutes=self._cache_ttl_minutes)
         
-        logger.info(f"✅ Creator analysis completed: {creator_address[:10]} - "
+        logger.debug(f"✅ Creator analysis completed: {creator_address[:10]} - "
                    f"Score: {performance.reputation_score:.1f} - "
                    f"Success Rate: {performance.success_rate*100:.1f}%")
         
@@ -766,7 +766,7 @@ class CreatorAnalyzer:
             "newly_blacklisted": []
         }
         
-        logger.info(f"🔄 Starting bulk update for {len(creator_addresses)} creators...")
+        logger.debug(f"🔄 Starting bulk update for {len(creator_addresses)} creators...")
         
         for i, creator_address in enumerate(creator_addresses, 1):
             try:
@@ -796,7 +796,7 @@ class CreatorAnalyzer:
                 
                 # Log du progrès
                 if i % 10 == 0:
-                    logger.info(f"Progress: {i}/{len(creator_addresses)} creators processed")
+                    logger.debug(f"Progress: {i}/{len(creator_addresses)} creators processed")
                     
             except Exception as e:
                 logger.error(f"Error updating creator {creator_address}: {e}")
@@ -806,7 +806,7 @@ class CreatorAnalyzer:
         results["top_creators"].sort(key=lambda x: x["reputation_score"], reverse=True)
         results["top_creators"] = results["top_creators"][:10]
         
-        logger.info(f"✅ Bulk update completed: {results['updated']}/{results['total_creators']} updated, "
+        logger.debug(f"✅ Bulk update completed: {results['updated']}/{results['total_creators']} updated, "
                    f"{results['blacklisted']} blacklisted, {results['errors']} errors")
         
         return results
@@ -872,7 +872,7 @@ class CreatorAnalyzer:
         """Vide le cache des analyses"""
         self._cache.clear()
         self._cache_expiry.clear()
-        logger.info("Creator analyzer cache cleared")
+        logger.debug("Creator analyzer cache cleared")
 
 # Instance globale
 creator_analyzer = CreatorAnalyzer()
