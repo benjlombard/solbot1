@@ -16,6 +16,16 @@ import time
 import sys
 import base64
 
+try:
+    from .creator_analyzer import creator_analyzer, CreatorPerformance
+except (ImportError, ModuleNotFoundError):
+    # Fallback for running as a script
+    import sys
+    import os
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
+    from creator_analyzer import creator_analyzer, CreatorPerformance
+
+
 # Logging configuration
 logging.basicConfig(
     level=logging.INFO,
@@ -1009,6 +1019,21 @@ class SolanaTokenAnalyzer:
         creator_balance = 0
         if find_creator:
             creator, creator_balance = self.find_token_creator(mint_address)
+
+        creator_analysis = None
+        if creator and creator != "Unknown":
+            try:
+                logger.info(f"Analyzing creator's past performance: {creator}")
+                creator_analysis = creator_analyzer.analyze_creator(creator)
+                if creator_analysis and creator_analysis.total_tokens > 0:
+                    logger.info(f"Creator analysis found: {creator_analysis.total_tokens} tokens created previously.")
+                elif creator_analysis:
+                    logger.info(f"Creator has no previously created tokens on record.")
+
+            except Exception as e:
+                logger.error(f"Could not analyze creator {creator}: {e}")
+                # Ensure creator_analysis is None if analysis fails
+                creator_analysis = None
         
         if not creator:
             creator = "Unknown"
@@ -1042,6 +1067,7 @@ class SolanaTokenAnalyzer:
             "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
             "creator": creator,
             "creatorBalance": creator_balance,
+            "creator_analysis": asdict(creator_analysis) if creator_analysis else None,
             "token": asdict(token_info),
             "token_extensions": None,
             "tokenMeta": asdict(token_metadata) if token_metadata else {
@@ -1309,6 +1335,26 @@ def main():
             logger.info(f"Creator: {report['creator']}")
         else:
             logger.info("Creator: Not identified")
+
+        # Creator analysis summary
+        if report.get('creator_analysis'):
+            ca = report['creator_analysis']
+            logger.info("--- Creator Analysis ---")
+            logger.info(f"  Reputation Score: {ca.get('reputation_score', 0.0):.1f}/100 | Risk Score: {ca.get('risk_score', 0.0):.1f}/100")
+            
+            if ca.get('total_tokens', 0) > 0:
+                logger.info(f"  History: {ca['total_tokens']} tokens created since {datetime.fromisoformat(ca['first_token_date']).strftime('%Y-%m-%d') if ca.get('first_token_date') else 'N/A'}")
+                logger.info(f"  Success Rate: {ca.get('success_rate', 0.0)*100:.1f}% ({ca.get('successful_tokens', 0)} successful, {ca.get('failed_tokens', 0)} failed)")
+                logger.info(f"  Avg. ROI: {ca.get('avg_roi', 0.0):.2f}x | Avg. Survival: {ca.get('avg_survival_time', 0.0):.1f} hours")
+            
+            if ca.get('is_blacklisted'):
+                logger.warning(f"  BLACKLISTED: YES - Reason: {ca.get('blacklist_reason', 'N/A')}")
+            else:
+                logger.info(f"  Blacklisted: NO")
+
+            if ca.get('confidence_level') != 'INSUFFICIENT_DATA':
+                logger.info(f"  Analysis Confidence: {ca.get('confidence_level', 'N/A')}")
+            logger.info("------------------------")
         
         # Save output
         if args.output:
