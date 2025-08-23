@@ -85,7 +85,7 @@ async def get_pump_progress_correct(
                                     expected_discriminator = bytes([0x17, 0xb7, 0xf8, 0x37, 0x60, 0xd8, 0xac, 0x60])
                                     
                                     if discriminator != expected_discriminator:
-                                        logger.warning(f"Unexpected discriminator for {token_address}: {discriminator.hex()}")
+                                        logger.debug(f"Unexpected discriminator for {token_address}: {discriminator.hex()}")
                                     
                                     # Offsets corrects selon la structure Pump.fun
                                     virtual_token_reserves = struct.unpack('<Q', raw_data[0x08:0x10])[0]  # 8-16
@@ -160,11 +160,11 @@ async def get_pump_progress_correct(
                                     logger.error(f"Error decoding bonding curve data for {token_address}: {e}")
                                     logger.error(f"Data preview: {raw_data[:64].hex()}")
                             else:
-                                logger.warning(f"Insufficient data length for {token_address}: {len(raw_data)} bytes")
+                                logger.debug(f"Insufficient data length for {token_address}: {len(raw_data)} bytes")
                         else:
-                            logger.warning(f"No account data for bonding curve {bonding_curve_address}")
+                            logger.debug(f"No account data for bonding curve {bonding_curve_address}")
                     else:
-                        logger.warning(f"No account found for bonding curve {bonding_curve_address}")
+                        logger.debug(f"No account found for bonding curve {bonding_curve_address}")
                 else:
                     logger.error(f"RPC error {response.status} for {token_address}")
         
@@ -207,7 +207,7 @@ async def get_pump_progress_correct(
         logger.error(f"Pump.fun API fallback failed for {token_address}: {e}")
     
     # Fallback final: estimation conservative
-    logger.warning(f"All methods failed for {token_address}, using conservative estimate")
+    logger.debug(f"All methods failed for {token_address}, using conservative estimate")
     return {
         'bonding_curve_progress': 1.0,  # Estimation très conservative
         'success': False,

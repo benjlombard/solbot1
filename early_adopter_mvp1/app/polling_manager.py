@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Set
 from collections import defaultdict
 import json
+import os
 
 from .models import HeliusTransaction, HeliusInstruction, PumpToken, EarlyPurchase
 from .early_adopter_scorer import scorer
@@ -53,11 +54,34 @@ class PumpFunLatestTokensDiscovery:
                     logger.debug(f"📥 Response headers: {dict(response.headers)}")
                     if response.status == 200:
                         data = await response.json()
+
+                        # --- Fallback Logic ---
+                        # Vérifier si la réponse est un signe de blocage de l'API
+                        temp_token = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else {})
                         
-                        logger.debug(f"📊 Received response from latest endpoint")
+                        is_blocked = (
+                            temp_token.get('name') == 'h1.nu/17w1U' or
+                            temp_token.get('description') == 'create solana tokens for dirt cheap!'
+                        )
+
+                        if is_blocked:
+                            logger.warning("⚠️ Blocked by /coins/latest API. Attempting fallback to /coins?limit=1...")
+                            fallback_url = f"{self.base_url}/coins?offset=0&limit=1"
+                            async with session.get(fallback_url, headers=headers, timeout=30) as fallback_response:
+                                if fallback_response.status == 200:
+                                    data = await fallback_response.json()
+                                    logger.info("✅ Fallback to /coins?limit=1 successful.")
+                                else:
+                                    error_msg = f"Fallback API call to /coins?limit=1 failed with status {fallback_response.status}"
+                                    logger.error(error_msg)
+                                    result['errors'].append(error_msg)
+                                    return result # Quitter si le fallback échoue aussi
+                        # --- End of Fallback Logic ---
+                        
+                        logger.debug(f"📊 Received response from discovery endpoint")
                         logger.debug(f"📊 Response type: {type(data)}")
                         
-                        # L'endpoint /coins/latest retourne UN SEUL token, pas une liste
+                        # L'endpoint /coins/latest ou le fallback /coins peut retourner une liste ou un objet
                         tokens = []
                         
                         if isinstance(data, dict) and 'mint' in data:
@@ -971,61 +995,151 @@ class IntelligentPollingManager:
             self.last_general_discovery = datetime.now() + timedelta(minutes=5)
 
     async def _full_immediate_enrichment(self, token_address: str, creator_address: str, source: str = "UNKNOWN"):
-        """Enrichissement complet immédiat : Pump.fun + RugCheck + Analyse créateur"""
+        """
+        Enrichissement complet avec double appel RugCheck et logique de sélection de rapport.
+        """
+        logger.info(f"🔄 [{source}] Starting dual enrichment for {token_address[:8]}...")
+        logger.info(f"   Full token address: {token_address}")
+        
+        reports_dir = "rugcheck_reports"
+        os.makedirs(reports_dir, exist_ok=True)
+
+        rugcheck_before = None
+        rugcheck_after = None
+        
         try:
-            logger.info(f"🔄 Enriching {token_address[:8]}... (from {source})")
+            # --- Étape 1: Collecte des rapports RugCheck ---
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                # Premier appel RugCheck
+                logger.info(f"🔎 [{token_address[:8]}] Fetching initial RugCheck report...")
+                try:
+                    rugcheck_before = await self._enrich_single_token_rugcheck(session, token_address)
+                    if rugcheck_before:
+                        file_path = os.path.join(reports_dir, f"{token_address}_before.json")
+                        with open(file_path, 'w') as f: json.dump(rugcheck_before, f, indent=4)
+                        logger.info(f"📝 Saved 'before' report to {file_path}")
+                except Exception as e:
+                    logger.warning(f"⚠️ [{token_address[:8]}] Initial RugCheck call failed: {e}")
+
+                # Pause
+                logger.info(f"⏳ [{token_address[:8]}] Waiting 15 seconds for data to mature...")
+                await asyncio.sleep(15)
+
+                # Deuxième appel RugCheck
+                logger.info(f"🔎 [{token_address[:8]}] Fetching final RugCheck report...")
+                try:
+                    rugcheck_after = await self._enrich_single_token_rugcheck(session, token_address)
+                    if rugcheck_after:
+                        file_path = os.path.join(reports_dir, f"{token_address}_after.json")
+                        with open(file_path, 'w') as f: json.dump(rugcheck_after, f, indent=4)
+                        logger.info(f"📝 Saved 'after' report to {file_path}")
+                except Exception as e:
+                     logger.warning(f"⚠️ [{token_address[:8]}] Final RugCheck call failed: {e}")
+
+            # --- Étape 2: Sélection du rapport final basé sur les nouvelles règles ---
+            final_rugcheck_report = None
+            if rugcheck_before and rugcheck_after:
+                self._log_rugcheck_comparison(token_address, rugcheck_before, rugcheck_after)
+                score_before = rugcheck_before.get('score_normalised', 101)
+                score_after = rugcheck_after.get('score_normalised', 101)
+                if score_before <= score_after:
+                    final_rugcheck_report = rugcheck_before
+                    logger.info(f"⚖️ [{token_address[:8]}] Using 'before' report (Score: {score_before}) as it's lower or equal to 'after' (Score: {score_after}).")
+                else:
+                    final_rugcheck_report = rugcheck_after
+                    logger.info(f"⚖️ [{token_address[:8]}] Using 'after' report (Score: {score_after}) as it's lower than 'before' (Score: {score_before}).")
+            elif rugcheck_before:
+                final_rugcheck_report = rugcheck_before
+                logger.warning(f"⚠️ [{token_address[:8]}] Using 'before' report as 'after' report failed.")
+            elif rugcheck_after:
+                final_rugcheck_report = rugcheck_after
+                logger.warning(f"⚠️ [{token_address[:8]}] Using 'after' report as 'before' report failed.")
+            else:
+                logger.error(f"❌ [{token_address[:8]}] Both RugCheck calls failed. Storing score as -1.")
+                final_rugcheck_report = {"error": "Both RugCheck calls failed", "score_normalised": -1, "totalHolders": 0, "risks": []}
             
-            # 1. Snapshot
-            db.create_snapshot(token_address)
-            
-            # 2. Enrichissement parallèle
+            # --- Étape 3: Vérification de la liste noire ---
+            BLACKLIST_RISK = "Creator history of rugged tokens"
+            def check_for_blacklist(report):
+                if not report or not isinstance(report.get('risks'), list): return False
+                return any(isinstance(r, dict) and r.get('name') == BLACKLIST_RISK for r in report['risks'])
+
+            if check_for_blacklist(final_rugcheck_report):
+                logger.warning(f"🚨 BLACKLISTED: Token {token_address[:8]}... based on final selected report. Halting enrichment.")
+                db.update_token_pumpfun_data(token_address, {'is_blacklisted': True})
+                db.upsert_rugcheck_report(token_address, final_rugcheck_report)
+                return
+
+            # --- Étape 4: Enrichissement et mise à jour (si pas blacklisté) ---
+            logger.info(f"✨ [{token_address[:8]}] Proceeding with full enrichment.")
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                 token_obj = db.get_token_by_address(token_address)
-                
-                tasks = [
+                pumpfun_data, onchain_data = await asyncio.gather(
                     self._enrich_single_token_pumpfun(session, token_address),
-                    self._enrich_single_token_onchain(token_address, token_obj),
-                    self._enrich_single_token_rugcheck(session, token_address)
-                ]
-                
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Traitement des résultats
-                pumpfun_data = results[0] if isinstance(results[0], dict) else {}
-                onchain_data = results[1] if isinstance(results[1], dict) else {}
-                rugcheck_data = results[2] if isinstance(results[2], dict) else None
-                
-                # Fusion des données
-                if onchain_data.get('success'):
-                    pumpfun_data.update({
-                        'bonding_curve_progress': onchain_data.get('bonding_curve_progress', 0),
-                        'virtual_sol_reserves': onchain_data.get('virtual_sol_reserves', 0),
-                        'virtual_token_reserves': onchain_data.get('virtual_token_reserves', 0)
-                    })
-                
-                # Mise à jour base de données
-                enrichment_status = []
-                
-                if pumpfun_data:
-                    if db.update_token_pumpfun_data(token_address, pumpfun_data):
-                        progress = pumpfun_data.get('bonding_curve_progress', 'N/A')
-                        enrichment_status.append(f"Pump:{progress}%")
-                
-                if rugcheck_data:
-                    db.upsert_rugcheck_report(token_address, rugcheck_data)
-                    score = rugcheck_data.get('score_normalised', 'N/A')
-                    enrichment_status.append(f"Rug:{score}")
-            
-            # 3. Analyse créateur (asynchrone)
+                    self._enrich_single_token_onchain(token_address, token_obj)
+                )
+
+            pumpfun_data = pumpfun_data or {}
+            onchain_data = onchain_data or {}
+
+            if onchain_data.get('success'):
+                pumpfun_data.update({
+                    'bonding_curve_progress': onchain_data.get('bonding_curve_progress', 0),
+                    'virtual_sol_reserves': onchain_data.get('virtual_sol_reserves', 0),
+                    'virtual_token_reserves': onchain_data.get('virtual_token_reserves', 0)
+                })
+
+            final_score = final_rugcheck_report.get('score_normalised', -1)
+            final_holders_count = final_rugcheck_report.get('totalHolders', 0)
+            pumpfun_data['holders_count'] = final_holders_count if final_holders_count is not None else 0
+            pumpfun_data['rugcheck_score'] = final_score
+
+            if pumpfun_data:
+                db.update_token_pumpfun_data(token_address, pumpfun_data)
+                logger.info(f"💾 [{token_address[:8]}] Updated Pump.fun data in DB.")
+
+            db.upsert_rugcheck_report(token_address, final_rugcheck_report)
+            logger.info(f"💾 [{token_address[:8]}] Upserted final RugCheck report in DB.")
+
+            db.create_snapshot(token_address)
+            logger.info(f"📸 [{token_address[:8]}] Created database snapshot after enrichment.")
+
             asyncio.create_task(self._analyze_creator_async(creator_address, token_address))
             
-            # Log de succès
-            pump_progress = pumpfun_data.get('bonding_curve_progress', 0)
-            rug_score = rugcheck_data.get('score_normalised', 0) if rugcheck_data else 0
-            logger.info(f"✅ Enriched {token_address[:8]}: Pump {pump_progress:.2f}%, Rug {rug_score:.0f}")
-            
+            logger.info(f"✅ [{token_address[:8]}] Enriched: Pump {pumpfun_data.get('bonding_curve_progress', 0):.2f}%, Rug {final_score}, Holders {final_holders_count}")
+
         except Exception as e:
-            logger.error(f"❌ Enrichment failed for {token_address[:8]}: {e}")
+            logger.error(f"💥 CRITICAL Enrichment failed for {token_address[:8]}: {e}", exc_info=True)
+
+    def _log_rugcheck_comparison(self, token_address: str, before: Dict, after: Dict):
+        """Logue une comparaison détaillée entre deux rapports RugCheck."""
+        try:
+            score_before = before.get('score_normalised', 'N/A')
+            score_after = after.get('score_normalised', 'N/A')
+            
+            holders_before = before.get('totalHolders', 'N/A')
+            holders_after = after.get('totalHolders', 'N/A')
+            
+            risks_before_list = before.get('risks', [])
+            risks_after_list = after.get('risks', [])
+            
+            # Extraire les noms des risques pour l'affichage, en s'assurant qu'ils sont des chaînes
+            risks_before_names = sorted([str(r.get('name')) for r in risks_before_list if isinstance(r, dict)])
+            risks_after_names = sorted([str(r.get('name')) for r in risks_after_list if isinstance(r, dict)])
+
+            # Construire le message de log détaillé pour éviter les problèmes de formatage
+            log_msg_parts = [
+                f"📊 [{token_address[:8]}] RugCheck 15s Compare:",
+                f"Score: {score_before} to {score_after}",
+                f"Holders: {holders_before} to {holders_after}",
+                f"Risks Before: {risks_before_names or '[]'}",
+                f"Risks After: {risks_after_names or '[]'}"
+            ]
+            
+            logger.info(" | ".join(log_msg_parts))
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not log RugCheck comparison for {token_address[:8]}: {e}")
 
     async def _analyze_creator_async(self, creator_address: str, token_address: str = ""):
         """Analyse le créateur de manière asynchrone"""

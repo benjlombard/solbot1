@@ -31,6 +31,9 @@ class RugCheckClient:
         if self.system_monitor:
             self.system_monitor.record_api_call('rugcheck')
 
+        headers = {}
+        headers['Authorization'] = 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NTYxMzQ0NzUsImlkIjoiRWdlQTFoWkg2djdDUXZOcmRLTXlSTkVNRlVnWW5iaXJ2YVBSNHJNVXdhS3cifQ.dGe-b-NgnP-aJnHHzW_pH04jDqfg1GfAozi_c4VZDE4'
+
         url = f"{self.base_url}/tokens/{token_address}/report"
         try:
             async with session.get(url, timeout=45.0) as response:

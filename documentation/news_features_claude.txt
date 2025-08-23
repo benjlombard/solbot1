@@ -1,6 +1,8 @@
 est-ce que ce programme est suffisant pour trader des cryptos très récente donc à un prix très bas et qui vont exploser et donc me faire générer des gros gains ?
 Ou est-ce qu'il faut aller plus loin et ajouter des fonctionnalités ?
 
+https://hamzabenjeddi.com/projects/part-1-how-i-reverse-engineered-the-pump-fun-buy-api/
+
 Mois j'avais pensé à 3 fonctionnalités supplémentaire : 
 - Comme j'historise les données et que j'arrive à détecter après coup les rug pull, je pourrais faire un modèle de machine learning pour essayer de prédire les rug pull avant que
 cela arrive et ne pas investir sur ces cryptos. Je peux analyser les données de rugcheck et aussi les transactions des wallets des créateurs pour construire ce modèle ML et si tu as d'autres idées je suis preneur.

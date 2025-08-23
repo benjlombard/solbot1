@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
 import json
+import os
 
 from app.models import PumpToken, EarlyPurchase, EarlyAdopter, TokenOutcome, OutcomeType
 from app.config import settings
@@ -559,9 +560,35 @@ class DatabaseManager:
             logger.error(f"Error updating token {token_address} with comprehensive pump.fun data: {e}", exc_info=True)
             return False
 
-    def upsert_rugcheck_report(self, token_address: str, report: Dict[str, Any]) -> bool:
-        """Insère ou met à jour un rapport de rugcheck."""
+    def upsert_rugcheck_report(self, token_address: str, report: Dict[str, Any], report_pre: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Insère ou met à jour un rapport de rugcheck.
+        Sauvegarde le rapport brut dans un fichier JSON si l'appel API a réussi.
+        """
         try:
+            # Save the raw report to a JSON file only if the API call was successful
+            if 'error' not in report:
+                try:
+                    reports_dir = 'rugcheck_reports'
+                    os.makedirs(reports_dir, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    
+                    # Save the main (after) report
+                    filepath = os.path.join(reports_dir, f"{token_address}_{timestamp}_after.json")
+                    with open(filepath, 'w') as f:
+                        json.dump(report, f, indent=2)
+                    logger.info(f"Rugcheck report for {token_address} saved to {filepath}")
+
+                    # Save the pre-delay report if it exists
+                    if report_pre and 'error' not in report_pre:
+                        filepath_pre = os.path.join(reports_dir, f"{token_address}_{timestamp}_before.json")
+                        with open(filepath_pre, 'w') as f:
+                            json.dump(report_pre, f, indent=2)
+                        logger.info(f"Pre-delay Rugcheck report for {token_address} saved to {filepath_pre}")
+
+                except Exception as e:
+                    logger.error(f"Failed to save rugcheck report to file for {token_address}: {e}")
+
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
@@ -571,6 +598,8 @@ class DatabaseManager:
                 top_holders = json.dumps(report.get('topHolders', []))
                 raw_report = json.dumps(report)
                 
+                logger.info(f"Extracted score for {token_address}: {score}")
+
                 cursor.execute("""
                     INSERT OR REPLACE INTO rugcheck_reports 
                     (token_address, score, is_rugged, risks, top_holders, raw_report, updated_at)

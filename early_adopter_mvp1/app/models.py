@@ -44,6 +44,8 @@ class PumpToken(BaseModel):
     creator: str
     created_at: datetime
     market_cap_discovery: Optional[float] = None
+    # NOTE: A corresponding 'is_blacklisted' column (BOOLEAN, default FALSE) needs to be added to the 'pump_tokens' table in the database.
+    is_blacklisted: bool = False
 
 class EarlyPurchase(BaseModel):
     signature: str

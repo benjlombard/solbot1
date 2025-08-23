@@ -12,6 +12,8 @@ id.json
 keypair.json
 wallet.json
 
+early_adopter_mvp1/rugcheck_reports/
+
 # Database files
 *.db
 *.db-wal

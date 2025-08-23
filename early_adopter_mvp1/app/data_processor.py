@@ -942,6 +942,17 @@ class IntelligentPollingManager:
                 
                 if rugcheck_report:
                     db.upsert_rugcheck_report(token_address, rugcheck_report)
+                    
+                    # Extract totalHolders and update pump_tokens
+                    total_holders = rugcheck_report.get('totalHolders')
+                    if total_holders is not None:
+                        logger.info(f"Found {total_holders} holders for {token_address}. Updating.")
+                        # Run synchronous DB update in an executor to avoid blocking the event loop
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, db.update_token_holders_count, token_address, total_holders)
+                    else:
+                        logger.warning(f"'totalHolders' not found in rugcheck report for {token_address}.")
+
             
             logger.info(f"Enrichment task complete. Updated {updated_count}/{len(tokens_to_enrich)} tokens.")
 
