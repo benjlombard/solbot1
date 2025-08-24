@@ -30,10 +30,8 @@ except ImportError:
         print("✅ Variables d'environnement chargées manuellement")
 
 # Configuration du logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from .logger_config import setup_logging
+setup_logging()
 
 logger = logging.getLogger(__name__)
 

@@ -17,15 +17,10 @@ from .config import settings
 from .pump_fun_client import PumpFunClient
 # Ajoutez cette ligne avec les autres imports
 from .creator_analyzer import creator_analyzer
-# Configuration du logging AVANT d'importer pump_fun_client
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('pumpfun_tracker.log'),
-        logging.StreamHandler()
-    ]
-)
+from .logger_config import setup_logging
+
+# Configuration du logging
+setup_logging()
 
 logger = logging.getLogger(__name__)
 

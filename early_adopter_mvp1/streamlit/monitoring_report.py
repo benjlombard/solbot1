@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import sys
 import os
 from collections import defaultdict
+import json
 
 # Add the parent directory to the path to import the database module
 # This is a bit of a hack, a better solution would be to have a proper package structure
@@ -65,13 +66,23 @@ for i, (label, minutes) in enumerate(intervals.items()):
     with cols[i]:
         st.metric(label=label, value=count)
 
-# --- Non-Blacklisted New Tokens ---
-st.header("✅ Non-Blacklisted New Tokens")
+# --- Non-Blacklisted New Tokens (Score >= 1) ---
+st.header("✅ Nouveaux Tokens Non-Blacklistés (Score Valide >= 1)")
 cols = st.columns(len(intervals))
 
 for i, (label, minutes) in enumerate(intervals.items()):
     since_time = get_time_since(minutes)
-    count = db.get_non_blacklisted_tokens_count_since(since_time)
+    count = db.get_non_blacklisted_tokens_count_with_valid_score_since(since_time)
+    with cols[i]:
+        st.metric(label=label, value=count)
+
+# --- Non-Blacklisted New Tokens (API Error) ---
+st.header("⚠️ Nouveaux Tokens Non-Blacklistés (Erreur API)")
+cols = st.columns(len(intervals))
+
+for i, (label, minutes) in enumerate(intervals.items()):
+    since_time = get_time_since(minutes)
+    count = db.get_non_blacklisted_tokens_count_with_api_error_since(since_time)
     with cols[i]:
         st.metric(label=label, value=count)
 
@@ -132,3 +143,59 @@ else:
                 lambda x: ['background-color: #ffcccc' if x.Blacklisted else '' for i in x],
                 axis=1
             ), use_container_width=True)
+
+st.divider()
+
+# --- Non-Blacklisted Token Details ---
+st.header("🔍 Non-Blacklisted Token Details")
+
+token_details = db.get_non_blacklisted_token_details()
+
+if not token_details:
+    st.warning("No non-blacklisted tokens with rugcheck reports found.")
+else:
+    df_details = pd.DataFrame(token_details)
+
+    # Process data for display
+    def format_risks(risks_json):
+        if not risks_json:
+            return "No risks"
+        try:
+            risks_list = json.loads(risks_json)
+            return ", ".join([r.get('name', 'Unknown') for r in risks_list])
+        except (json.JSONDecodeError, TypeError):
+            return "Invalid risk format"
+
+    def format_holders(holders_json):
+        if not holders_json:
+            return "N/A"
+        try:
+            holders_list = json.loads(holders_json)
+            if not holders_list:
+                return "N/A"
+            top_5_pct = sum(h.get('percentage', 0) for h in holders_list[:5])
+            return f"Top 5: {top_5_pct:.2f}%"
+        except (json.JSONDecodeError, TypeError):
+            return "Invalid holder format"
+
+    df_details['risks_list'] = df_details['risks'].apply(format_risks)
+    df_details['holder_dist'] = df_details['top_holders'].apply(format_holders)
+    
+    # Format date
+    df_details['rugcheck_updated_at'] = pd.to_datetime(df_details['rugcheck_updated_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    df_display_details = df_details[[
+        'address', 'creator', 'score', 'risks_list', 
+        'holders_count', 'holder_dist', 'rugcheck_updated_at'
+    ]]
+    df_display_details.rename(columns={
+        'address': 'Token Address',
+        'creator': 'Creator',
+        'score': 'Rugcheck Score',
+        'risks_list': 'Risks',
+        'holders_count': 'Holders',
+        'holder_dist': 'Holder Distribution',
+        'rugcheck_updated_at': 'Rugcheck Updated At'
+    }, inplace=True)
+
+    st.dataframe(df_display_details, use_container_width=True)

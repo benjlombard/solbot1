@@ -489,7 +489,8 @@ class DatabaseManager:
     def get_tokens_to_enrich(self, limit: int = 50, update_interval_minutes: int = 5) -> List[str]:
         """
         Récupère une liste d'adresses de tokens qui ont besoin d'être enrichies.
-        Sélectionne les tokens qui n'ont pas été mis à jour dans l'intervalle de temps spécifié.
+        Sélectionne les tokens qui n'ont pas été mis à jour dans l'intervalle de temps spécifié
+        et qui ne sont pas blacklistés.
         """
         try:
             with self.get_connection() as conn:
@@ -498,7 +499,8 @@ class DatabaseManager:
                 interval_ago = (datetime.now() - timedelta(minutes=update_interval_minutes)).isoformat()
                 cursor.execute("""
                     SELECT address FROM pump_tokens
-                    WHERE last_updated_pumpfun IS NULL OR last_updated_pumpfun < ?
+                    WHERE (is_blacklisted = 0 OR is_blacklisted IS NULL)
+                    AND (last_updated_pumpfun IS NULL OR last_updated_pumpfun < ?)
                     ORDER BY created_at DESC
                     LIMIT ?
                 """, (interval_ago, limit))
@@ -779,17 +781,96 @@ class DatabaseManager:
             logger.error(f"Error getting creator token reports: {e}")
             return []
 
-    def get_non_blacklisted_tokens_count_since(self, since: datetime) -> int:
-        """Counts new non-blacklisted tokens since a given datetime."""
+    def get_non_blacklisted_tokens_count_with_valid_score_since(self, since: datetime) -> int:
+        """Counts new non-blacklisted tokens with a valid rugcheck score (>= 1) since a given datetime."""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM pump_tokens WHERE is_blacklisted = 0 AND row_created_at >= ?", (since.isoformat(),))
+                cursor.execute("""
+                    SELECT COUNT(pt.address)
+                    FROM pump_tokens pt
+                    JOIN rugcheck_reports rr ON pt.address = rr.token_address
+                    WHERE (pt.is_blacklisted = 0 OR pt.is_blacklisted IS NULL)
+                    AND pt.row_created_at >= ?
+                    AND rr.score >= 1
+                """, (since.isoformat(),))
                 count = cursor.fetchone()[0]
                 return count
         except Exception as e:
-            logger.error(f"Error counting non-blacklisted new tokens since {since}: {e}")
+            logger.error(f"Error counting non-blacklisted tokens with valid score: {e}")
             return 0
+
+    def get_non_blacklisted_tokens_count_with_api_error_since(self, since: datetime) -> int:
+        """Counts new non-blacklisted tokens with a rugcheck API error (score = -1) since a given datetime."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT COUNT(pt.address)
+                    FROM pump_tokens pt
+                    JOIN rugcheck_reports rr ON pt.address = rr.token_address
+                    WHERE (pt.is_blacklisted = 0 OR pt.is_blacklisted IS NULL)
+                    AND pt.row_created_at >= ?
+                    AND rr.score = -1
+                """, (since.isoformat(),))
+                count = cursor.fetchone()[0]
+                return count
+        except Exception as e:
+            logger.error(f"Error counting non-blacklisted tokens with API error: {e}")
+            return 0
+
+    def get_non_blacklisted_token_details(self) -> List[Dict[str, Any]]:
+        """
+        Retrieves detailed information for non-blacklisted tokens,
+        joining with rugcheck reports.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT
+                        pt.address,
+                        pt.creator,
+                        rr.score,
+                        rr.risks,
+                        pt.holders_count,
+                        rr.top_holders,
+                        rr.updated_at as rugcheck_updated_at
+                    FROM pump_tokens pt
+                    LEFT JOIN rugcheck_reports rr ON pt.address = rr.token_address
+                    WHERE pt.is_blacklisted = 0 OR pt.is_blacklisted IS NULL
+                    ORDER BY pt.created_at DESC
+                """)
+                
+                reports = []
+                for row in cursor.fetchall():
+                    reports.append(dict(row))
+                return reports
+        except Exception as e:
+            logger.error(f"Error getting non-blacklisted token details: {e}")
+            return []
+
+    def has_creator_blacklisted_tokens(self, creator_address: str, current_token_address: str) -> bool:
+        """
+        Checks if a creator has any other blacklisted tokens in the database.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT 1
+                    FROM pump_tokens
+                    WHERE creator = ?
+                    AND is_blacklisted = 1
+                    AND address != ?
+                    LIMIT 1
+                """, (creator_address, current_token_address))
+                
+                result = cursor.fetchone()
+                return result is not None
+        except Exception as e:
+            logger.error(f"Error checking for creator's blacklisted tokens: {e}")
+            return False
 
 # Instance globale
 db = DatabaseManager()

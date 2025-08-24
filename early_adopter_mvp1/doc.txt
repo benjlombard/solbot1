@@ -5,3 +5,5 @@ https://jules.google.com/task/2911894240593286406/code/early_adopter_mvp1/app/co
 https://api.rugcheck.xyz/v1/tokens/5ycc329ZLMjZNzopVVmbTsmt4TkBo2KtRAMYdc5Wpump/report
 http://localhost:8501/
 
+cas typique d'arnaque : 7mAegA8sFGqiptLogesGRNc1X7vQsnPM9SgFG4D2pump => chaîne de compte dans l'onglet transfer de solscan
+un compte finance un autre compte qui finance un autre compte etc...

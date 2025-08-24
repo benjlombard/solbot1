@@ -1013,6 +1013,26 @@ class IntelligentPollingManager:
             return any(isinstance(r, dict) and r.get('name') == BLACKLIST_RISK for r in report['risks'])
 
         try:
+            # --- NOUVELLE RÈGLE: Blacklist par association de créateur ---
+            if db.has_creator_blacklisted_tokens(creator_address, token_address):
+                logger.warning(f"🚨 BLACKLISTED BY ASSOCIATION: Creator {creator_address[:8]} has prior blacklisted tokens. Blacklisting {token_address[:8]}...")
+                db.update_token_blacklist_status(token_address, True)
+                
+                # Créer un rapport de blacklist minimal
+                blacklist_report = {
+                    "score_normalised": 100,
+                    "totalHolders": 0,
+                    "risks": [{
+                        "name": "Blacklisted by Creator Association",
+                        "value": "Creator has previously launched tokens that were blacklisted.",
+                        "score": 100,
+                        "level": "critical"
+                    }],
+                    "error": "Blacklisted by creator association rule."
+                }
+                db.upsert_rugcheck_report(token_address, blacklist_report)
+                return # Arrêter tout enrichissement ultérieur
+
             # --- Étape 1: Collecte des deux rapports RugCheck ---
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                 logger.info(f"🔎 [{token_address[:8]}] Fetching initial RugCheck report...")
@@ -1053,14 +1073,17 @@ class IntelligentPollingManager:
             final_rugcheck_report = None
             if rugcheck_before and rugcheck_after:
                 self._log_rugcheck_comparison(token_address, rugcheck_before, rugcheck_after)
-                score_before = rugcheck_before.get('score_normalised', 101)
-                score_after = rugcheck_after.get('score_normalised', 101)
+                score_before = rugcheck_before.get('score_normalised', 101) # Default to a high score if missing
+                score_after = rugcheck_after.get('score_normalised', 101) # Default to a high score if missing
+                
+                # Choisir le rapport avec le score le plus élevé (le plus défavorable)
                 if score_before >= score_after:
                     final_rugcheck_report = rugcheck_before
                     logger.info(f"⚖️ [{token_address[:8]}] Using 'before' report (Score: {score_before}) as it's higher or equal (more unfavorable) to 'after' (Score: {score_after}).")
                 else:
                     final_rugcheck_report = rugcheck_after
                     logger.info(f"⚖️ [{token_address[:8]}] Using 'after' report (Score: {score_after}) as it's higher (more unfavorable) than 'before' (Score: {score_before}).")
+
             elif rugcheck_before:
                 final_rugcheck_report = rugcheck_before
                 logger.warning(f"⚠️ [{token_address[:8]}] Using 'before' report as 'after' report failed.")
@@ -1071,6 +1094,7 @@ class IntelligentPollingManager:
                 logger.error(f"❌ [{token_address[:8]}] Both RugCheck calls failed. Storing score as -1.")
                 final_rugcheck_report = {"error": "Both RugCheck calls failed", "score_normalised": -1, "totalHolders": 0, "risks": []}
             
+            # Vérification finale de blacklist sur le rapport sélectionné
             if check_for_blacklist(final_rugcheck_report):
                 logger.warning(f"🚨 BLACKLISTED on final check: Token {token_address[:8]}... Halting enrichment.")
                 db.update_token_blacklist_status(token_address, True)

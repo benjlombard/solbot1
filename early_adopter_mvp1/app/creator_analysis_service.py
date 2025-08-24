@@ -30,74 +30,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from app.creator_analyzer import creator_analyzer
 from app.database import db
 from app.config import settings
-
-# Configuration du logging SANS emojis pour Windows
-class WindowsCompatibleFormatter(logging.Formatter):
-    """Formatter qui remplace les emojis par du texte pour Windows"""
-    
-    def format(self, record):
-        # Remplacer les emojis par du texte
-        if hasattr(record, 'msg'):
-            msg = str(record.msg)
-            # Dictionnaire de remplacement des emojis
-            emoji_replacements = {
-                '🚀': '[START]',
-                '📡': '[MONITOR]', 
-                '📊': '[STATS]',
-                '🔄': '[UPDATE]',
-                '🆕': '[NEW]',
-                '📈': '[CHART]',
-                '🔍': '[SEARCH]',
-                '✅': '[OK]',
-                '❌': '[ERROR]',
-                '⚠️': '[WARNING]',
-                '🩺': '[HEALTH]',
-                '💾': '[SAVE]',
-                '🚨': '[ALERT]',
-                '✨': '[STAR]',
-                '🎯': '[TARGET]',
-                '📝': '[LOG]',
-                '🕐': '[TIME]',
-                '👁️': '[WATCH]',
-                '👋': '[STOP]',
-                '🎉': '[SUCCESS]'
-            }
-            
-            for emoji, replacement in emoji_replacements.items():
-                msg = msg.replace(emoji, replacement)
-            
-            record.msg = msg
-        
-        return super().format(record)
-
-# Configuration du logging avec formatter Windows
-def setup_windows_logging():
-    """Configure le logging compatible Windows"""
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    
-    # Supprimer les handlers existants
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    
-    # Handler pour fichier
-    file_handler = logging.FileHandler('creator_service.log', encoding='utf-8')
-    file_formatter = WindowsCompatibleFormatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    file_handler.setFormatter(file_formatter)
-    logger.addHandler(file_handler)
-    
-    # Handler pour console
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_formatter = WindowsCompatibleFormatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
+from app.logger_config import setup_logging
 
 # Configurer le logging
-setup_windows_logging()
+setup_logging()
 logger = logging.getLogger(__name__)
 
 class CreatorAnalysisService:
