@@ -1007,47 +1007,60 @@ class IntelligentPollingManager:
         rugcheck_before = None
         rugcheck_after = None
         
+        BLACKLIST_RISK = "Creator history of rugged tokens"
+        def check_for_blacklist(report):
+            if not report or not isinstance(report.get('risks'), list): return False
+            return any(isinstance(r, dict) and r.get('name') == BLACKLIST_RISK for r in report['risks'])
+
         try:
-            # --- Étape 1: Collecte des rapports RugCheck ---
+            # --- Étape 1: Collecte des deux rapports RugCheck ---
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                # Premier appel RugCheck
                 logger.info(f"🔎 [{token_address[:8]}] Fetching initial RugCheck report...")
                 try:
                     rugcheck_before = await self._enrich_single_token_rugcheck(session, token_address)
                     if rugcheck_before:
-                        file_path = os.path.join(reports_dir, f"{token_address}_before.json")
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        file_path = os.path.join(reports_dir, f"{token_address}_{timestamp}_before.json")
                         with open(file_path, 'w') as f: json.dump(rugcheck_before, f, indent=4)
                         logger.info(f"📝 Saved 'before' report to {file_path}")
                 except Exception as e:
                     logger.warning(f"⚠️ [{token_address[:8]}] Initial RugCheck call failed: {e}")
 
-                # Pause
                 logger.info(f"⏳ [{token_address[:8]}] Waiting 15 seconds for data to mature...")
                 await asyncio.sleep(15)
 
-                # Deuxième appel RugCheck
                 logger.info(f"🔎 [{token_address[:8]}] Fetching final RugCheck report...")
                 try:
                     rugcheck_after = await self._enrich_single_token_rugcheck(session, token_address)
                     if rugcheck_after:
-                        file_path = os.path.join(reports_dir, f"{token_address}_after.json")
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        file_path = os.path.join(reports_dir, f"{token_address}_{timestamp}_after.json")
                         with open(file_path, 'w') as f: json.dump(rugcheck_after, f, indent=4)
                         logger.info(f"📝 Saved 'after' report to {file_path}")
                 except Exception as e:
                      logger.warning(f"⚠️ [{token_address[:8]}] Final RugCheck call failed: {e}")
 
-            # --- Étape 2: Sélection du rapport final basé sur les nouvelles règles ---
+            # --- Étape 2: Logique de blacklistage et de sélection ---
+
+            # Vérification prioritaire sur le premier rapport
+            if check_for_blacklist(rugcheck_before):
+                logger.warning(f"🚨 BLACKLISTED on first check: Token {token_address[:8]}... Halting enrichment.")
+                db.update_token_blacklist_status(token_address, True)
+                db.upsert_rugcheck_report(token_address, rugcheck_before)
+                return
+
+            # Si non blacklisté au premier check, continuer la logique normale
             final_rugcheck_report = None
             if rugcheck_before and rugcheck_after:
                 self._log_rugcheck_comparison(token_address, rugcheck_before, rugcheck_after)
                 score_before = rugcheck_before.get('score_normalised', 101)
                 score_after = rugcheck_after.get('score_normalised', 101)
-                if score_before <= score_after:
+                if score_before >= score_after:
                     final_rugcheck_report = rugcheck_before
-                    logger.info(f"⚖️ [{token_address[:8]}] Using 'before' report (Score: {score_before}) as it's lower or equal to 'after' (Score: {score_after}).")
+                    logger.info(f"⚖️ [{token_address[:8]}] Using 'before' report (Score: {score_before}) as it's higher or equal (more unfavorable) to 'after' (Score: {score_after}).")
                 else:
                     final_rugcheck_report = rugcheck_after
-                    logger.info(f"⚖️ [{token_address[:8]}] Using 'after' report (Score: {score_after}) as it's lower than 'before' (Score: {score_before}).")
+                    logger.info(f"⚖️ [{token_address[:8]}] Using 'after' report (Score: {score_after}) as it's higher (more unfavorable) than 'before' (Score: {score_before}).")
             elif rugcheck_before:
                 final_rugcheck_report = rugcheck_before
                 logger.warning(f"⚠️ [{token_address[:8]}] Using 'before' report as 'after' report failed.")
@@ -1058,19 +1071,13 @@ class IntelligentPollingManager:
                 logger.error(f"❌ [{token_address[:8]}] Both RugCheck calls failed. Storing score as -1.")
                 final_rugcheck_report = {"error": "Both RugCheck calls failed", "score_normalised": -1, "totalHolders": 0, "risks": []}
             
-            # --- Étape 3: Vérification de la liste noire ---
-            BLACKLIST_RISK = "Creator history of rugged tokens"
-            def check_for_blacklist(report):
-                if not report or not isinstance(report.get('risks'), list): return False
-                return any(isinstance(r, dict) and r.get('name') == BLACKLIST_RISK for r in report['risks'])
-
             if check_for_blacklist(final_rugcheck_report):
-                logger.warning(f"🚨 BLACKLISTED: Token {token_address[:8]}... based on final selected report. Halting enrichment.")
-                db.update_token_pumpfun_data(token_address, {'is_blacklisted': True})
+                logger.warning(f"🚨 BLACKLISTED on final check: Token {token_address[:8]}... Halting enrichment.")
+                db.update_token_blacklist_status(token_address, True)
                 db.upsert_rugcheck_report(token_address, final_rugcheck_report)
                 return
 
-            # --- Étape 4: Enrichissement et mise à jour (si pas blacklisté) ---
+            # --- Étape 3: Enrichissement et mise à jour (si pas blacklisté) ---
             logger.info(f"✨ [{token_address[:8]}] Proceeding with full enrichment.")
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                 token_obj = db.get_token_by_address(token_address)
@@ -1108,8 +1115,31 @@ class IntelligentPollingManager:
             
             logger.info(f"✅ [{token_address[:8]}] Enriched: Pump {pumpfun_data.get('bonding_curve_progress', 0):.2f}%, Rug {final_score}, Holders {final_holders_count}")
 
+            # Nettoyer les anciens rapports
+            self._cleanup_rugcheck_reports(reports_dir, 10)
+
         except Exception as e:
             logger.error(f"💥 CRITICAL Enrichment failed for {token_address[:8]}: {e}", exc_info=True)
+
+    def _cleanup_rugcheck_reports(self, directory: str, keep_count: int):
+        """Nettoie les anciens rapports JSON de RugCheck."""
+        try:
+            files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.json')]
+            if len(files) <= keep_count:
+                return
+
+            # Trier les fichiers par date de modification (le plus ancien en premier)
+            files.sort(key=os.path.getmtime)
+            
+            # Calculer le nombre de fichiers à supprimer
+            to_delete_count = len(files) - keep_count
+            
+            # Supprimer les plus anciens
+            for i in range(to_delete_count):
+                os.remove(files[i])
+                logger.info(f"🗑️ Deleted old rugcheck report: {files[i]}")
+        except Exception as e:
+            logger.error(f"Error cleaning up rugcheck reports: {e}")
 
     def _log_rugcheck_comparison(self, token_address: str, before: Dict, after: Dict):
         """Logue une comparaison détaillée entre deux rapports RugCheck."""
