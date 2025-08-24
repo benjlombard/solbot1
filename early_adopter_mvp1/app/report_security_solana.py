@@ -15,15 +15,10 @@ import base58
 import time
 import sys
 import base64
-
-try:
-    from .creator_analyzer import creator_analyzer, CreatorPerformance
-except (ImportError, ModuleNotFoundError):
-    # Fallback for running as a script
-    import sys
-    import os
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
-    from creator_analyzer import creator_analyzer, CreatorPerformance
+import os
+# Path correction to allow running as a script
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from early_adopter_mvp1.app.creator_analyzer import creator_analyzer, CreatorPerformance
 
 
 # Logging configuration
@@ -163,6 +158,14 @@ def is_valid_solana_address(address: str) -> bool:
         return len(decoded) == 32
     except Exception:
         return False
+
+
+def json_datetime_serializer(obj):
+    """JSON serializer for objects not serializable by default json code"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
 
 class SolanaTokenAnalyzer:
     """Enhanced Solana token analyzer matching rugcheck functionality"""
@@ -1343,7 +1346,7 @@ def main():
             logger.info(f"  Reputation Score: {ca.get('reputation_score', 0.0):.1f}/100 | Risk Score: {ca.get('risk_score', 0.0):.1f}/100")
             
             if ca.get('total_tokens', 0) > 0:
-                logger.info(f"  History: {ca['total_tokens']} tokens created since {datetime.fromisoformat(ca['first_token_date']).strftime('%Y-%m-%d') if ca.get('first_token_date') else 'N/A'}")
+                logger.info(f"  History: {ca['total_tokens']} tokens created since {ca['first_token_date'].strftime('%Y-%m-%d') if ca.get('first_token_date') else 'N/A'}")
                 logger.info(f"  Success Rate: {ca.get('success_rate', 0.0)*100:.1f}% ({ca.get('successful_tokens', 0)} successful, {ca.get('failed_tokens', 0)} failed)")
                 logger.info(f"  Avg. ROI: {ca.get('avg_roi', 0.0):.2f}x | Avg. Survival: {ca.get('avg_survival_time', 0.0):.1f} hours")
             
@@ -1359,13 +1362,13 @@ def main():
         # Save output
         if args.output:
             with open(args.output, 'w', encoding='utf-8') as f:
-                json.dump(report, f, indent=2, ensure_ascii=False)
+                json.dump(report, f, indent=2, ensure_ascii=False, default=json_datetime_serializer)
             logger.info(f"Report saved to: {args.output}")
         else:
             print("\n" + "=" * 50)
             print("JSON REPORT:")
             print("=" * 50)
-            print(json.dumps(report, indent=2, ensure_ascii=False))
+            print(json.dumps(report, indent=2, ensure_ascii=False, default=json_datetime_serializer))
         
         return 0
         
