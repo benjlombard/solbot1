@@ -835,6 +835,7 @@ class DatabaseManager:
                         rr.risks,
                         pt.holders_count,
                         rr.top_holders,
+                        pt.bonding_curve_progress,
                         rr.updated_at as rugcheck_updated_at
                     FROM pump_tokens pt
                     LEFT JOIN rugcheck_reports rr ON pt.address = rr.token_address

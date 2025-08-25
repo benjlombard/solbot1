@@ -180,13 +180,17 @@ else:
 
     df_details['risks_list'] = df_details['risks'].apply(format_risks)
     df_details['holder_dist'] = df_details['top_holders'].apply(format_holders)
+    # Format bonding curve progress
+    df_details['bonding_curve_progress_fmt'] = df_details['bonding_curve_progress'].apply(
+        lambda x: f"{x * 100:.2f}%" if pd.notna(x) else "N/A"
+    )
     
     # Format date
     df_details['rugcheck_updated_at'] = pd.to_datetime(df_details['rugcheck_updated_at']).dt.strftime('%Y-%m-%d %H:%M:%S')
 
     df_display_details = df_details[[
         'address', 'creator', 'score', 'risks_list', 
-        'holders_count', 'holder_dist', 'rugcheck_updated_at'
+        'holders_count', 'holder_dist', 'bonding_curve_progress_fmt', 'rugcheck_updated_at'
     ]]
     df_display_details.rename(columns={
         'address': 'Token Address',
@@ -195,7 +199,21 @@ else:
         'risks_list': 'Risks',
         'holders_count': 'Holders',
         'holder_dist': 'Holder Distribution',
+        'bonding_curve_progress_fmt': 'Bonding Curve Progress',
         'rugcheck_updated_at': 'Rugcheck Updated At'
     }, inplace=True)
 
     st.dataframe(df_display_details, use_container_width=True)
+
+    st.divider()
+    st.header("💯 Tokens with Completed Bonding Curve")
+    
+    # Filter for tokens where bonding_curve_progress is 1 (or 1.0)
+    df_completed = df_details[df_details['bonding_curve_progress'] == 1]
+    
+    if df_completed.empty:
+        st.info("No non-blacklisted tokens have reached 100% bonding curve progress yet.")
+    else:
+        # Filter the already formatted and renamed dataframe to show only completed tokens
+        completed_indices = df_completed.index
+        st.dataframe(df_display_details.loc[completed_indices], use_container_width=True)

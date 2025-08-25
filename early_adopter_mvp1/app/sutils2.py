@@ -126,6 +126,7 @@ async def get_pump_progress_correct(
                                     logger.debug(f"  Progress (virtual method): {progress_virtual:.2f}%")
                                     logger.debug(f"  Progress (real method): {progress_real:.2f}%")
                                     logger.debug(f"  Final progress: {final_progress:.2f}%")
+                                    logger.info(f"[{token_address[:8]}] On-chain bonding curve progress retrieved: {final_progress:.2f}%")
                                     
                                     # Calculer le prix et market cap
                                     price_sol = 0
@@ -141,7 +142,7 @@ async def get_pump_progress_correct(
                                         logger.debug(f"  Market Cap: ${market_cap:,.2f}")
                                     
                                     return {
-                                        'bonding_curve_progress': round(final_progress, 2),
+                                        'bonding_curve_progress': final_progress / 100,
                                         'virtual_sol_reserves': virtual_sol_reserves,
                                         'virtual_token_reserves': virtual_token_reserves,
                                         'real_sol_reserves': real_sol_reserves,
@@ -166,7 +167,7 @@ async def get_pump_progress_correct(
                     else:
                         logger.debug(f"No account found for bonding curve {bonding_curve_address}")
                 else:
-                    logger.error(f"RPC error {response.status} for {token_address}")
+                    logger.error(f"RPC error {response.status} for {token_address} on endpoint: {rpc_url}")
         
     except asyncio.TimeoutError:
         logger.error(f"Timeout fetching bonding curve data for {token_address}")
@@ -190,8 +191,9 @@ async def get_pump_progress_correct(
                     
                     if progress is not None:
                         logger.debug(f"Got progress from Pump.fun API: {progress}%")
+                        logger.info(f"[{token_address[:8]}] API fallback bonding curve progress retrieved: {progress}%")
                         return {
-                            'bonding_curve_progress': float(progress),
+                            'bonding_curve_progress': float(progress) / 100,
                             'success': True,
                             'source': 'pumpfun_api'
                         }
@@ -209,7 +211,7 @@ async def get_pump_progress_correct(
     # Fallback final: estimation conservative
     logger.debug(f"All methods failed for {token_address}, using conservative estimate")
     return {
-        'bonding_curve_progress': 1.0,  # Estimation très conservative
+        'bonding_curve_progress': 0.0,  # Estimation très conservative
         'success': False,
         'estimated': True,
         'source': 'estimated'
