@@ -13,7 +13,7 @@ from .config import settings
 from .database import db
 from .pump_fun_client import PumpFunClient
 from .rugcheck_client import RugCheckClient
-from .sutils2 import get_pump_progress_correct
+from .sutils3 import get_pump_progress
 from .creator_analyzer import creator_analyzer
 import aiohttp
 
@@ -1617,7 +1617,7 @@ class IntelligentPollingManager:
             # Fetch data from HTTP API and on-chain concurrently
             async with aiohttp.ClientSession() as session:
                 http_api_tasks = [self.pump_fun_client.get_token_data(session, t['address']) for t in tokens_to_enrich]
-                on_chain_tasks = [get_pump_progress_correct(t['address'], t.get('bonding_curve'), t.get('associated_bonding_curve'), self.helius_api_key) for t in tokens_to_enrich]
+                on_chain_tasks = [get_pump_progress(t['address'], helius_api_key=self.helius_api_key) for t in tokens_to_enrich]
                 rugcheck_tasks = [self.rugcheck_client.get_token_report_async(session, t['address']) for t in tokens_to_enrich]
                 
                 all_tasks = http_api_tasks + on_chain_tasks + rugcheck_tasks
@@ -1683,11 +1683,9 @@ class IntelligentPollingManager:
             
             logger.debug(f"🔗 On-chain enrichment for {token_address[:10]}... - BC: {bonding_curve[:10] if bonding_curve else 'None'}...")
             
-            data = await get_pump_progress_correct(
+            data = await get_pump_progress(
                 token_address,
-                bonding_curve,
-                associated_bonding_curve,
-                self.helius_api_key
+                helius_api_key=self.helius_api_key
             )
             return data if data else {}
         except Exception as e:

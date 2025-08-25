@@ -335,7 +335,7 @@ async def test_optimized_version(token_address: str, helius_api_key: Optional[st
 if __name__ == "__main__":
     async def main():
         # Test avec un token d'exemple
-        test_token = "BuLHqV9LsveorVinD4WsMqSNGAqPzcYxT8ue7wfxpump"  # Ton exemple
+        test_token = "GVUgcNd4fz3dM9XFMqCdBHaGh77SpRWvWetFSaxvpump"  # Ton exemple
         helius_key = "your-helius-api-key"  # Optionnel
         
         await test_optimized_version(test_token, helius_key)

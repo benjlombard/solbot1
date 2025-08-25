@@ -16,7 +16,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app.database import db
 from app.config import settings
-from app.sutils2 import get_pump_progress_correct, get_pump_progress_via_dexscreener
+from app.sutils3 import get_pump_progress
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -122,7 +122,7 @@ class BondingCurveBackfillerCorrect:
     
     async def _update_single_token_correct(self, token: dict) -> bool:
         """
-        Met à jour un token individuel avec les calculs corrects
+        Met à jour un token individuel en utilisant sutils3.
         """
         token_address = token['address']
         token_symbol = token.get('symbol', 'UNK')
@@ -130,29 +130,33 @@ class BondingCurveBackfillerCorrect:
         try:
             logger.info(f"Processing {token_symbol} ({token_address[:10]}...)")
             
-            # 1. Méthode principale: calcul on-chain correct
-            result = await get_pump_progress_correct(
+            # Utilise la nouvelle méthode de sutils3 qui gère les fallbacks en interne
+            result = await get_pump_progress(
                 token_address,
-                token.get('bonding_curve'),
-                token.get('associated_bonding_curve'),
-                self.helius_api_key
+                helius_api_key=self.helius_api_key
             )
             
             if result and result.get('success'):
-                progress = result['bonding_curve_progress']
+                # sutils3 retourne un float 0-1, on le convertit en % pour le log et la DB
+                progress_percent = result['bonding_curve_progress'] * 100
                 source = result.get('source', 'unknown')
                 
-                success = self._update_token_progress_enhanced(token_address, result)
+                # On passe une copie du résultat avec le progress en %
+                # pour ne pas altérer le dictionnaire original.
+                update_payload = result.copy()
+                update_payload['bonding_curve_progress'] = progress_percent
+                
+                # La fonction enhanced peut stocker plus de données retournées par sutils3
+                success = self._update_token_progress_enhanced(token_address, update_payload)
                 
                 if success:
-                    logger.info(f"✅ Updated {token_symbol}: {progress}% (source: {source})")
+                    logger.info(f"✅ Updated {token_symbol}: {progress_percent:.2f}% (source: {source})")
                     
-                    # Compter par source
-                    if 'onchain' in source:
-                        self.onchain_success_count += 1
-                    elif 'api' in source:
+                    if 'pumpfun_api' in source:
                         self.api_success_count += 1
-                    elif 'estimated' in source:
+                    elif 'helius' in source:
+                        self.onchain_success_count += 1
+                    else: # dexscreener, estimated, etc.
                         self.estimated_count += 1
                     
                     return True
@@ -160,36 +164,21 @@ class BondingCurveBackfillerCorrect:
                     logger.error(f"❌ Failed to update database for {token_symbol}")
                     return False
             
-            # 2. Fallback: DexScreener pour validation
-            logger.warning(f"Main method failed for {token_symbol}, trying DexScreener...")
-            
-            dex_result = await get_pump_progress_via_dexscreener(token_address)
-            
-            if dex_result and dex_result.get('success'):
-                progress = dex_result['bonding_curve_progress']
-                
-                success = self._update_token_progress_simple(token_address, progress, 'dexscreener')
-                
-                if success:
-                    logger.info(f"✅ Updated {token_symbol}: {progress}% (source: dexscreener)")
-                    self.api_success_count += 1
-                    return True
-            
-            # 3. Estimation finale basée sur l'âge
-            logger.warning(f"All external methods failed for {token_symbol}, using estimation...")
+            logger.warning(f"sutils3 failed for {token_symbol}, using local age estimation as final fallback.")
             
             estimated_progress = self._estimate_progress_by_age_enhanced(token)
-            success = self._update_token_progress_simple(token_address, estimated_progress, 'estimated')
+            # _update_token_progress_simple attend un pourcentage
+            success = self._update_token_progress_simple(token_address, estimated_progress, 'local_estimation')
             
             if success:
-                logger.info(f"⚠️ Updated {token_symbol}: {estimated_progress}% (estimated)")
+                logger.info(f"⚠️ Updated {token_symbol}: {estimated_progress:.2f}% (estimated by age)")
                 self.estimated_count += 1
                 return True
             
             return False
             
         except Exception as e:
-            logger.error(f"Error updating {token_address}: {e}")
+            logger.error(f"Critical error in _update_single_token_correct for {token_address}: {e}")
             return False
     
     def _estimate_progress_by_age_enhanced(self, token: dict) -> float:
@@ -469,13 +458,17 @@ async def main():
             # Mode test sur un token spécifique
             logger.info(f"🧪 Testing calculation for {args.test}")
             
-            from app.sutils2 import test_bonding_curve_calculation
-            result = await test_bonding_curve_calculation(args.test, backfiller.helius_api_key)
+            # sutils3 a sa propre fonction de test
+            from app.sutils3 import test_optimized_version
+            result = await test_optimized_version(args.test, backfiller.helius_api_key)
             
-            if result:
-                logger.info(f"✅ Test result: {result['bonding_curve_progress']}%")
+            # La fonction de test affiche déjà des logs détaillés.
+            # On peut ajouter un résumé ici si on veut.
+            if result and result.get('success'):
+                progress_percent = result['bonding_curve_progress'] * 100
+                logger.info(f"✅ Test complete. Final progress: {progress_percent:.2f}% via {result.get('source')}")
             else:
-                logger.error("❌ Test failed")
+                logger.error("❌ Test failed or returned no data.")
             
             return
         
