@@ -77,6 +77,7 @@ class BondingCurveBackfillerCorrect:
                         SELECT address, name, symbol, row_created_at, bonding_curve, associated_bonding_curve
                         FROM pump_tokens 
                         WHERE datetime(row_created_at) >= datetime('now','localtime','-7 days')
+                        AND (is_blacklisted = 0 OR is_blacklisted IS NULL)
                         ORDER BY row_created_at DESC
                         LIMIT ?
                     """, (limit,))
@@ -87,6 +88,7 @@ class BondingCurveBackfillerCorrect:
                         FROM pump_tokens 
                         WHERE (bonding_curve_progress IS NULL OR bonding_curve_progress = 0)
                         AND datetime(row_created_at) >= datetime('now','localtime','-7 days')
+                        AND (is_blacklisted = 0 OR is_blacklisted IS NULL)
                         ORDER BY row_created_at DESC
                         LIMIT ?
                     """, (limit,))
@@ -130,33 +132,30 @@ class BondingCurveBackfillerCorrect:
         try:
             logger.info(f"Processing {token_symbol} ({token_address[:10]}...)")
             
-            # Utilise la nouvelle méthode de sutils3 qui gère les fallbacks en interne
             result = await get_pump_progress(
                 token_address,
                 helius_api_key=self.helius_api_key
             )
             
             if result and result.get('success'):
-                # sutils3 retourne un float 0-1, on le convertit en % pour le log et la DB
-                progress_percent = result['bonding_curve_progress'] * 100
+                # sutils3 retourne TOUJOURS en fraction (0.0-1.0)
+                progress_fraction = result['bonding_curve_progress']
                 source = result.get('source', 'unknown')
                 
-                # On passe une copie du résultat avec le progress en %
-                # pour ne pas altérer le dictionnaire original.
+                # NORMALISATION : Stocker TOUJOURS en fraction (0.0-1.0)
                 update_payload = result.copy()
-                update_payload['bonding_curve_progress'] = progress_percent
+                update_payload['bonding_curve_progress'] = progress_fraction  # Garder en fraction
                 
-                # La fonction enhanced peut stocker plus de données retournées par sutils3
                 success = self._update_token_progress_enhanced(token_address, update_payload)
                 
                 if success:
-                    logger.info(f"✅ Updated {token_symbol}: {progress_percent:.2f}% (source: {source})")
+                    logger.info(f"✅ Updated {token_symbol}: {progress_fraction*100:.2f}% (stored as {progress_fraction:.6f} fraction)")
                     
                     if 'pumpfun_api' in source:
                         self.api_success_count += 1
                     elif 'helius' in source:
                         self.onchain_success_count += 1
-                    else: # dexscreener, estimated, etc.
+                    else:
                         self.estimated_count += 1
                     
                     return True
@@ -164,21 +163,24 @@ class BondingCurveBackfillerCorrect:
                     logger.error(f"❌ Failed to update database for {token_symbol}")
                     return False
             
-            logger.warning(f"sutils3 failed for {token_symbol}, using local age estimation as final fallback.")
+            # Fallback estimation
+            logger.warning(f"sutils3 failed for {token_symbol}, using estimation.")
             
-            estimated_progress = self._estimate_progress_by_age_enhanced(token)
-            # _update_token_progress_simple attend un pourcentage
-            success = self._update_token_progress_simple(token_address, estimated_progress, 'local_estimation')
+            estimated_progress_percent = self._estimate_progress_by_age_enhanced(token)
+            # Convertir l'estimation en fraction pour cohérence
+            estimated_progress_fraction = estimated_progress_percent / 100.0
+            
+            success = self._update_token_progress_simple(token_address, estimated_progress_fraction, 'local_estimation')
             
             if success:
-                logger.info(f"⚠️ Updated {token_symbol}: {estimated_progress:.2f}% (estimated by age)")
+                logger.info(f"⚠️ Updated {token_symbol}: {estimated_progress_percent:.2f}% (stored as {estimated_progress_fraction:.6f} fraction)")
                 self.estimated_count += 1
                 return True
             
             return False
             
         except Exception as e:
-            logger.error(f"Critical error in _update_single_token_correct for {token_address}: {e}")
+            logger.error(f"Critical error for {token_address}: {e}")
             return False
     
     def _estimate_progress_by_age_enhanced(self, token: dict) -> float:
@@ -253,20 +255,21 @@ class BondingCurveBackfillerCorrect:
             logger.error(f"Error updating database for {token_address}: {e}")
             return False
     
-    def _update_token_progress_simple(self, token_address: str, progress: float, source: str) -> bool:
+    def _update_token_progress_simple(self, token_address: str, progress_fraction: float, source: str) -> bool:
         """
-        Met à jour seulement le progrès de bonding curve
+        Met à jour seulement le progrès de bonding curve EN FRACTION (0.0-1.0)
         """
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
                 
+                # Stockage normalisé : TOUJOURS en fraction
                 cursor.execute("""
                     UPDATE pump_tokens 
                     SET bonding_curve_progress = ?, 
                         last_updated_pumpfun = ?
                     WHERE address = ?
-                """, (progress, datetime.now().isoformat(), token_address))
+                """, (progress_fraction, datetime.now().isoformat(), token_address))
                 
                 if cursor.rowcount > 0:
                     conn.commit()
@@ -299,6 +302,7 @@ class BondingCurveBackfillerCorrect:
                         COUNT(CASE WHEN bonding_curve_progress >= 50 THEN 1 END) as high_progress
                     FROM pump_tokens
                     WHERE datetime(row_created_at) >= datetime('now','localtime','-7 days')
+                    AND (is_blacklisted = 0 OR is_blacklisted IS NULL)
                 """)
                 
                 stats = dict(cursor.fetchone())
@@ -322,6 +326,7 @@ class BondingCurveBackfillerCorrect:
                         COUNT(*) as count
                     FROM pump_tokens
                     WHERE datetime(row_created_at) >= datetime('now', 'localtime','-7 days')
+                    AND (is_blacklisted = 0 OR is_blacklisted IS NULL)
                     GROUP BY range_group
                     ORDER BY count DESC
                 """)
@@ -342,6 +347,7 @@ class BondingCurveBackfillerCorrect:
                         AVG(bonding_curve_progress) as avg_progress
                     FROM pump_tokens
                     WHERE created_at >= datetime('now', '-7 days')
+                    AND (is_blacklisted = 0 OR is_blacklisted IS NULL)
                     GROUP BY period
                     ORDER BY total DESC
                 """)
@@ -387,6 +393,7 @@ class BondingCurveBackfillerCorrect:
                     WHERE bonding_curve_progress IS NOT NULL 
                     AND bonding_curve_progress > 0
                     AND datetime(row_created_at) >= datetime('now','localtime', '-24 hours')
+                    AND (is_blacklisted = 0 OR is_blacklisted IS NULL)
                     ORDER BY RANDOM()
                     LIMIT ?
                 """, (sample_size,))
