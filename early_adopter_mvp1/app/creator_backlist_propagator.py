@@ -148,9 +148,79 @@ class CreatorBlacklistPropagator:
         logger.info(f"   Creators affected: {len(creators_to_blacklist)}")
         logger.info(f"   Total tokens to blacklist: {total_tokens_to_blacklist}")
     
+    def debug_blacklist_status(self, sample_addresses: list = None) -> None:
+        """
+        Debug: Affiche le statut actuel des blacklists
+        """
+        logger.info("🔍 DEBUG: Current blacklist status")
+        
+        try:
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if sample_addresses:
+                    # Vérifier des adresses spécifiques
+                    placeholders = ','.join(['?' for _ in sample_addresses])
+                    cursor.execute(f"""
+                        SELECT address, symbol, creator, is_blacklisted, updated_at
+                        FROM pump_tokens 
+                        WHERE address IN ({placeholders})
+                        ORDER BY creator, address
+                    """, sample_addresses)
+                else:
+                    # Échantillon général
+                    cursor.execute("""
+                        SELECT address, symbol, creator, is_blacklisted, updated_at
+                        FROM pump_tokens 
+                        WHERE creator IN (
+                            SELECT creator FROM pump_tokens 
+                            WHERE is_blacklisted = 1 
+                            GROUP BY creator 
+                            LIMIT 3
+                        )
+                        ORDER BY creator, is_blacklisted DESC, address
+                        LIMIT 20
+                    """)
+                
+                results = cursor.fetchall()
+                
+                logger.info("Sample blacklist status:")
+                current_creator = None
+                for row in results:
+                    address = row[0]
+                    symbol = row[1] or 'UNK'
+                    creator = row[2]
+                    is_blacklisted = row[3]
+                    updated_at = row[4]
+                    
+                    if creator != current_creator:
+                        logger.info(f"\n👤 Creator: {creator[:20]}...")
+                        current_creator = creator
+                    
+                    status_emoji = "🚫" if is_blacklisted == 1 else "✅"
+                    logger.info(f"   {status_emoji} {symbol} ({address[:10]}...) = {is_blacklisted} (updated: {updated_at})")
+                
+                # Stats globales
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total,
+                        COUNT(CASE WHEN is_blacklisted = 1 THEN 1 END) as blacklisted,
+                        COUNT(CASE WHEN is_blacklisted = 0 OR is_blacklisted IS NULL THEN 1 END) as not_blacklisted
+                    FROM pump_tokens
+                """)
+                
+                stats = cursor.fetchone()
+                logger.info(f"\n📊 Global stats:")
+                logger.info(f"   Total tokens: {stats[0]}")
+                logger.info(f"   Blacklisted (=1): {stats[1]}")
+                logger.info(f"   Not blacklisted (=0/NULL): {stats[2]}")
+                
+        except Exception as e:
+            logger.error(f"Error in debug: {e}")
+
     def execute_blacklist_propagation(self, creators_to_blacklist: Dict, dry_run: bool = True) -> bool:
         """
-        Exécute la propagation du blacklistage
+        Exécute la propagation du blacklistage avec UPDATE SQL direct
         """
         if not creators_to_blacklist:
             logger.info("✅ No changes to execute")
@@ -167,38 +237,77 @@ class CreatorBlacklistPropagator:
                 
                 for creator, data in creators_to_blacklist.items():
                     tokens_to_blacklist = data['tokens_to_blacklist']
-                    reason_token = data['reason_token']
                     
                     logger.info(f"\nProcessing creator {creator[:20]}... ({len(tokens_to_blacklist)} tokens)")
                     
-                    for token in tokens_to_blacklist:
-                        token_address = token['address']
-                        token_symbol = token['symbol']
-                        
-                        if not dry_run:
-                            # Vraie mise à jour
-                            success = db.update_token_blacklist_status(token_address, True)
-                            
-                            if success:
-                                logger.info(f"   ✅ Blacklisted {token_symbol} ({token_address[:10]}...)")
-                                self.tokens_blacklisted += 1
-                            else:
-                                logger.error(f"   ❌ Failed to blacklist {token_symbol} ({token_address[:10]}...)")
-                        else:
-                            # Mode dry run
-                            logger.info(f"   🧪 Would blacklist {token_symbol} ({token_address[:10]}...)")
-                            self.tokens_blacklisted += 1
-                    
                     if not dry_run:
-                        # Petite pause pour éviter de surcharger la DB
-                        import time
-                        time.sleep(0.1)
+                        # Méthode 1: UPDATE direct avec SQL
+                        token_addresses = [token['address'] for token in tokens_to_blacklist]
+                        placeholders = ','.join(['?' for _ in token_addresses])
+                        
+                        sql = f"""
+                            UPDATE pump_tokens 
+                            SET is_blacklisted = 1, 
+                                updated_at = ?
+                            WHERE address IN ({placeholders})
+                        """
+                        
+                        params = [datetime.now().isoformat()] + token_addresses
+                        
+                        logger.info(f"   Executing SQL: {sql}")
+                        logger.info(f"   Parameters: {len(token_addresses)} addresses")
+                        
+                        cursor.execute(sql, params)
+                        
+                        # Vérifier combien de lignes ont été mises à jour
+                        updated_rows = cursor.rowcount
+                        logger.info(f"   ✅ Updated {updated_rows} rows in database")
+                        
+                        if updated_rows != len(tokens_to_blacklist):
+                            logger.warning(f"   ⚠️ Expected {len(tokens_to_blacklist)} updates, got {updated_rows}")
+                        
+                        # Validation immédiate
+                        validation_sql = f"""
+                            SELECT address, is_blacklisted 
+                            FROM pump_tokens 
+                            WHERE address IN ({placeholders})
+                        """
+                        
+                        cursor.execute(validation_sql, token_addresses)
+                        validation_results = cursor.fetchall()
+                        
+                        for result in validation_results:
+                            address = result[0]
+                            is_blacklisted = result[1]
+                            token_symbol = next((t['symbol'] for t in tokens_to_blacklist if t['address'] == address), 'UNK')
+                            
+                            if is_blacklisted == 1:
+                                logger.info(f"     ✅ Verified {token_symbol} ({address[:10]}...) = blacklisted")
+                            else:
+                                logger.error(f"     ❌ FAILED {token_symbol} ({address[:10]}...) = {is_blacklisted}")
+                        
+                        self.tokens_blacklisted += len(tokens_to_blacklist)
+                        
+                    else:
+                        # Mode dry run - juste afficher ce qui serait fait
+                        for token in tokens_to_blacklist:
+                            logger.info(f"   🧪 Would blacklist {token['symbol']} ({token['address'][:10]}...)")
+                            self.tokens_blacklisted += 1
                     
                     self.creators_affected += 1
                 
                 if not dry_run:
+                    # Commit toutes les changes
                     conn.commit()
-                    logger.info(f"\n✅ Blacklist propagation completed successfully!")
+                    logger.info(f"\n✅ All changes committed to database!")
+                    
+                    # Validation globale finale
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM pump_tokens WHERE is_blacklisted = 1
+                    """)
+                    total_blacklisted = cursor.fetchone()[0]
+                    logger.info(f"📊 Total blacklisted tokens in database: {total_blacklisted}")
+                    
                 else:
                     logger.info(f"\n🧪 Dry run completed - no changes made")
                 
@@ -210,6 +319,8 @@ class CreatorBlacklistPropagator:
                 
         except Exception as e:
             logger.error(f"Error executing blacklist propagation: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def get_blacklist_statistics(self) -> Dict:
@@ -335,9 +446,15 @@ def main():
         parser.add_argument("--execute", action="store_true", help="Execute changes (default: dry run)")
         parser.add_argument("--stats-only", action="store_true", help="Only show statistics")
         parser.add_argument("--validate", action="store_true", help="Validate current propagation state")
-        
+        parser.add_argument("--debug", action="store_true", help="Show debug info about current blacklist status")
+
         args = parser.parse_args()
         
+        if args.debug:
+            # Mode debug
+            propagator.debug_blacklist_status()
+            return
+
         if args.validate:
             # Mode validation seulement
             propagator.validate_propagation()
