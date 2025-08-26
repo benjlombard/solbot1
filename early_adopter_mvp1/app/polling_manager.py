@@ -621,6 +621,7 @@ class IntelligentPollingManager:
         # Timers séparés pour chaque méthode
         self.last_latest_discovery = datetime.now() - timedelta(minutes=10)
         self.last_general_discovery = datetime.now() - timedelta(minutes=30)
+        self.last_good_token_enrichment = datetime.now() - timedelta(minutes=5)
         
         # Configuration des intervalles
         self.latest_discovery_interval_seconds = getattr(settings, 'latest_discovery_interval_seconds', 60)  # 1 minute par défaut
@@ -891,7 +892,15 @@ class IntelligentPollingManager:
                     except Exception as e:
                         logger.error(f"❌ API DISCOVERY FAILED: {e}")
                 
-                # ===== 3. ENRICHISSEMENT DIFFÉRÉ (silencieux) - Désactivé temporairement =====
+                # ===== 3. ENRICHISSEMENT PERIODIQUE DES BONS TOKENS (toutes les 60s) =====
+                if (datetime.now() - self.last_good_token_enrichment).total_seconds() > 60:
+                    try:
+                        await self._periodic_enrich_good_tokens()
+                        self.last_good_token_enrichment = datetime.now()
+                    except Exception as e:
+                        logger.error(f"❌ PERIODIC GOOD TOKEN ENRICHMENT FAILED: {e}")
+
+                # ===== 4. ENRICHISSEMENT DIFFÉRÉ (silencieux) - Désactivé temporairement =====
                 # if settings.enable_metadata_enrichment and (datetime.now() - self.last_enrichment_run).total_seconds() > settings.enrichment_interval_seconds:
                 #     try:
                 #         await self._enrich_token_metadata()
@@ -1093,14 +1102,76 @@ class IntelligentPollingManager:
                 return
 
             # --- Étape 5: Enrichissement complet (si pas blacklisté) ---
-            logger.info(f"✨ [{token_address[:8]}] Proceeding with full enrichment.")
+            final_score = final_rugcheck_report.get('score_normalised', -1)
+            if final_score >= 1:
+                logger.info(f"✨ [{token_address[:8]}] Token has good score ({final_score}). Proceeding with full enrichment.")
+                
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                    token_obj = db.get_token_by_address(token_address)
+                    pumpfun_data, onchain_data = await asyncio.gather(
+                        self._enrich_single_token_pumpfun(session, token_address),
+                        self._enrich_single_token_onchain(token_address, token_obj)
+                    )
+
+                pumpfun_data = pumpfun_data or {}
+                onchain_data = onchain_data or {}
+
+                if onchain_data.get('success'):
+                    pumpfun_data.update({
+                        'bonding_curve_progress': onchain_data.get('bonding_curve_progress', 0),
+                        'virtual_sol_reserves': onchain_data.get('virtual_sol_reserves', 0),
+                        'virtual_token_reserves': onchain_data.get('virtual_token_reserves', 0)
+                    })
+
+                final_holders_count = final_rugcheck_report.get('totalHolders', 0)
+                pumpfun_data['holders_count'] = final_holders_count if final_holders_count is not None else 0
+                pumpfun_data['rugcheck_score'] = final_score
+
+                if pumpfun_data:
+                    logger.info(f"🔄 [{token_address[:8]}] Updating token with new Pump.fun data...")
+                    db.update_token_pumpfun_data(token_address, pumpfun_data)
+                    logger.info(f"💾 [{token_address[:8]}] Updated Pump.fun data in DB.")
+
+                db.upsert_rugcheck_report(token_address, final_rugcheck_report)
+                logger.info(f"💾 [{token_address[:8]}] Upserted final RugCheck report in DB.")
+                
+                # Create snapshot AFTER updating
+                db.create_snapshot(token_address)
+                logger.info(f"📸 [{token_address[:8]}] Created database snapshot after enrichment.")
+
+                asyncio.create_task(self._analyze_creator_async(creator_address, token_address))
+                
+                logger.info(f"✅ [{token_address[:8]}] Enriched: Pump {pumpfun_data.get('bonding_curve_progress', 0) * 100:.2f}%, Rug {final_score}, Holders {final_holders_count}")
+            else:
+                logger.info(f"📉 [{token_address[:8]}] Token score is {final_score}. Skipping full enrichment.")
+                # Just save the rugcheck report
+                db.upsert_rugcheck_report(token_address, final_rugcheck_report)
+                logger.info(f"💾 [{token_address[:8]}] Upserted final RugCheck report in DB (no enrichment).")
+
+            # Nettoyer les anciens rapports
+            self._cleanup_rugcheck_reports(reports_dir, 10)
+
+        except Exception as e:
+            logger.error(f"💥 CRITICAL Enrichment failed for {token_address[:8]}: {e}", exc_info=True)
+
+    async def _enrich_and_snapshot(self, token_address: str):
+        """
+        A streamlined enrichment function for periodically updating good tokens.
+        It fetches Pump.fun data, updates the DB, and creates a snapshot.
+        """
+        logger.info(f"🔄 Periodically enriching token: {token_address[:8]}...")
+        try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                 token_obj = db.get_token_by_address(token_address)
+                if not token_obj:
+                    logger.warning(f"Could not find token {token_address} for periodic enrichment.")
+                    return
+
                 pumpfun_data, onchain_data = await asyncio.gather(
                     self._enrich_single_token_pumpfun(session, token_address),
                     self._enrich_single_token_onchain(token_address, token_obj)
                 )
-
+            
             pumpfun_data = pumpfun_data or {}
             onchain_data = onchain_data or {}
 
@@ -1111,30 +1182,18 @@ class IntelligentPollingManager:
                     'virtual_token_reserves': onchain_data.get('virtual_token_reserves', 0)
                 })
 
-            final_score = final_rugcheck_report.get('score_normalised', -1)
-            final_holders_count = final_rugcheck_report.get('totalHolders', 0)
-            pumpfun_data['holders_count'] = final_holders_count if final_holders_count is not None else 0
-            pumpfun_data['rugcheck_score'] = final_score
-
             if pumpfun_data:
+                logger.info(f"💾 Updating pump.fun data for {token_address[:8]}...")
                 db.update_token_pumpfun_data(token_address, pumpfun_data)
-                logger.info(f"💾 [{token_address[:8]}] Updated Pump.fun data in DB.")
-
-            db.upsert_rugcheck_report(token_address, final_rugcheck_report)
-            logger.info(f"💾 [{token_address[:8]}] Upserted final RugCheck report in DB.")
-
-            db.create_snapshot(token_address)
-            logger.info(f"📸 [{token_address[:8]}] Created database snapshot after enrichment.")
-
-            asyncio.create_task(self._analyze_creator_async(creator_address, token_address))
-            
-            logger.info(f"✅ [{token_address[:8]}] Enriched: Pump {pumpfun_data.get('bonding_curve_progress', 0) * 100:.2f}%, Rug {final_score}, Holders {final_holders_count}")
-
-            # Nettoyer les anciens rapports
-            self._cleanup_rugcheck_reports(reports_dir, 10)
+                
+                # Create snapshot AFTER updating
+                db.create_snapshot(token_address)
+                logger.info(f"📸 Created snapshot for {token_address[:8]} after periodic update.")
+            else:
+                logger.warning(f"No new pump.fun data found for {token_address[:8]} during periodic update.")
 
         except Exception as e:
-            logger.error(f"💥 CRITICAL Enrichment failed for {token_address[:8]}: {e}", exc_info=True)
+            logger.error(f"Error during periodic enrichment for {token_address[:8]}: {e}", exc_info=True)
 
     def _cleanup_rugcheck_reports(self, directory: str, keep_count: int):
         """Nettoie les anciens rapports JSON de RugCheck."""
@@ -1155,6 +1214,25 @@ class IntelligentPollingManager:
                 logger.info(f"🗑️ Deleted old rugcheck report: {files[i]}")
         except Exception as e:
             logger.error(f"Error cleaning up rugcheck reports: {e}")
+
+    async def _periodic_enrich_good_tokens(self):
+        """Periodically enriches tokens that are in the 'good new tokens' list."""
+        logger.info("🚀 Starting periodic enrichment of good tokens...")
+        try:
+            good_tokens = db.get_new_potential_tokens_with_details(minutes_since=30)
+            if not good_tokens:
+                logger.info("✅ No good tokens to enrich periodically at this time.")
+                return
+
+            logger.info(f"Found {len(good_tokens)} good tokens to enrich periodically.")
+            
+            tasks = [self._enrich_and_snapshot(token['address']) for token in good_tokens]
+            await asyncio.gather(*tasks)
+            
+            logger.info(f"✅ Finished periodic enrichment for {len(good_tokens)} tokens.")
+
+        except Exception as e:
+            logger.error(f"Error during periodic enrichment of good tokens: {e}", exc_info=True)
 
     def _log_rugcheck_comparison(self, token_address: str, before: Dict, after: Dict):
         """Logue une comparaison détaillée entre deux rapports RugCheck."""

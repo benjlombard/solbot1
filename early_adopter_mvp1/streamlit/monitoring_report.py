@@ -30,6 +30,47 @@ if auto_refresh:
 
 st.write(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
+# --- Potentially Good New Tokens ---
+st.header("🌟 Potentiellement bons nouveaux tokens (dernières 30 minutes)")
+
+new_potential_tokens = db.get_new_potential_tokens_with_details(minutes_since=30)
+
+if not new_potential_tokens:
+    st.info("Aucun nouveau token prometteur trouvé dans les 30 dernières minutes.")
+else:
+    df_new_potential = pd.DataFrame(new_potential_tokens)
+    
+    # Format data for display
+    df_new_potential['bonding_curve'] = df_new_potential['bonding_curve_progress'].apply(
+        lambda x: f"{x * 100:.2f}%" if pd.notna(x) else "N/A"
+    )
+    df_new_potential['discovered_at'] = pd.to_datetime(df_new_potential['row_created_at']).dt.strftime('%H:%M:%S')
+    df_new_potential['market_cap_fmt'] = df_new_potential['usd_market_cap'].apply(
+        lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A"
+    )
+    df_new_potential['updated_at_fmt'] = pd.to_datetime(df_new_potential['last_updated_pumpfun']).dt.strftime('%H:%M:%S')
+
+    # Select and rename columns
+    df_display_potential = df_new_potential[[
+        'address', 'name', 'symbol', 'creator', 'score', 'bonding_curve', 'market_cap_fmt', 'discovered_at', 'updated_at_fmt'
+    ]]
+    df_display_potential.rename(columns={
+        'address': 'Token Address',
+        'name': 'Name',
+        'symbol': 'Symbol',
+        'creator': 'Creator',
+        'score': 'Rugcheck Score',
+        'bonding_curve': 'Bonding Curve',
+        'market_cap_fmt': 'Market Cap',
+        'discovered_at': 'Discovered At',
+        'updated_at_fmt': 'Last Updated'
+    }, inplace=True)
+
+    st.dataframe(df_display_potential, use_container_width=True)
+
+st.divider()
+
+
 # --- Helper Functions ---
 
 def get_time_since(minutes):
@@ -44,6 +85,7 @@ intervals = {
     "1 hour": 60,
     "6 hours": 360,
     "24 hours": 1440,
+    "7 days": 10080,
 }
 
 # --- New Token Discovery Rate ---

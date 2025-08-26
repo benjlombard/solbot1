@@ -851,6 +851,40 @@ class DatabaseManager:
             logger.error(f"Error getting non-blacklisted token details: {e}")
             return []
 
+    def get_new_potential_tokens(self, minutes_since: int = 30) -> List[Dict[str, Any]]:
+        """
+        Retrieves new, non-blacklisted tokens with a good rugcheck score.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                since_time = datetime.now() - timedelta(minutes=minutes_since)
+                
+                query = """
+                    SELECT
+                        pt.address,
+                        pt.name,
+                        pt.symbol,
+                        pt.creator,
+                        rr.score,
+                        pt.bonding_curve_progress,
+                        pt.row_created_at
+                    FROM pump_tokens pt
+                    JOIN rugcheck_reports rr ON pt.address = rr.token_address
+                    WHERE (pt.is_blacklisted = 0 OR pt.is_blacklisted IS NULL)
+                      AND rr.score >= 1
+                      AND pt.row_created_at >= ?
+                    ORDER BY pt.row_created_at DESC
+                """
+                
+                cursor.execute(query, (since_time.isoformat(),))
+                
+                tokens = [dict(row) for row in cursor.fetchall()]
+                return tokens
+        except Exception as e:
+            logger.error(f"Error getting new potential tokens: {e}")
+            return []
+
     def has_creator_blacklisted_tokens(self, creator_address: str, current_token_address: str) -> bool:
         """
         Checks if a creator has any other blacklisted tokens in the database.
@@ -872,6 +906,42 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error checking for creator's blacklisted tokens: {e}")
             return False
+
+    def get_new_potential_tokens_with_details(self, minutes_since: int = 30) -> List[Dict[str, Any]]:
+        """
+        Retrieves new, non-blacklisted tokens with a good rugcheck score and full details.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                since_time = datetime.now() - timedelta(minutes=minutes_since)
+                
+                query = """
+                    SELECT
+                        pt.address,
+                        pt.name,
+                        pt.symbol,
+                        pt.creator,
+                        rr.score,
+                        pt.bonding_curve_progress,
+                        pt.row_created_at,
+                        pt.usd_market_cap,
+                        pt.last_updated_pumpfun
+                    FROM pump_tokens pt
+                    JOIN rugcheck_reports rr ON pt.address = rr.token_address
+                    WHERE (pt.is_blacklisted = 0 OR pt.is_blacklisted IS NULL)
+                      AND rr.score >= 1
+                      AND pt.row_created_at >= ?
+                    ORDER BY pt.row_created_at DESC
+                """
+                
+                cursor.execute(query, (since_time.isoformat(),))
+                
+                tokens = [dict(row) for row in cursor.fetchall()]
+                return tokens
+        except Exception as e:
+            logger.error(f"Error getting new potential tokens with details: {e}")
+            return []
 
 # Instance globale
 db = DatabaseManager()
