@@ -147,51 +147,52 @@ def format_price(price):
         return str(price)
 
 def main():
-    # Configuration auto-refresh dans la sidebar
-    with st.sidebar:
-        st.header("⚙️ Configuration")
-        auto_refresh = st.checkbox("🔄 Auto-refresh (30s)", value=False)
-        
-        if auto_refresh:
-            # Placeholder pour le countdown
-            placeholder = st.empty()
-            
-            # Initialiser le timer
-            if 'last_refresh_time' not in st.session_state:
-                st.session_state.last_refresh_time = time.time()
-            
-            # Calculer le temps restant
-            elapsed = time.time() - st.session_state.last_refresh_time
-            remaining = max(0, 30 - int(elapsed))
-            
-            if remaining > 0:
-                placeholder.metric("⏱️ Prochain refresh", f"{remaining}s")
-                # Programmer le prochain refresh
-                time.sleep(1)
-                st.rerun()
-            else:
-                # Time to refresh!
-                st.session_state.last_refresh_time = time.time()
-                st.cache_data.clear()
-                placeholder.success("🔄 Refreshing...")
-                time.sleep(0.5)
-                st.rerun()
-    
     # Titre principal
     st.title("🚀 DexScreener Token Tracker Dashboard")
     
-    # Bouton refresh manuel
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if st.button("🔄 Refresh Now"):
-            st.session_state.last_refresh_time = time.time()
+    # Récupérer les paramètres d'URL pour persister l'auto-refresh
+    query_params = st.query_params
+    auto_refresh_from_url = query_params.get("autorefresh", "false") == "true"
+    
+    # Auto-refresh avec persistance via URL
+    with st.sidebar:
+        st.header("⚙️ Configuration")
+        
+        # Checkbox avec état persistant via URL
+        auto_refresh = st.checkbox(
+            "🔄 Auto-refresh (30s)", 
+            value=auto_refresh_from_url
+        )
+        
+        # Mettre à jour l'URL si l'état change
+        if auto_refresh != auto_refresh_from_url:
+            if auto_refresh:
+                st.query_params["autorefresh"] = "true"
+            else:
+                st.query_params.clear()
+            st.rerun()
+        
+        if auto_refresh:
+            # Meta refresh avec préservation des paramètres d'URL
+            refresh_url = f"?autorefresh=true"
+            st.markdown(f"""
+            <meta http-equiv="refresh" content="30; url={refresh_url}">
+            """, unsafe_allow_html=True)
+            st.success("✅ Auto-refresh activé (30s)")
+        else:
+            st.info("❌ Auto-refresh désactivé")
+        
+        if st.button("🔄 Refresh Manuel"):
             st.cache_data.clear()
             st.rerun()
+        
+        # Afficher l'heure actuelle
+        st.info(f"🕒 {datetime.now().strftime('%H:%M:%S')}")
     
     st.markdown("---")
     
-    # Initialisation des données
-    @st.cache_data(ttl=30)
+    # Initialisation des données avec cache court
+    @st.cache_data(ttl=30)  # Les données sont rafraîchies toutes les 30s automatiquement
     def load_data():
         dashboard = DashboardData()
         try:
