@@ -347,25 +347,52 @@ def main():
     st.header("🆕 Nouveaux tokens (5 derniers cycles)")
     
     if not recent_tokens.empty:
-        # Préparer les données pour l'affichage
+        # Préparer les données pour l'affichage avec liens
         recent_display = recent_tokens[['token_address', 'base_token_symbol', 'base_token_name', 
                                       'price_usd', 'volume_h24', 'market_cap', 'liquidity_usd',
                                       'created_by_endpoint', 'created_at']].copy()
         
-        # Formater les colonnes
+        # Créer les colonnes de liens (URL directes, pas de Markdown)
+        recent_display['pump_fun'] = recent_display['token_address'].apply(
+            lambda addr: f"https://pump.fun/coin/{addr}" if addr else None
+        )
+        
+        recent_display['dexscreener'] = recent_display['token_address'].apply(
+            lambda addr: f"https://dexscreener.com/solana/{addr}" if addr else None
+        )
+        
+        # Formater les colonnes numériques
         recent_display['price_usd'] = recent_display['price_usd'].apply(format_price)
         recent_display['volume_h24'] = recent_display['volume_h24'].apply(format_number)
         recent_display['market_cap'] = recent_display['market_cap'].apply(format_number)
         recent_display['liquidity_usd'] = recent_display['liquidity_usd'].apply(format_number)
         
+        # Réorganiser les colonnes avec les liens au début
+        columns_order = ['token_address', 'pump_fun', 'dexscreener', 'base_token_symbol', 'base_token_name', 
+                        'price_usd', 'volume_h24', 'market_cap', 'liquidity_usd', 
+                        'created_by_endpoint', 'created_at']
+        recent_display = recent_display[columns_order]
+        
         # Renommer les colonnes
-        recent_display.columns = ['Adresse Token', 'Symbole', 'Nom', 'Prix USD', 
+        recent_display.columns = ['Adresse Token', '🚀 Pump.fun', '📊 DexScreener', 'Symbole', 'Nom', 'Prix USD', 
                                  'Volume 24h', 'Market Cap', 'Liquidité', 'Endpoint', 'Créé le']
         
         st.dataframe(
             recent_display,
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "🚀 Pump.fun": st.column_config.LinkColumn(
+                    "🚀 Pump.fun",
+                    help="Voir sur Pump.fun",
+                    display_text="Pump.fun"
+                ),
+                "📊 DexScreener": st.column_config.LinkColumn(
+                    "📊 DexScreener", 
+                    help="Voir sur DexScreener",
+                    display_text="DexScreener"
+                )
+            }
         )
         
         # Statistiques des nouveaux tokens
@@ -427,9 +454,26 @@ def main():
             (filtered_tokens['volume_h24'].fillna(0) >= min_volume)
         ]
     
-    # Affichage du tableau filtré
+    # Affichage du tableau filtré avec liens
     if show_columns and not filtered_tokens.empty:
         display_df = filtered_tokens[show_columns].copy()
+        
+        # Ajouter les colonnes de liens si token_address est présent
+        if 'token_address' in display_df.columns:
+            display_df['pump_fun_link'] = display_df['token_address'].apply(
+                lambda addr: f"https://pump.fun/coin/{addr}" if addr else None
+            )
+            
+            display_df['dexscreener_link'] = display_df['token_address'].apply(
+                lambda addr: f"https://dexscreener.com/solana/{addr}" if addr else None
+            )
+            
+            # Réorganiser les colonnes pour mettre les liens après token_address
+            cols = list(display_df.columns)
+            if 'token_address' in cols:
+                addr_idx = cols.index('token_address')
+                new_cols = cols[:addr_idx+1] + ['pump_fun_link', 'dexscreener_link'] + cols[addr_idx+1:-2]
+                display_df = display_df[new_cols]
         
         # Formater les colonnes numériques
         numeric_columns = ['price_usd', 'volume_h24', 'market_cap', 'liquidity_usd', 'fdv']
@@ -440,10 +484,26 @@ def main():
                 else:
                     display_df[col] = display_df[col].apply(format_number)
         
+        # Configuration des colonnes avec liens
+        column_config = {}
+        if 'pump_fun_link' in display_df.columns:
+            column_config["pump_fun_link"] = st.column_config.LinkColumn(
+                "🚀 Pump.fun",
+                help="Voir sur Pump.fun",
+                display_text="Pump.fun"
+            )
+        if 'dexscreener_link' in display_df.columns:
+            column_config["dexscreener_link"] = st.column_config.LinkColumn(
+                "📊 DexScreener",
+                help="Voir sur DexScreener", 
+                display_text="DexScreener"
+            )
+        
         st.dataframe(
             display_df,
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config=column_config
         )
         
         st.info(f"Affichage de {len(display_df)} tokens sur {len(all_tokens)} total")
