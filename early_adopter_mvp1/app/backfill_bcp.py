@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script pour backfill les bonding_curve_progress manquants avec calculs corrects
+Script pour backfill les bonding_curve_progress manquants avec calculs corrects et historisation
 """
 
 import sys
@@ -29,6 +29,8 @@ class BondingCurveBackfillerCorrect:
         self.api_success_count = 0
         self.onchain_success_count = 0
         self.estimated_count = 0
+        self.snapshots_created = 0
+        self.snapshot_errors = 0
         
     async def backfill_missing_progress(self, limit: int = 100, force_update: bool = False):
         """
@@ -62,6 +64,8 @@ class BondingCurveBackfillerCorrect:
         logger.info(f"  API method: {self.api_success_count}")
         logger.info(f"  Estimated: {self.estimated_count}")
         logger.info(f"  Errors: {self.error_count}")
+        logger.info(f"  Snapshots created: {self.snapshots_created}")
+        logger.info(f"  Snapshot errors: {self.snapshot_errors}")
     
     def _get_tokens_without_progress(self, limit: int, force_update: bool = False) -> list:
         """
@@ -149,7 +153,7 @@ class BondingCurveBackfillerCorrect:
                 success = self._update_token_progress_enhanced(token_address, update_payload)
                 
                 if success:
-                    logger.info(f"✅ Updated {token_symbol}: {progress_fraction*100:.2f}% (stored as {progress_fraction:.6f} fraction)")
+                    logger.info(f"Updated {token_symbol}: {progress_fraction*100:.2f}% (stored as {progress_fraction:.6f} fraction)")
                     
                     if 'pumpfun_api' in source:
                         self.api_success_count += 1
@@ -160,7 +164,7 @@ class BondingCurveBackfillerCorrect:
                     
                     return True
                 else:
-                    logger.error(f"❌ Failed to update database for {token_symbol}")
+                    logger.error(f"Failed to update database for {token_symbol}")
                     return False
             
             # Fallback estimation
@@ -173,7 +177,7 @@ class BondingCurveBackfillerCorrect:
             success = self._update_token_progress_simple(token_address, estimated_progress_fraction, 'local_estimation')
             
             if success:
-                logger.info(f"⚠️ Updated {token_symbol}: {estimated_progress_percent:.2f}% (stored as {estimated_progress_fraction:.6f} fraction)")
+                logger.info(f"Updated {token_symbol}: {estimated_progress_percent:.2f}% (stored as {estimated_progress_fraction:.6f} fraction)")
                 self.estimated_count += 1
                 return True
             
@@ -212,10 +216,61 @@ class BondingCurveBackfillerCorrect:
             logger.error(f"Error estimating progress: {e}")
             return 2.0  # Valeur par défaut très conservative
     
+    def _create_snapshot_before_update(self, token_address: str) -> bool:
+        """
+        Crée un snapshot de la ligne actuelle dans pump_tokens_history avant mise à jour
+        """
+        try:
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Récupérer toutes les données actuelles
+                cursor.execute("SELECT * FROM pump_tokens WHERE address = ?", (token_address,))
+                current_data = cursor.fetchone()
+                
+                if not current_data:
+                    logger.warning(f"No current data found for {token_address}")
+                    return False
+                
+                # Construire l'INSERT en excluant 'id' et en ajoutant snapshot_timestamp et token_address
+                columns = [desc[0] for desc in cursor.description if desc[0] != 'id']
+                
+                # Préparer les valeurs avec snapshot_timestamp en première position
+                values = [datetime.now().isoformat()]  # snapshot_timestamp
+                values.append(token_address)  # token_address
+                
+                # Ajouter toutes les autres valeurs sauf 'id' et 'address'
+                for i, col_name in enumerate([desc[0] for desc in cursor.description]):
+                    if col_name not in ['id', 'address']:
+                        values.append(current_data[i])
+                
+                # Construire la requête INSERT
+                history_columns = ['snapshot_timestamp', 'token_address'] + [col for col in columns if col != 'address']
+                placeholders = ', '.join(['?'] * len(history_columns))
+                columns_str = ', '.join(history_columns)
+                
+                cursor.execute(f"""
+                    INSERT INTO pump_tokens_history ({columns_str})
+                    VALUES ({placeholders})
+                """, values)
+                
+                conn.commit()
+                self.snapshots_created += 1
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error creating snapshot for {token_address}: {e}")
+            self.snapshot_errors += 1
+            return False
+    
     def _update_token_progress_enhanced(self, token_address: str, result: dict) -> bool:
         """
-        Met à jour le token avec toutes les données de bonding curve
+        Met à jour le token avec toutes les données de bonding curve (avec historisation)
         """
+        # Créer le snapshot AVANT la mise à jour
+        if not self._create_snapshot_before_update(token_address):
+            logger.warning(f"Failed to create snapshot for {token_address}, proceeding with update anyway")
+        
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -257,8 +312,12 @@ class BondingCurveBackfillerCorrect:
     
     def _update_token_progress_simple(self, token_address: str, progress_fraction: float, source: str) -> bool:
         """
-        Met à jour seulement le progrès de bonding curve EN FRACTION (0.0-1.0)
+        Met à jour seulement le progrès de bonding curve EN FRACTION (avec historisation)
         """
+        # Créer le snapshot AVANT la mise à jour
+        if not self._create_snapshot_before_update(token_address):
+            logger.warning(f"Failed to create snapshot for {token_address}, proceeding with update anyway")
+        
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
@@ -360,16 +419,28 @@ class BondingCurveBackfillerCorrect:
                         'avg_progress': row['avg_progress']
                     }
                 
+                # Stats d'historisation
+                cursor.execute("""
+                    SELECT COUNT(*) as total_snapshots
+                    FROM pump_tokens_history
+                    WHERE datetime(snapshot_timestamp) >= datetime('now','localtime','-7 days')
+                """)
+                
+                history_stats = dict(cursor.fetchone())
+                
                 return {
                     'global_stats': stats,
                     'distribution': distribution,
                     'by_period': by_period,
+                    'history_stats': history_stats,
                     'backfill_results': {
                         'total_success': self.success_count,
                         'onchain_success': self.onchain_success_count,
                         'api_success': self.api_success_count,
                         'estimated': self.estimated_count,
-                        'errors': self.error_count
+                        'errors': self.error_count,
+                        'snapshots_created': self.snapshots_created,
+                        'snapshot_errors': self.snapshot_errors
                     }
                 }
                 
@@ -381,7 +452,7 @@ class BondingCurveBackfillerCorrect:
         """
         Valide les résultats sur un échantillon aléatoire
         """
-        logger.info(f"🧪 Validating results on random sample of {sample_size} tokens...")
+        logger.info(f"Validating results on random sample of {sample_size} tokens...")
         
         try:
             with db.get_connection() as conn:
@@ -411,30 +482,31 @@ class BondingCurveBackfillerCorrect:
                     db_progress = token['bonding_curve_progress']
                     symbol = token['symbol'] or 'UNK'
                     
-                    logger.info(f"\n🔍 Validating {symbol} ({token_address[:10]}...):")
+                    logger.info(f"\nValidating {symbol} ({token_address[:10]}...):")
                     logger.info(f"  DB progress: {db_progress}%")
                     
                     # Re-calculer avec la méthode correcte
-                    fresh_result = await get_pump_progress_correct(
-                        token_address, None, None, self.helius_api_key
+                    fresh_result = await get_pump_progress(
+                        token_address,
+                        helius_api_key=self.helius_api_key
                     )
                     
                     if fresh_result and fresh_result.get('success'):
-                        fresh_progress = fresh_result['bonding_curve_progress']
+                        fresh_progress = fresh_result['bonding_curve_progress'] * 100  # Convertir en %
                         source = fresh_result.get('source', 'unknown')
-                        diff = abs(fresh_progress - db_progress)
+                        diff = abs(fresh_progress - db_progress * 100)  # DB est en fraction
                         
                         logger.info(f"  Fresh calculation: {fresh_progress}% (source: {source})")
                         logger.info(f"  Difference: {diff:.2f}%")
                         
                         if diff < 1.0:
-                            logger.info(f"  ✅ Validation passed (diff < 1%)")
+                            logger.info(f"  Validation passed (diff < 1%)")
                         elif diff < 5.0:
-                            logger.warning(f"  ⚠️ Minor difference (diff < 5%)")
+                            logger.warning(f"  Minor difference (diff < 5%)")
                         else:
-                            logger.error(f"  ❌ Large difference (diff >= 5%)")
+                            logger.error(f"  Large difference (diff >= 5%)")
                     else:
-                        logger.error(f"  ❌ Fresh calculation failed")
+                        logger.error(f"  Fresh calculation failed")
                     
                     # Pause entre les validations
                     await asyncio.sleep(2)
@@ -446,7 +518,7 @@ async def main():
     """
     Point d'entrée principal
     """
-    logger.info("🚀 Starting bonding curve progress backfill with CORRECT calculations")
+    logger.info("Starting bonding curve progress backfill with CORRECT calculations and historization")
     
     backfiller = BondingCurveBackfillerCorrect()
     
@@ -463,19 +535,15 @@ async def main():
         
         if args.test:
             # Mode test sur un token spécifique
-            logger.info(f"🧪 Testing calculation for {args.test}")
+            logger.info(f"Testing calculation for {args.test}")
             
-            # sutils3 a sa propre fonction de test
-            from app.sutils3 import test_optimized_version
-            result = await test_optimized_version(args.test, backfiller.helius_api_key)
+            result = await get_pump_progress(args.test, helius_api_key=backfiller.helius_api_key)
             
-            # La fonction de test affiche déjà des logs détaillés.
-            # On peut ajouter un résumé ici si on veut.
             if result and result.get('success'):
                 progress_percent = result['bonding_curve_progress'] * 100
-                logger.info(f"✅ Test complete. Final progress: {progress_percent:.2f}% via {result.get('source')}")
+                logger.info(f"Test complete. Final progress: {progress_percent:.2f}% via {result.get('source')}")
             else:
-                logger.error("❌ Test failed or returned no data.")
+                logger.error("Test failed or returned no data.")
             
             return
         
@@ -492,7 +560,7 @@ async def main():
         # Afficher les statistiques
         stats = backfiller.get_backfill_stats_detailed()
         if stats:
-            logger.info("\n📊 Detailed Backfill Statistics:")
+            logger.info("\nDetailed Backfill Statistics:")
             logger.info("=" * 50)
             
             global_stats = stats['global_stats']
@@ -516,12 +584,12 @@ async def main():
             completion_pct = (global_stats['tokens_with_progress'] / global_stats['total_tokens'] * 100) if global_stats['total_tokens'] > 0 else 0
             logger.info(f"  Completion rate: {completion_pct:.1f}%")
             if global_stats['avg_progress'] is not None:
-                logger.info(f"  Average progress: {global_stats['avg_progress']:.2f}%")
+                logger.info(f"  Average progress: {global_stats['avg_progress']*100:.2f}%")
             else:
                 logger.info("  Average progress: N/A")
 
             if global_stats['min_progress'] is not None and global_stats['max_progress'] is not None:
-                logger.info(f"  Min/Max progress: {global_stats['min_progress']:.1f}% / {global_stats['max_progress']:.1f}%")
+                logger.info(f"  Min/Max progress: {global_stats['min_progress']*100:.1f}% / {global_stats['max_progress']*100:.1f}%")
             else:
                 logger.info("  Min/Max progress: N/A")
             
@@ -532,6 +600,8 @@ async def main():
             logger.info(f"  API method: {results['api_success']}")
             logger.info(f"  Estimated: {results['estimated']}")
             logger.info(f"  Errors: {results['errors']}")
+            logger.info(f"  Snapshots created: {results['snapshots_created']}")
+            logger.info(f"  Snapshot errors: {results['snapshot_errors']}")
             
             logger.info(f"\nProgress distribution:")
             for range_name, count in stats['distribution'].items():
@@ -544,18 +614,24 @@ async def main():
                 avg = period_stats['avg_progress']
                 pct = (with_progress / total * 100) if total > 0 else 0
                 if avg is not None:
-                    logger.info(f"  {period}: {with_progress}/{total} ({pct:.1f}%) - Avg: {avg:.2f}%")
+                    logger.info(f"  {period}: {with_progress}/{total} ({pct:.1f}%) - Avg: {avg*100:.2f}%")
                 else:
                     logger.info(f"  {period}: {with_progress}/{total} ({pct:.1f}%) - Avg: N/A")
+            
+            # Stats d'historisation
+            history_stats = stats.get('history_stats', {})
+            if 'total_snapshots' in history_stats:
+                logger.info(f"\nHistorization stats:")
+                logger.info(f"  Total snapshots (7d): {history_stats['total_snapshots']}")
         
-        logger.info("\n✅ Backfill completed successfully!")
-        logger.info("💡 To validate results, run with --validate flag")
-        logger.info("🧪 To test specific token, run with --test TOKEN_ADDRESS")
+        logger.info("\nBackfill completed successfully!")
+        logger.info("To validate results, run with --validate flag")
+        logger.info("To test specific token, run with --test TOKEN_ADDRESS")
         
     except KeyboardInterrupt:
-        logger.info("\n👋 Backfill interrupted by user")
+        logger.info("\nBackfill interrupted by user")
     except Exception as e:
-        logger.error(f"❌ Backfill failed: {e}")
+        logger.error(f"Backfill failed: {e}")
         import traceback
         traceback.print_exc()
 
