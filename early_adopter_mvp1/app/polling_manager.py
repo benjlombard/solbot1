@@ -1103,7 +1103,7 @@ class IntelligentPollingManager:
 
             # --- Étape 5: Enrichissement complet (si pas blacklisté) ---
             final_score = final_rugcheck_report.get('score_normalised', -1)
-            if final_score >= 1:
+            if final_score >= -1:
                 logger.info(f"✨ [{token_address[:8]}] Token has good score ({final_score}). Proceeding with full enrichment.")
                 
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:

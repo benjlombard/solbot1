@@ -24,21 +24,24 @@ def fetch_token_data(token_address):
         print(f"Error fetching data for {token_address}: {e}")
         return None
 
-def update_token_data(conn, token_address, ath_market_cap, survival_time_hours, current_market_cap):
-    """Update peak_market_cap, survival_time_hours, current_market_cap, and last_updated_from_api in creator_token_history."""
+def update_token_data(conn, token_address, ath_market_cap, survival_time_hours, current_market_cap, is_complete, bonding_curve_completed_timestamp):
+    """Update peak_market_cap, survival_time_hours, current_market_cap, is_complete, bonding_curve_completed_timestamp, and last_updated_from_api in creator_token_history."""
     try:
         cursor = conn.cursor()
         cursor.execute(
             """
             UPDATE creator_token_history
-            SET peak_market_cap = ?, survival_time_hours = ?, current_market_cap = ?, last_updated_from_api = ?
+            SET peak_market_cap = ?, survival_time_hours = ?, current_market_cap = ?, 
+                is_complete = ?, bonding_curve_completed_timestamp = ?, last_updated_from_api = ?
             WHERE token_address = ?
             """,
-            (ath_market_cap, survival_time_hours, current_market_cap, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), token_address)
+            (ath_market_cap, survival_time_hours, current_market_cap, is_complete, 
+             bonding_curve_completed_timestamp, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), token_address)
         )
         conn.commit()
         print(f"Updated {token_address}: peak_market_cap={ath_market_cap}, survival_time_hours={survival_time_hours}, "
-              f"current_market_cap={current_market_cap}")
+              f"current_market_cap={current_market_cap}, is_complete={is_complete}, "
+              f"bonding_curve_completed_timestamp={bonding_curve_completed_timestamp}")
     except sqlite3.Error as e:
         print(f"Database update error for {token_address}: {e}")
 
@@ -88,13 +91,25 @@ def main(db_path, cycle_time, calls_per_cycle, token_address, update_interval_ho
                         created_timestamp = data.get('created_timestamp')
                         last_trade_timestamp = data.get('last_trade_timestamp')
                         current_market_cap = data.get('usd_market_cap', 0.0)
+                        complete = data.get('complete', False)
                         
+                        # Calculer survival_time_hours
                         if created_timestamp and last_trade_timestamp:
                             survival_time_hours = (last_trade_timestamp - created_timestamp) / 3600000
                         else:
                             survival_time_hours = 0.0
                         
-                        update_token_data(conn, token_addr, ath_market_cap, survival_time_hours, current_market_cap)
+                        # Déterminer is_complete et bonding_curve_completed_timestamp
+                        if complete:
+                            is_complete = 1
+                            # Convertir le timestamp en secondes si nécessaire (l'API semble retourner en millisecondes)
+                            bonding_curve_completed_timestamp = last_trade_timestamp // 1000 if last_trade_timestamp else 0
+                        else:
+                            is_complete = 0
+                            bonding_curve_completed_timestamp = 0  # Utiliser 0 au lieu de NULL pour respecter la contrainte NOT NULL
+                        
+                        update_token_data(conn, token_addr, ath_market_cap, survival_time_hours, 
+                                        current_market_cap, is_complete, bonding_curve_completed_timestamp)
                     else:
                         print(f"Skipping update for {token_addr} due to API failure.")
                     
@@ -114,7 +129,7 @@ def main(db_path, cycle_time, calls_per_cycle, token_address, update_interval_ho
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Update creator_token_history with pump.fun API data.")
-    parser.add_argument("--db-path", default="path/to/your/database.db", help="Path to SQLite database file")
+    parser.add_argument("--db-path", default="early_adopter.db", help="Path to SQLite database file")
     parser.add_argument("--cycle-time", type=int, default=60, help="Cycle time in seconds")
     parser.add_argument("--calls-per-cycle", type=int, default=10, help="Number of API calls per cycle")
     parser.add_argument("--token-address", default=None, help="Specific token address to update (optional)")

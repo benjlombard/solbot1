@@ -1,0 +1,28 @@
+git add . && git commit -m "add files" && git push origin main
+
+cd early_adopter_mvp1/
+source ea_env/Scripts/activate
+python -m app.run
+
+cd early_adopter_mvp1/
+source ea_env/Scripts/activate
+python -m streamlit run streamlit/monitoring_report.py --server.port 8023
+
+cd early_adopter_mvp1/
+source ea_env/Scripts/activate
+python -m app.dexscreener_tracker
+
+cd early_adopter_mvp1/
+source ea_env/Scripts/activate
+python -m streamlit run streamlit/dexscreener_tracker.py --server.port 8024
+
+
+cd early_adopter_mvp1/
+source ea_env/Scripts/activate
+python -m app.dexscreener_tracker
+
+cd early_adopter_mvp1/
+source ea_env/Scripts/activate
+python -m streamlit run streamlit/analyze_creator.py --server.port 8025
+
+
