@@ -104,4 +104,10 @@ class Settings:
         # Backwards compatibility
         self.use_transaction_detection = self.token_discovery_method == "transaction"
 
+        # Trading Configuration
+        self.wallet_private_key: str = os.getenv("WALLET_PRIVATE_KEY", "")
+        self.trading_enabled: bool = os.getenv("TRADING_ENABLED", "False").lower() == "true"
+        self.max_sol_per_trade: float = float(os.getenv("MAX_SOL_PER_TRADE", "0.005"))
+        self.max_daily_budget: float = float(os.getenv("MAX_DAILY_BUDGET", "0.05"))
+        
 settings = Settings()

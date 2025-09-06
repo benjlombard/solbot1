@@ -852,17 +852,13 @@ class IntelligentPollingManager:
 
     async def _polling_loop(self):
         """Boucle principale de polling avec découverte optimisée"""
-        logger.info("🚀 DISCOVERY ENGINE STARTED - Latest: 30s | API: 60s")
+        logger.info(f"🚀 DISCOVERY ENGINE STARTED - Latest: {self.latest_discovery_interval_seconds}s | API: {self.general_discovery_interval_seconds}s")
         
-        cycle_count = 0
-        
-        # Configuration des intervalles optimisés
-        LATEST_DISCOVERY_INTERVAL_SECONDS = 30  # Toutes les 30 secondes
-        API_DISCOVERY_INTERVAL_SECONDS = 60     # Toutes les 60 secondes
-        
+        cycle_count = 0   
         while self.is_running:
             try:
                 cycle_count += 1
+                cycle_start = datetime.now()
                 
                 # Vérifications système (silencieuses)
                 self._check_daily_reset()
@@ -872,9 +868,12 @@ class IntelligentPollingManager:
                     await asyncio.sleep(3600)
                     continue
                 
+                latest_time_since = (datetime.now() - self.last_latest_discovery).total_seconds()
+                api_time_since = (datetime.now() - self.last_general_discovery).total_seconds()
+
                 # ===== 1. DÉCOUVERTE LATEST (30 secondes) =====
                 if (self.use_latest_discovery and 
-                    (datetime.now() - self.last_latest_discovery).total_seconds() > LATEST_DISCOVERY_INTERVAL_SECONDS):
+                    (datetime.now() - self.last_latest_discovery).total_seconds() > self.latest_discovery_interval_seconds):
                     
                     logger.info("🔥 LATEST DISCOVERY START")
                     try:
@@ -884,7 +883,7 @@ class IntelligentPollingManager:
                 
                 # ===== 2. DÉCOUVERTE API GÉNÉRALE (60 secondes) =====
                 if (self.use_api_discovery and 
-                    (datetime.now() - self.last_general_discovery).total_seconds() > API_DISCOVERY_INTERVAL_SECONDS):
+                    (datetime.now() - self.last_general_discovery).total_seconds() > self.general_discovery_interval_seconds):
                     
                     logger.info("📡 API DISCOVERY START")
                     try:
@@ -899,6 +898,13 @@ class IntelligentPollingManager:
                         self.last_good_token_enrichment = datetime.now()
                     except Exception as e:
                         logger.error(f"❌ PERIODIC GOOD TOKEN ENRICHMENT FAILED: {e}")
+
+                latest_remaining = max(0, self.latest_discovery_interval_seconds - latest_time_since)
+                api_remaining = max(0, self.general_discovery_interval_seconds - api_time_since)
+    
+                next_action_wait = min(latest_remaining, api_remaining, 10)  # Max 10s entre cycles
+
+                #logger.info(f"⏱️ Cycle #{cycle_count} completed - Attente de {next_action_wait:.0f}s pour lancer le prochain cycle")
 
                 # ===== 4. ENRICHISSEMENT DIFFÉRÉ (silencieux) - Désactivé temporairement =====
                 # if settings.enable_metadata_enrichment and (datetime.now() - self.last_enrichment_run).total_seconds() > settings.enrichment_interval_seconds:
@@ -917,9 +923,10 @@ class IntelligentPollingManager:
                 self.consecutive_failures = 0
                 self.last_successful_poll = datetime.now()
                 self.api_health_status = "healthy"
-                
-                # Attendre avant le prochain cycle
-                await asyncio.sleep(10)
+
+                if next_action_wait > 0:
+                    await asyncio.sleep(next_action_wait)
+
                 
             except asyncio.CancelledError:
                 logger.info("🛑 DISCOVERY ENGINE STOPPED")
