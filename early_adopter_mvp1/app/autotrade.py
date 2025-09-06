@@ -141,9 +141,19 @@ class TradeConfig:
     slippage_bps: int = 200  # Réduit à 1% pour limiter les pertes
     priority_fee_lamports: int = 100  # Frais de priorité par défaut
     network: Network = Network.DEVNET  # Par défaut sur devnet pour la sécurité
-    confirmation_timeout: int = 180  # 3 minutes
+    confirmation_timeout: int = 60  # 3 minutes
     require_manual_confirmation: bool = True
+    confirmation_strategy: str = "smart"  # "smart", "basic", "aggressive"
 
+    def get_confirmation_timeout(self) -> int:
+        """Retourne le timeout selon la stratégie"""
+        if self.confirmation_strategy == "basic":
+            return 15  # Rapide
+        elif self.confirmation_strategy == "aggressive":
+            return 60  # Plus long
+        else:  # smart
+            return 30  # Équilibré
+            
     def __post_init__(self):
         if self.take_profit_levels is None:
             self.take_profit_levels = [100, 300, 500]
@@ -562,6 +572,152 @@ class SolanaClient:
             return None
 
     async def confirm_transaction(self, signature: str, timeout: int = 60) -> bool:
+        """Confirme une transaction avec plusieurs stratégies de fallback"""
+        try:
+            await self.ensure_client_active()
+            logger.info(f"⏳ Waiting for transaction confirmation: {signature[:8]}... ({self.network.value})")
+            logger.info(f"🔗 Explorer URL: {NETWORK_CONFIGS[self.network]['explorer_base']}/tx/{signature}{'?cluster=devnet' if self.network == Network.DEVNET else ''}")
+            
+            start_time = time.time()
+            check_count = 0
+            max_not_found_checks = 20  # Arrêter après 20 checks "not found" consécutifs
+            consecutive_not_found = 0
+            
+            while time.time() - start_time < timeout:
+                check_count += 1
+                elapsed = time.time() - start_time
+                
+                try:
+                    logger.debug(f"📊 Confirmation check #{check_count} (elapsed: {elapsed:.1f}s)")
+                    
+                    response = await self.client.get_signature_statuses([Signature.from_string(signature)])
+                    logger.debug(f"📋 Signature status response: {response}")
+                    
+                    if response.value and len(response.value) > 0:
+                        status = response.value[0]
+                        
+                        if status is None:
+                            consecutive_not_found += 1
+                            logger.debug(f"🔄 Transaction not yet found on network (check #{check_count}, consecutive: {consecutive_not_found})")
+                            
+                            # Si on ne trouve pas la transaction après plusieurs tentatives, essayer une approche différente
+                            if consecutive_not_found >= max_not_found_checks:
+                                logger.warning(f"⚠️ Transaction not found after {max_not_found_checks} consecutive checks")
+                                logger.info("🔍 Trying alternative confirmation method...")
+                                
+                                # Méthode alternative : essayer de récupérer directement la transaction
+                                try:
+                                    tx_details = await self.client.get_transaction(
+                                        Signature.from_string(signature),
+                                        encoding="json",
+                                        max_supported_transaction_version=0
+                                    )
+                                    
+                                    if tx_details.value:
+                                        logger.info("✅ Transaction found using direct lookup!")
+                                        if tx_details.value.meta and tx_details.value.meta.err is None:
+                                            logger.info(f"✅ Transaction successful: {signature[:8]}...")
+                                            return True
+                                        else:
+                                            logger.error(f"❌ Transaction failed: {tx_details.value.meta.err if tx_details.value.meta else 'Unknown error'}")
+                                            return False
+                                    else:
+                                        logger.warning("❌ Transaction not found even with direct lookup")
+                                        
+                                except Exception as e:
+                                    logger.debug(f"Direct transaction lookup failed: {e}")
+                                
+                                # Dernière tentative : suggestion à l'utilisateur
+                                logger.warning("🔍 RPC may not have indexed this transaction yet")
+                                logger.info("💡 Please check the explorer URL manually:")
+                                logger.info(f"   {NETWORK_CONFIGS[self.network]['explorer_base']}/tx/{signature}{'?cluster=devnet' if self.network == Network.DEVNET else ''}")
+                                
+                                # Demander à l'utilisateur s'il voit la transaction
+                                if self.network == Network.MAINNET:  # Seulement sur mainnet pour éviter les interruptions en test
+                                    try:
+                                        user_input = input("Do you see the transaction as successful in the explorer? (yes/no/wait): ").lower().strip()
+                                        if user_input == "yes":
+                                            logger.info("✅ User confirmed transaction success")
+                                            return True
+                                        elif user_input == "no":
+                                            logger.error("❌ User confirmed transaction failure")
+                                            return False
+                                        elif user_input == "wait":
+                                            logger.info("🔄 User requested to continue waiting...")
+                                            consecutive_not_found = 0  # Reset counter
+                                            continue
+                                    except:
+                                        pass
+                                
+                                # Si on arrive ici, considérer comme timeout
+                                break
+                        else:
+                            # Transaction trouvée, reset du compteur
+                            consecutive_not_found = 0
+                            
+                            logger.info(f"📊 Transaction Status Check #{check_count}:")
+                            logger.info(f"   Confirmation Status: {status.confirmation_status}")
+                            logger.info(f"   Confirmations: {status.confirmations}")
+                            logger.info(f"   Slot: {status.slot}")
+                            logger.info(f"   Error: {status.err}")
+                            
+                            if status.confirmation_status:
+                                if status.confirmation_status in ["processed", "confirmed", "finalized"]:
+                                    logger.info(f"✅ Transaction confirmed with status '{status.confirmation_status}': {signature[:8]}... ({self.network.value})")
+                                    logger.info(f"   Final confirmations: {status.confirmations}")
+                                    logger.info(f"   Confirmation time: {elapsed:.1f}s")
+                                    return True
+                            
+                            if status.err:
+                                logger.error(f"❌ Transaction failed with error: {status.err}")
+                                return False
+                    
+                    # Attendre avant le prochain check, avec délai progressif
+                    if consecutive_not_found > 10:
+                        await asyncio.sleep(5)  # Attendre plus longtemps si pas trouvé
+                    else:
+                        await asyncio.sleep(2)
+                    
+                except Exception as check_error:
+                    logger.error(f"❌ Error during confirmation check #{check_count}: {check_error}")
+                    await asyncio.sleep(3)
+            
+            # Timeout final
+            logger.warning(f"⏰ Transaction confirmation timeout after {timeout}s")
+            logger.warning(f"   Total checks performed: {check_count}")
+            logger.warning(f"   Consecutive 'not found' responses: {consecutive_not_found}")
+            
+            # Une dernière tentative avec direct lookup
+            logger.info("🔍 Final attempt with direct transaction lookup...")
+            try:
+                tx_details = await self.client.get_transaction(
+                    Signature.from_string(signature),
+                    encoding="json",
+                    max_supported_transaction_version=0
+                )
+                
+                if tx_details.value:
+                    logger.info("✅ Transaction found in final direct lookup!")
+                    if tx_details.value.meta and tx_details.value.meta.err is None:
+                        logger.info(f"✅ Transaction was actually successful: {signature[:8]}...")
+                        return True
+                    else:
+                        logger.error(f"❌ Transaction failed: {tx_details.value.meta.err if tx_details.value.meta else 'Unknown error'}")
+                        return False
+            except Exception as e:
+                logger.debug(f"Final direct lookup failed: {e}")
+            
+            logger.warning("❌ Unable to confirm transaction status via RPC")
+            logger.info("💡 This doesn't necessarily mean the transaction failed")
+            logger.info(f"   Check manually: {NETWORK_CONFIGS[self.network]['explorer_base']}/tx/{signature}{'?cluster=devnet' if self.network == Network.DEVNET else ''}")
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Error confirming transaction: {e}")
+            return False
+
+    async def confirm_transaction_old(self, signature: str, timeout: int = 60) -> bool:
         """Confirme qu'une transaction a été processée avec un logging détaillé"""
         try:
             await self.ensure_client_active()
