@@ -19,9 +19,15 @@ from pathlib import Path
 import base64
 import random
 from enum import Enum
-# from autotrade_enhanced_logger import get_logger, log_trade, log_error, log_performance
-# from autotrade_notification_system import notify_trade, notify_error, notify_system
 from .autotrade_config_loader import load_trading_config
+
+try:
+    from .autotrade_portfolio_db import record_trade_transaction, get_portfolio_db
+    PORTFOLIO_DB_AVAILABLE = True
+    print("✅ Portfolio database module loaded")
+except ImportError as e:
+    PORTFOLIO_DB_AVAILABLE = False
+    print(f"⚠️ Portfolio database not available: {e}")
 
 # Imports pour Solana
 try:
@@ -100,30 +106,84 @@ except ImportError:
 
 
 # Configuration des réseaux
-NETWORK_CONFIGS = {
-    Network.MAINNET: {
-        "rpc_url": "https://mainnet.helius-rpc.com/?api-key=09fa25c2-61df-44b7-b435-bbd2dbbae0df",  # Replace with your Helius RPC URL
-        "jupiter_api": "https://quote-api.jup.ag/v6",
-        "explorer_base": "https://solscan.io",
-        "name": "Mainnet Beta"
-    },
-    # Network.MAINNET: {
-    #     "rpc_url": "https://api.mainnet-beta.solana.com",
-    #     "jupiter_api": "https://quote-api.jup.ag/v6",
-    #     "explorer_base": "https://solscan.io",
-    #     "name": "Mainnet Beta"
-    # },
-    Network.DEVNET: {
-        "rpc_url": "https://api.devnet.solana.com",
-        "jupiter_api": "https://quote-api.jup.ag/v6",  # Jupiter fonctionne aussi sur devnet
-        "explorer_base": "https://solscan.io",
-        "name": "Devnet"
-    }
-}
+# NETWORK_CONFIGS = {
+#     Network.MAINNET: {
+#         "rpc_url": "https://mainnet.helius-rpc.com/?api-key=09fa25c2-61df-44b7-b435-bbd2dbbae0df",  # Replace with your Helius RPC URL
+#         "jupiter_api": "https://quote-api.jup.ag/v6",
+#         "explorer_base": "https://solscan.io",
+#         "name": "Mainnet Beta"
+#     },
+#     Network.DEVNET: {
+#         "rpc_url": "https://api.devnet.solana.com",
+#         "jupiter_api": "https://quote-api.jup.ag/v6",  # Jupiter fonctionne aussi sur devnet
+#         "explorer_base": "https://solscan.io",
+#         "name": "Devnet"
+#     }
+# }
+
+def load_network_configs():
+    """Charge la configuration des réseaux depuis le YAML"""
+    try:
+        from .autotrade_config_loader import get_config
+        config_loader = get_config()
+        
+        return {
+            Network.MAINNET: {
+                "rpc_url": config_loader.get("network.rpc_endpoints.mainnet.primary", 
+                                           "https://api.mainnet-beta.solana.com"),
+                "jupiter_api": config_loader.get("network.jupiter_api", 
+                                               "https://quote-api.jup.ag/v6"),
+                "explorer_base": config_loader.get("network.explorer_base.mainnet", 
+                                                 "https://solscan.io"),
+                "name": "Mainnet Beta"
+            },
+            Network.DEVNET: {
+                "rpc_url": config_loader.get("network.rpc_endpoints.devnet.primary", 
+                                           "https://api.devnet.solana.com"),
+                "jupiter_api": config_loader.get("network.jupiter_api", 
+                                               "https://quote-api.jup.ag/v6"),
+                "explorer_base": config_loader.get("network.explorer_base.devnet", 
+                                                 "https://solscan.io"),
+                "name": "Devnet"
+            }
+        }
+    except Exception as e:
+        print(f"⚠️ Could not load network config from YAML: {e}")
+        print("Using fallback network configuration")
+        # Configuration de fallback si le YAML n'est pas accessible
+        return {
+            Network.MAINNET: {
+                "rpc_url": "https://api.mainnet-beta.solana.com",
+                "jupiter_api": "https://quote-api.jup.ag/v6",
+                "explorer_base": "https://solscan.io",
+                "name": "Mainnet Beta"
+            },
+            Network.DEVNET: {
+                "rpc_url": "https://api.devnet.solana.com",
+                "jupiter_api": "https://quote-api.jup.ag/v6",
+                "explorer_base": "https://solscan.io",
+                "name": "Devnet"
+            }
+        }
+
+NETWORK_CONFIGS = load_network_configs()
+print(f"📡 Network configs loaded:")
+print(f"  Mainnet RPC: {NETWORK_CONFIGS[Network.MAINNET]['rpc_url'][:50]}...")
+print(f"  Devnet RPC: {NETWORK_CONFIGS[Network.DEVNET]['rpc_url']}")
+
+try:
+    from .autotrade_config_loader import get_config
+    config_loader = get_config()
+    log_level_str = config_loader.get("logging.level", "INFO")
+    log_level = getattr(logging, log_level_str.upper(), logging.INFO)
+    print(f"📝 Log level set to: {log_level_str.upper()}")
+except Exception as e:
+    log_level = logging.INFO
+    print(f"⚠️ Could not load logging config from YAML, using default INFO: {e}")
 
 # Configuration du logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=log_level,  # ← Utiliser le niveau depuis le YAML
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -131,23 +191,93 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TradeConfig:
     """Configuration pour le trading automatique"""
-    max_sol_per_trade: float = 0.0001  # Réduit pour les tests
-    max_daily_budget: float = 0.01     # Budget quotidien conservateur
-    max_simultaneous_positions: int = 2
-    min_score_to_buy: float = 60
-    min_confidence_level: float = 40
-    stop_loss_percentage: float = -40
+    max_sol_per_trade: float = None
+    max_daily_budget: float = None
+    max_simultaneous_positions: int = None
+    min_score_to_buy: float = None
+    min_confidence_level: float = None
+    stop_loss_percentage: float = None
     take_profit_levels: List[float] = None
     take_profit_portions: List[float] = None
-    max_token_age_minutes: int = 10
-    price_check_interval_seconds: int = 30
-    slippage_bps: int = 200  # Réduit à 1% pour limiter les pertes
-    priority_fee_lamports: int = 100  # Frais de priorité par défaut
-    network: Network = Network.DEVNET  # Par défaut sur devnet pour la sécurité
-    confirmation_timeout: int = 60  # 3 minutes
-    require_manual_confirmation: bool = True
-    confirmation_strategy: str = "smart"  # "smart", "basic", "aggressive"
-    accept_finalized_after_timeout: bool = True
+    max_token_age_minutes: int = None
+    price_check_interval_seconds: int = None
+    slippage_bps: int = None
+    priority_fee_lamports: int = None
+    network: Network = None
+    confirmation_timeout: int = None
+    require_manual_confirmation: bool = None
+    confirmation_strategy: str = None
+    accept_finalized_after_timeout: bool = None
+
+    def __post_init__(self):
+        # Charger la config depuis le YAML si les valeurs sont None
+        if self.max_sol_per_trade is None:
+            self._load_from_yaml()
+        
+        # Valeurs par défaut pour les listes
+        if self.take_profit_levels is None:
+            self.take_profit_levels = [100, 300, 500]
+        if self.take_profit_portions is None:
+            self.take_profit_portions = [0.5, 0.3, 0.2]
+
+    def _load_from_yaml(self):
+        """Charge les valeurs depuis le fichier YAML"""
+        try:
+            from .autotrade_config_loader import get_config
+            config = get_config()
+            network_type = config.get_network_type()
+            
+            # Charger toutes les valeurs depuis le YAML
+            self.max_sol_per_trade = config.get_trading_value("max_sol_per_trade") or 0.0001
+            self.max_daily_budget = config.get_trading_value("max_daily_budget") or 0.01
+            self.max_simultaneous_positions = config.get("trading.max_simultaneous_positions", 2)
+            self.min_score_to_buy = config.get("trading.min_score_to_buy", 60)
+            self.min_confidence_level = config.get("trading.min_confidence_level", 40)
+            self.stop_loss_percentage = config.get("trading.stop_loss_percentage", -40)
+            self.take_profit_levels = config.get("trading.take_profit_levels", [100, 300, 500])
+            self.take_profit_portions = config.get("trading.take_profit_portions", [0.5, 0.3, 0.2])
+            self.max_token_age_minutes = config.get("trading.max_token_age_minutes", 10)
+            self.price_check_interval_seconds = config.get("monitoring.price_check_interval_seconds", 30)
+            self.slippage_bps = config.get("trading.slippage_bps", 200)
+            self.priority_fee_lamports = config.get_trading_value("priority_fee_lamports") or 100
+            self.network = Network.MAINNET if network_type == "mainnet" else Network.DEVNET
+            self.confirmation_timeout = config.get("trading.confirmation_timeout", 60)
+            self.confirmation_strategy = config.get("trading.confirmation_strategy", "smart")
+            
+            # Confirmation manuelle selon le réseau
+            manual_conf = config.get(f"trading.require_manual_confirmation.{network_type}")
+            self.require_manual_confirmation = manual_conf if manual_conf is not None else True
+            
+            self.accept_finalized_after_timeout = config.get("security.accept_finalized_after_timeout", True)
+            
+            print(f"📊 TradeConfig loaded from YAML:")
+            print(f"  Network: {self.network.value}")
+            print(f"  Max SOL/trade: {self.max_sol_per_trade}")
+            print(f"  Daily budget: {self.max_daily_budget}")
+            print(f"  Manual confirmation: {self.require_manual_confirmation}")
+            
+        except Exception as e:
+            print(f"⚠️ Could not load TradeConfig from YAML: {e}")
+            print("Using fallback values")
+            self._set_fallback_values()
+
+    def _set_fallback_values(self):
+        """Valeurs de fallback si le YAML n'est pas accessible"""
+        self.max_sol_per_trade = self.max_sol_per_trade or 0.0001
+        self.max_daily_budget = self.max_daily_budget or 0.01
+        self.max_simultaneous_positions = self.max_simultaneous_positions or 2
+        self.min_score_to_buy = self.min_score_to_buy or 60
+        self.min_confidence_level = self.min_confidence_level or 40
+        self.stop_loss_percentage = self.stop_loss_percentage or -40
+        self.max_token_age_minutes = self.max_token_age_minutes or 10
+        self.price_check_interval_seconds = self.price_check_interval_seconds or 30
+        self.slippage_bps = self.slippage_bps or 200
+        self.priority_fee_lamports = self.priority_fee_lamports or 100
+        self.network = self.network or Network.DEVNET
+        self.confirmation_timeout = self.confirmation_timeout or 60
+        self.require_manual_confirmation = self.require_manual_confirmation if self.require_manual_confirmation is not None else True
+        self.confirmation_strategy = self.confirmation_strategy or "smart"
+        self.accept_finalized_after_timeout = self.accept_finalized_after_timeout if self.accept_finalized_after_timeout is not None else True
 
     def get_confirmation_timeout(self) -> int:
         """Retourne le timeout selon la stratégie"""
@@ -157,12 +287,6 @@ class TradeConfig:
             return 60  # Plus long
         else:  # smart
             return 30  # Équilibré
-
-    def __post_init__(self):
-        if self.take_profit_levels is None:
-            self.take_profit_levels = [100, 300, 500]
-        if self.take_profit_portions is None:
-            self.take_profit_portions = [0.5, 0.3, 0.2]
 
     @property
     def solana_rpc_url(self) -> str:
@@ -229,6 +353,7 @@ class SolanaClient:
         self._session_active = False
         self.last_balance = None  # Initialize balance caching
         self.last_balance_time = 0  # Initialize balance caching timestamp
+        self.known_atas = {}
         try:
             if SOLANA_AVAILABLE:
                 private_key_bytes = base58.b58decode(private_key)
@@ -686,7 +811,156 @@ class JupiterClient:
         if self.session:
             await self.session.close()
 
+    async def test_jupiter_quote_simple():
+        """Test simple pour diagnostiquer le problème Jupiter"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                
+                # Test 1: Obtenir la liste des tokens
+                logger.debug("🔍 Test 1: Getting Jupiter token list...")
+                async with session.get("https://quote-api.jup.ag/v6/tokens") as response:
+                    logger.debug(f"Token list status: {response.status}")
+                    if response.status == 200:
+                        tokens = await response.json()
+                        logger.debug(f"Found {len(tokens)} tokens")
+                        
+                        # Chercher notre token
+                        target_token = "Fv73EXJBRfctJzLVC3P7uQP6er6JU8b4KtDr4LQFpump"
+                        found = any(token.get('address') == target_token for token in tokens)
+                        logger.debug(f"Target token found: {found}")
+                    else:
+                        logger.error(f"Failed to get token list: {response.status}")
+                
+                # Test 2: Test quote avec USDC (token connu)
+                logger.debug("🔍 Test 2: Testing quote with USDC...")
+                test_params = {
+                    "inputMint": "So11111111111111111111111111111111111111112",  # SOL
+                    "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",  # USDC
+                    "amount": "100000",  # 0.0001 SOL
+                    "slippageBps": "300"
+                }
+                
+                async with session.get("https://quote-api.jup.ag/v6/quote", params=test_params) as response:
+                    logger.debug(f"USDC quote status: {response.status}")
+                    if response.status == 200:
+                        quote = await response.json()
+                        logger.debug(f"USDC quote success: {quote.get('outAmount')} micro-USDC")
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"USDC quote failed: {error_text}")
+                
+                # Test 3: Test quote avec le token problématique
+                logger.debug("🔍 Test 3: Testing quote with target token...")
+                test_params_target = {
+                    "inputMint": "So11111111111111111111111111111111111111112",  # SOL
+                    "outputMint": "Fv73EXJBRfctJzLVC3P7uQP6er6JU8b4KtDr4LQFpump",  # Target token
+                    "amount": "100000",  # 0.0001 SOL
+                    "slippageBps": "300"
+                }
+                
+                async with session.get("https://quote-api.jup.ag/v6/quote", params=test_params_target) as response:
+                    logger.debug(f"Target token quote status: {response.status}")
+                    error_text = await response.text()
+                    logger.debug(f"Target token response: {error_text}")
+                    
+        except Exception as e:
+            logger.error(f"Test failed: {e}")
+
     async def get_quote(self, input_mint: str, output_mint: str, amount: int, slippage_bps: int = 200) -> Optional[Dict]:
+        """Obtient un devis de Jupiter avec debug amélioré"""
+        try:
+            url = f"{self.base_url}/quote"
+            
+            # 🆕 CORRECTION: Validation des paramètres d'entrée
+            if not input_mint or not output_mint:
+                logger.error("❌ Invalid mint addresses provided")
+                return None
+            
+            if amount <= 0:
+                logger.error(f"❌ Invalid amount: {amount}")
+                return None
+            
+            # 🆕 CORRECTION: S'assurer que les adresses sont au bon format
+            try:
+                # Valider les adresses Solana (doivent être 44 caractères en base58)
+                if len(input_mint) < 32 or len(input_mint) > 44:
+                    logger.error(f"❌ Invalid input_mint length: {len(input_mint)} (should be 44)")
+                    return None
+                if len(output_mint) != 44:
+                    logger.error(f"❌ Invalid output_mint length: {len(output_mint)} (should be 44)")
+                    return None
+            except Exception as e:
+                logger.error(f"❌ Error validating mint addresses: {e}")
+                return None
+            
+            params = {
+                "inputMint": input_mint,
+                "outputMint": output_mint,
+                "amount": str(amount),  # 🆕 CORRECTION: Convertir en string
+                "slippageBps": str(slippage_bps),  # 🆕 CORRECTION: Convertir en string
+                "onlyDirectRoutes": "false",
+                "asLegacyTransaction": "false"
+            }
+            
+            logger.debug(f"🔍 Jupiter quote request:")
+            logger.debug(f"   URL: {url}")
+            logger.debug(f"   Input mint: {input_mint}")
+            logger.debug(f"   Output mint: {output_mint}")
+            logger.debug(f"   Amount: {amount} lamports")
+            logger.debug(f"   Slippage: {slippage_bps} bps")
+            
+            async with self.session.get(url, params=params) as response:
+                # 🆕 DIAGNOSTIC APPROFONDI
+                logger.debug(f"📋 Response status: {response.status}")
+                logger.debug(f"📋 Response headers: {dict(response.headers)}")
+                
+                response_text = await response.text()
+                logger.debug(f"📋 Response body: {response_text[:500]}...")  # Premiers 500 caractères
+                
+                if response.status == 200:
+                    try:
+                        quote = json.loads(response_text)
+                        logger.debug(f"✅ Quote received: {quote.get('outAmount', 0)} tokens")
+                        return quote
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ Failed to parse JSON response: {e}")
+                        return None
+                        
+                elif response.status == 400:
+                    logger.error(f"❌ Jupiter quote failed with 400 Bad Request")
+                    logger.error(f"   Response: {response_text}")
+                    
+                    # 🆕 ANALYSER L'ERREUR 400
+                    try:
+                        error_data = json.loads(response_text)
+                        if 'error' in error_data:
+                            logger.error(f"   Jupiter error: {error_data['error']}")
+                        if 'message' in error_data:
+                            logger.error(f"   Error message: {error_data['message']}")
+                    except:
+                        logger.error(f"   Raw error response: {response_text}")
+                        
+                    # 🆕 SUGGESTIONS SELON L'ERREUR
+                    if "mint" in response_text.lower():
+                        logger.error("💡 Possible mint address issue - check if token exists")
+                    elif "amount" in response_text.lower():
+                        logger.error("💡 Possible amount issue - try different amount")
+                    elif "route" in response_text.lower():
+                        logger.error("💡 No route available - token may have no liquidity")
+                    
+                    return None
+                    
+                else:
+                    logger.error(f"❌ Jupiter quote failed: {response.status}")
+                    logger.error(f"   Response: {response_text}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"❌ Error getting Jupiter quote: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return None
+
+    async def get_quote_old(self, input_mint: str, output_mint: str, amount: int, slippage_bps: int = 200) -> Optional[Dict]:
         """Obtient un devis de Jupiter"""
         try:
             url = f"{self.base_url}/quote"
@@ -777,11 +1051,12 @@ class AutoTrader:
         self.daily_spent = 0.0
         self.daily_trades = 0
         self.last_reset_date = datetime.now().date()
-        self.SOL_MINT = "So11111111111111111111111111111111111111112"
+        self.SOL_MINT = "So11111111111111111111111111111111111111112"  # Vérifier si c'est bien 44 caractères
         self.is_running = False
         self.monitoring_task = None
         self.solana_client = None
-        self.known_atas = {"Dtznpvk7EBXHhTNvz1YjWCTByfPVFsDqMgafKA3ppump": "DX7XJdr7X53FFe1fga4DSJj86E8GHsoAmro4wnAvYTH2"}  # Cache for known ATAs
+        #self.known_atas = {"Fv73EXJBRfctJzLVC3P7uQP6er6JU8b4KtDr4LQFpump": "CX8AWFkLfVM1DWmSNv7T8WDzXTd2R3J3n3pMnN3gXy7J"}  # Cache for known ATAs
+        self.known_atas = {"Fv73EXJBRfctJzLVC3P7uQP6er6JU8b4KtDr4LQFpump": "CX8AWFkLfVM1DWmSNv7T8WDzXTd2R3J3n3pMnN3gXy7J"}
 
 
     async def get_sol_price_usd(self) -> float:
@@ -1169,8 +1444,85 @@ class AutoTrader:
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return None
 
-    
-    async def get_transaction_details(self, signature: str) -> Optional[Dict]:
+    async def get_transaction_details(self, signature: str, max_retries: int = 5, delay: float = 3.0) -> Optional[Dict]:
+        """Version corrigée avec paramètres consistants"""
+        if not self.solana_client:
+            return None
+            
+        async with self.solana_client as solana:
+            for attempt in range(max_retries):
+                try:
+                    logger.debug(f"🔍 Fetching transaction details (attempt {attempt + 1}/{max_retries}): {signature[:8]}...")
+                    
+                    # Délai progressif
+                    if attempt > 0:
+                        current_delay = delay * (1.5 ** (attempt - 1))
+                        logger.debug(f"⏳ Waiting {current_delay:.1f}s before retry...")
+                        await asyncio.sleep(current_delay)
+                    
+                    # 🆕 CORRECTION: TOUJOURS utiliser max_supported_transaction_version=0
+                    # Car vos transactions Jupiter utilisent la version 0
+                    
+                    if attempt < 3:
+                        # Tentatives 1-3: encoding json avec version 0
+                        tx_details = await solana.client.get_transaction(
+                            Signature.from_string(signature),
+                            encoding="json",
+                            max_supported_transaction_version=0  # 🆕 TOUJOURS inclure
+                        )
+                    else:
+                        # Tentatives 4-5: encoding jsonParsed avec version 0 
+                        tx_details = await solana.client.get_transaction(
+                            Signature.from_string(signature),
+                            encoding="jsonParsed",
+                            max_supported_transaction_version=0  # 🆕 TOUJOURS inclure
+                        )
+                    
+                    if tx_details.value:
+                        logger.debug(f"✅ Transaction details retrieved on attempt {attempt + 1}")
+                        
+                        # Gestion flexible des métadonnées selon le format de réponse
+                        meta = None
+                        if hasattr(tx_details.value, 'meta'):
+                            meta = tx_details.value.meta
+                        elif hasattr(tx_details.value, 'transaction') and hasattr(tx_details.value.transaction, 'meta'):
+                            meta = tx_details.value.transaction.meta
+                        
+                        if meta:
+                            fee_lamports = getattr(meta, 'fee', 0)
+                            logger.debug(f"📊 Transaction Meta (attempt {attempt + 1}):")
+                            logger.debug(f"   Error: {getattr(meta, 'err', 'None')}")
+                            logger.debug(f"   Fee: {fee_lamports} lamports ({fee_lamports / 1e9:.9f} SOL)")
+                            
+                            if getattr(meta, 'err', None):
+                                logger.error(f"❌ Transaction failed: {meta.err}")
+                                return {"success": False, "error": meta.err, "meta": meta}
+                            else:
+                                logger.debug(f"✅ Transaction successful with fee: {fee_lamports} lamports")
+                                return {"success": True, "meta": meta, "fee_lamports": fee_lamports}
+                        else:
+                            logger.warning(f"⚠️ Transaction found but no meta information (attempt {attempt + 1})")
+                            return {"success": None, "meta": None}
+                    else:
+                        logger.debug(f"❌ Transaction not found on attempt {attempt + 1}")
+                        
+                except Exception as e:
+                    error_str = str(e)
+                    logger.error(f"❌ Error fetching transaction details (attempt {attempt + 1}): {e}")
+                    
+                    # Analyser les erreurs spécifiques
+                    if "UnsupportedTransactionVersion" in error_str:
+                        logger.error("💡 Transaction version error - this should not happen with our fix!")
+                    elif "not found" in error_str.lower():
+                        logger.debug("Transaction not found by RPC, will retry...")
+                    elif "timeout" in error_str.lower():
+                        logger.debug("RPC timeout, will retry with longer delay...")
+                        delay *= 1.5
+                    
+            logger.warning(f"❌ Failed to fetch transaction details after {max_retries} attempts")
+            return None
+
+    async def get_transaction_details_old(self, signature: str) -> Optional[Dict]:
         """Récupère les détails complets d'une transaction"""
         if not self.solana_client:
             return None
@@ -1219,6 +1571,50 @@ class AutoTrader:
             except Exception as e:
                 logger.error(f"❌ Error fetching transaction details: {e}")
                 return None
+
+    async def get_real_transaction_fee_sync(self, signature: str) -> float:
+        """Récupère les vrais frais de transaction de manière synchrone après confirmation"""
+        try:
+            if not self.solana_client:
+                logger.warning("Solana client not available for fee retrieval")
+                return 0.000005
+                
+            # Attendre le délai nécessaire basé sur vos observations
+            logger.debug(f"Waiting for transaction details to be available for {signature[:8]}...")
+            await asyncio.sleep(8)  # Délai initial pour que les détails soient disponibles
+            
+            # Essayer de récupérer les détails avec quelques tentatives
+            for attempt in range(3):
+                try:
+                    if attempt > 0:
+                        logger.debug(f"Retry attempt {attempt + 1} for fee retrieval...")
+                        await asyncio.sleep(3)
+                    
+                    tx_details = await self.solana_client.client.get_transaction(
+                        Signature.from_string(signature),
+                        encoding="json",
+                        max_supported_transaction_version=0
+                    )
+                    
+                    if tx_details.value and hasattr(tx_details.value, 'meta') and tx_details.value.meta:
+                        fee_lamports = getattr(tx_details.value.meta, 'fee', 0)
+                        fee_sol = fee_lamports / 1e9
+                        
+                        logger.debug(f"Real transaction fee retrieved: {fee_lamports} lamports ({fee_sol:.9f} SOL)")
+                        return fee_sol
+                    else:
+                        logger.debug(f"Transaction details not yet available (attempt {attempt + 1})")
+                        
+                except Exception as e:
+                    logger.debug(f"Fee retrieval attempt {attempt + 1} failed: {e}")
+                    
+            # Si on n'arrive pas à récupérer les frais, utiliser l'estimation
+            logger.warning(f"Could not retrieve real fees for {signature[:8]}..., using estimate")
+            return 0.000005
+            
+        except Exception as e:
+            logger.error(f"Error in get_real_transaction_fee_sync: {e}")
+            return 0.000005
 
     async def execute_buy_order(self, token_address: str, token_symbol: str, sol_amount: float) -> Optional[Position]:
         try:
@@ -1394,8 +1790,95 @@ class AutoTrader:
                 confirmation_time = time.time() - confirmation_start
 
                 if confirmed:
-                    logger.debug(f"✅ Transaction confirmée en {confirmation_time:.1f}s")
+                    logger.debug(f"Transaction confirmée en {confirmation_time:.1f}s")
+
+                    # RÉCUPÉRATION SYNCHRONE DES VRAIS FRAIS
+                    logger.debug("Récupération des vrais frais de transaction...")
+                    real_transaction_fee = await self.get_real_transaction_fee_sync(tx_signature)
                     
+                    logger.debug(f"Frais réels récupérés: {real_transaction_fee:.9f} SOL")
+                    
+                    # Mettre à jour cost_breakdown avec les vrais frais
+                    cost_breakdown["transaction_fees"] = real_transaction_fee
+                    cost_breakdown["total_actual_fees"] = real_transaction_fee
+                    
+                    logger.debug(f"cost_breakdown mis à jour avec les frais réels: {cost_breakdown.get('transaction_fees'):.9f} SOL")
+
+
+                    if PORTFOLIO_DB_AVAILABLE:
+                        try:
+                            priority_fee_sol = cost_breakdown.get("priority_fees", 0)
+                            account_creation_fee = cost_breakdown.get("account_creation", 0)
+                            
+                            # 🆕 AJOUT: Debug des paramètres d'enregistrement
+                            fees_dict = {
+                                'transaction': real_transaction_fee,
+                                'priority': priority_fee_sol,
+                                'account_creation': account_creation_fee
+                            }
+                            
+                            logger.debug(f"🔍 FEES DICT POUR LA BASE:")
+                            logger.debug(f"   fees_dict: {fees_dict}")
+                            logger.debug(f"   fees_dict['transaction']: {fees_dict['transaction']:.9f} SOL")
+                            logger.debug(f"   Type fees_dict['transaction']: {type(fees_dict['transaction'])}")
+                            
+                            # Enregistrer la transaction
+                            db_success = record_trade_transaction(
+                                signature=tx_signature,
+                                network=self.config.network.value,
+                                token_address=token_address,
+                                token_symbol=token_symbol,
+                                operation_type="BUY",
+                                sol_amount=sol_amount,
+                                token_amount=estimated_tokens,
+                                price_per_token=estimated_price,
+                                fees=fees_dict,  # 🆕 Utiliser la variable pour debug
+                                jupiter_data=quote,
+                                confirmation_time=confirmation_time,
+                                status="CONFIRMED"
+                            )
+                            
+                            if db_success:
+                                logger.info("📊 Transaction enregistrée en base de données")
+                                
+                                # 🆕 AJOUT: Vérification immédiate en base
+                                try:
+                                    # Relire la transaction depuis la base pour vérifier
+                                    from .autotrade_portfolio_db import get_portfolio_db
+                                    db = get_portfolio_db("app/data/autotrader.db")  # Ajustez le chemin
+                                    
+                                    # Requête SQL directe pour vérifier
+                                    cursor = db.conn.cursor()
+                                    cursor.execute(
+                                        "SELECT transaction_fee_sol FROM transactions WHERE transaction_signature = ? ORDER BY timestamp DESC LIMIT 1",
+                                        (tx_signature,)
+                                    )
+                                    result = cursor.fetchone()
+                                    
+                                    if result:
+                                        db_fee = result[0]
+                                        logger.debug(f"🔍 VÉRIFICATION BASE DE DONNÉES:")
+                                        logger.debug(f"   Frais enregistrés en base: {db_fee:.9f} SOL")
+                                        logger.debug(f"   Frais attendus: {real_transaction_fee:.9f} SOL")
+                                        logger.debug(f"   Match: {abs(db_fee - real_transaction_fee) < 0.000000001}")
+                                        
+                                        if abs(db_fee - real_transaction_fee) > 0.000000001:
+                                            logger.error(f"❌ INCOHÉRENCE DÉTECTÉE!")
+                                            logger.error(f"   Envoyé à la base: {real_transaction_fee:.9f} SOL")
+                                            logger.error(f"   Enregistré en base: {db_fee:.9f} SOL")
+                                    else:
+                                        logger.warning("⚠️ Transaction introuvable en base immédiatement après enregistrement")
+                                        
+                                except Exception as e:
+                                    logger.debug(f"Could not verify database entry: {e}")
+                            else:
+                                logger.warning("❌ Échec de l'enregistrement en base de données")
+                                
+                        except Exception as e:
+                            logger.error(f"❌ Erreur lors de l'enregistrement en base: {e}")
+                    else:
+                        logger.debug("Portfolio database not available - skipping recording")
+                        
                     # Récupérer les frais réels de la transaction
                     try:
                         tx_details = await self.get_transaction_details(tx_signature)
@@ -1460,330 +1943,6 @@ class AutoTrader:
                             logger.warning(f"❓ Transaction status unclear")
                     
                     logger.error(f"🔗 Check transaction manually: {self.config.explorer_base_url}/tx/{tx_signature}{'?cluster=devnet' if self.config.network == Network.DEVNET else ''}")
-                    return None
-                            
-        except Exception as e:
-            logger.error(f"Erreur dans execute_buy_order : {e}")
-            logger.error(f"Trace complète : {traceback.format_exc()}")
-            return None
-
-    async def execute_buy_order_old(self, token_address: str, token_symbol: str, sol_amount: float) -> Optional[Position]:
-        try:
-            logger.debug(f"🔥 EXECUTING BUY ORDER: {sol_amount:.3f} SOL → {token_symbol} ({token_address[:8]}...) on {self.config.network_name}")
-            
-            if not self.wallet_private_key or not SOLANA_AVAILABLE:
-                logger.error("Running in simulation mode")
-                return await self._execute_simulated_buy(token_address, token_symbol, sol_amount)
-            
-            if not self.solana_client:
-                logger.debug("Initialisation du client Solana...")
-                await self.initialize_solana_client()
-                logger.debug(f"Client Solana initialisé : {self.solana_client}")
-            
-            async with JupiterClient(self.config.jupiter_api_url) as jupiter, self.solana_client as solana:
-                logger.debug(f"Contexte async entré : JupiterClient={jupiter}, SolanaClient={solana}")
-                logger.debug("Client Solana actif (vérifié par le gestionnaire de contexte)")
-                
-                # Vérification du compte de token
-                logger.debug(f"Vérification de l'ATA pour le mint : {token_address}")
-                ata = await self.create_token_account_if_needed(solana, token_address)
-                if not ata:
-                    logger.error("Aucun compte de token disponible et échec de la création")
-                    return None
-                logger.debug(f"Utilisation de l'ATA : {str(ata)[:8]}... pour le swap")
-                logger.debug(f"Adresse ATA complète : {str(ata)}")
-
-                account_creation_cost = 0.0  # ATA déjà existant
-
-                # Vérification du solde
-                logger.debug("Vérification du solde du portefeuille...")
-                can_afford, balance_msg, cost_breakdown = await self.can_afford_trade(sol_amount, account_creation_cost, solana)
-                
-                logger.debug(f"💰 Analyse du solde ({self.config.network_name}) :")
-                for key, value in cost_breakdown.items():
-                    if isinstance(value, (int, float)):
-                        logger.debug(f"  {key} : {value:.6f} SOL")
-                    else:
-                        logger.debug(f"  {key} : {value}")
-                
-                if not can_afford:
-                    logger.error(f"❌ {balance_msg}")
-                    return None
-                
-                logger.debug(f"✅ {balance_msg}")
-                
-                # Paramètres de la transaction
-                sol_lamports = int(sol_amount * 1e9)
-                if sol_lamports < 1000:
-                    logger.error(f"Montant trop faible : {sol_amount:.9f} SOL")
-                    return None
-                logger.debug(f"Paramètres de la transaction : sol_lamports={sol_lamports}, slippage_bps={self.config.slippage_bps}")
-                
-                # Obtenir un devis de Jupiter
-                logger.debug("Récupération du devis depuis Jupiter...")
-                quote = await jupiter.get_quote(
-                    input_mint=self.SOL_MINT,
-                    output_mint=token_address,
-                    amount=sol_lamports,
-                    slippage_bps=self.config.slippage_bps
-                )
-                
-                if not quote:
-                    logger.error("Échec de la récupération du devis depuis Jupiter")
-                    return None
-                logger.debug(f"Devis Jupiter reçu : {quote}")
-                logger.debug(f"📊 Détails du devis : in_amount={quote.get('inAmount')}, out_amount={quote.get('outAmount')}, price_impact={quote.get('priceImpactPct')}%")
-                
-                # Calcul des détails de la transaction
-                estimated_tokens_raw = int(quote.get('outAmount', 0))
-                token_decimals = 6  # À ajuster selon les métadonnées du token
-                estimated_tokens = estimated_tokens_raw / (10 ** token_decimals)
-                estimated_price = sol_amount / estimated_tokens if estimated_tokens > 0 else 0
-                impact_pct = float(quote.get('priceImpactPct', 0))
-                
-                logger.debug(f"📊 Analyse du devis :")
-                logger.debug(f"  Entrée : {sol_amount:.6f} SOL")
-                logger.debug(f"  Sortie : {estimated_tokens:.0f} {token_symbol}")
-                logger.debug(f"  Prix par token : {estimated_price:.8f} SOL")
-                logger.debug(f"  Impact sur le prix : {impact_pct:.2f}%")
-                
-                # Confirmation utilisateur si nécessaire
-                if self.config.require_manual_confirmation:
-                    confirmation_details = {
-                        "Opération": "ACHAT",
-                        "Token": f"{token_symbol} ({token_address[:8]}...)",
-                        "Montant SOL": f"{sol_amount:.6f} SOL",
-                        "Tokens attendus": f"{estimated_tokens:.0f} {token_symbol}",
-                        "Prix par token": f"{estimated_price:.8f} SOL",
-                        "Impact sur le prix": f"{impact_pct:.2f}%",
-                        "Solde actuel": f"{cost_breakdown.get('current_balance', 0):.6f} SOL",
-                        "Solde restant": f"{cost_breakdown.get('available_after', 0):.6f} SOL"
-                    }
-                    if not ask_user_confirmation("Achat de token", confirmation_details, self.config.network):
-                        logger.debug("Transaction annulée par l'utilisateur")
-                        return None
-                
-                # Obtenir les frais de priorité
-                logger.debug("Récupération des frais de priorité...")
-                priority_fee = await solana.get_dynamic_priority_fee()
-                logger.debug(f"Frais de priorité : {priority_fee} lamports")
-                
-                # Obtenir la transaction de swap depuis Jupiter
-                logger.debug("Récupération de la transaction de swap depuis Jupiter...")
-                swap_data = await jupiter.get_swap_transaction(
-                    quote,
-                    str(solana.public_key),
-                    priority_fee
-                )
-                
-                if not swap_data:
-                    logger.error("Échec de la récupération de la transaction de swap depuis Jupiter")
-                    return None
-                logger.debug(f"Données de la transaction Jupiter : {swap_data}")
-                logger.debug(f"📜 Clé 'swapTransaction' présente : {'swapTransaction' in swap_data}")
-                
-                # Parse et préparer la transaction
-                logger.debug("Parsing des octets de la transaction...")
-                transaction_bytes = base64.b64decode(swap_data.get('swapTransaction'))
-                logger.debug(f"Octets de la transaction (taille) : {len(transaction_bytes)}")
-                transaction = VersionedTransaction.from_bytes(transaction_bytes)
-                logger.debug(f"Transaction parsée : {transaction}")
-                logger.debug(f"🔍 Détails de la transaction avant signature :")
-                logger.debug(f"  Signatures : {transaction.signatures}")
-                logger.debug(f"  Blockhash : {transaction.message.recent_blockhash}")
-                logger.debug(f"  Compte principal : {transaction.message.account_keys[0]}")
-
-                # Débogage de la transaction
-                logger.debug("🔧 DEBUG : Analyse de la transaction avant signature...")
-                self.debug_transaction_info(transaction, solana.keypair)
-
-                # Rafraîchir le blockhash
-                logger.debug("Récupération d'un blockhash frais...")
-                recent_blockhash = (await solana.client.get_latest_blockhash()).value.blockhash
-                logger.debug(f"Nouveau blockhash : {recent_blockhash}")
-
-                # Charger les Address Lookup Tables (ATL)
-                address_lookup_tables = []
-                for atl in transaction.message.address_table_lookups:
-                    logger.debug(f"Chargement de l'ATL : {atl.account_key}")
-                    try:
-                        lookup_table = await solana.load_address_lookup_table(atl.account_key)
-                        if lookup_table:
-                            address_lookup_tables.append(lookup_table)
-                            logger.debug(f"ATL chargée : {atl.account_key}, {len(lookup_table.addresses)} adresses")
-                        else:
-                            logger.error(f"Échec du chargement de l'ATL : {atl.account_key}")
-                            return None
-                    except Exception as e:
-                        logger.error(f"Erreur lors du chargement de l'ATL {atl.account_key} : {e}")
-                        logger.error(f"Trace complète : {traceback.format_exc()}")
-                        return None
-
-                # # Déterminer les indices des comptes signataires et modifiables
-                # header = transaction.message.header
-                # num_required_signatures = header.num_required_signatures
-                # num_readonly_signed_accounts = header.num_readonly_signed_accounts
-                # num_readonly_unsigned_accounts = header.num_readonly_unsigned_accounts
-
-                # signer_indices = list(range(num_required_signatures))
-                # writable_signer_indices = list(range(num_required_signatures - num_readonly_signed_accounts))
-                # total_accounts = len(transaction.message.account_keys)
-                # writable_unsigned_indices = list(range(num_required_signatures, total_accounts - num_readonly_unsigned_accounts))
-
-                # # Combiner les account_keys et les adresses de l'ATL
-                # all_account_keys = list(transaction.message.account_keys)
-                # for atl in transaction.message.address_table_lookups:
-                #     for idx in atl.writable_indexes:
-                #         all_account_keys.append(address_lookup_tables[0].addresses[idx])
-                #     for idx in atl.readonly_indexes:
-                #         all_account_keys.append(address_lookup_tables[0].addresses[idx])
-
-                # # Convertir les CompiledInstruction en Instruction
-                # instructions = []
-                # for compiled_instr in transaction.message.instructions:
-                #     program_id = transaction.message.account_keys[compiled_instr.program_id_index]
-                #     accounts = []
-                #     for account_idx in compiled_instr.accounts:
-                #         try:
-                #             pubkey = all_account_keys[account_idx]
-                #             accounts.append(AccountMeta(
-                #                 pubkey=pubkey,
-                #                 is_signer=account_idx in signer_indices,
-                #                 is_writable=(account_idx in writable_signer_indices or account_idx in writable_unsigned_indices)
-                #             ))
-                #         except IndexError:
-                #             logger.error(f"IndexError : account_idx={account_idx} dépasse la longueur de all_account_keys={len(all_account_keys)}")
-                #             return None
-                #     instruction = Instruction(
-                #         program_id=program_id,
-                #         accounts=accounts,
-                #         data=compiled_instr.data
-                #     )
-                #     instructions.append(instruction)
-                #     logger.debug(f"Instruction convertie : program_id={program_id}, accounts={len(accounts)}, data={compiled_instr.data[:16]}...")
-
-                # Créer un nouveau MessageV0 avec le blockhash mis à jour
-                # new_message = MessageV0.try_compile(
-                #     payer=solana.public_key,
-                #     instructions=instructions,
-                #     address_lookup_table_accounts=address_lookup_tables,
-                #     recent_blockhash=recent_blockhash
-                # )
-                # logger.debug(f"Nouveau MessageV0 créé avec blockhash : {recent_blockhash}")
-
-                 # Vérification du keypair avant signature
-                # logger.debug("✍️ Préparation de la signature de la transaction...")
-                # logger.debug(f"Keypair utilisé : pubkey={str(solana.keypair.pubkey())[:8]}...")
-                # if str(solana.keypair.pubkey()) != str(new_message.account_keys[0]):
-                #     logger.error(f"Erreur : La clé publique du keypair ({solana.keypair.pubkey()}) ne correspond pas au compte principal ({new_message.account_keys[0]})")
-                #     return None
-
-                # # Créer la transaction signée (signing happens in constructor)
-                # transaction = VersionedTransaction(new_message, [solana.keypair])
-                # logger.debug("✅ Transaction signée automatiquement lors de la construction")
-                # logger.debug(f"  Signature : {str(transaction.signatures[0])[:8]}...")
-
-                try:
-                    # Méthode simplifiée : ne pas reconstruire toute la transaction
-                    # Juste mettre à jour le blockhash dans la transaction existante
-                    
-                    # Créer une nouvelle transaction avec le même message mais un nouveau blockhash
-                    original_message = transaction.message
-                    
-                    # Créer un nouveau message avec blockhash mis à jour
-                    # Mais garder exactement la même structure d'accounts et d'instructions
-                    new_message = MessageV0(
-                        header=original_message.header,
-                        account_keys=original_message.account_keys,
-                        recent_blockhash=recent_blockhash,
-                        instructions=original_message.instructions,
-                        address_table_lookups=original_message.address_table_lookups
-                    )
-                    
-                    logger.debug(f"Nouveau MessageV0 créé avec blockhash mis à jour : {recent_blockhash}")
-                    
-                    # Créer la transaction signée avec le nouveau message
-                    transaction = VersionedTransaction(new_message, [solana.keypair])
-                    logger.debug("✅ Transaction reconstruite avec nouveau blockhash et signée")
-                    logger.debug(f"  Signature : {str(transaction.signatures[0])[:8]}...")
-                    
-                except Exception as reconstruct_error:
-                    logger.error(f"Erreur lors de la reconstruction : {reconstruct_error}")
-                    logger.error(f"Trace complète : {traceback.format_exc()}")
-                    
-                    # Fallback : utiliser la transaction originale sans modification du blockhash
-                    logger.warning("⚠️ Utilisation de la transaction originale sans modification du blockhash")
-                    transaction = VersionedTransaction(transaction.message, [solana.keypair])
-                    logger.debug("✅ Transaction originale signée")
-                    logger.debug(f"  Signature : {str(transaction.signatures[0])[:8]}...")
-
-                
-
-               
-
-                # Débogage de la transaction signée
-                logger.debug("🔧 DEBUG : Analyse de la transaction signée...")
-                self.debug_transaction_info(transaction, solana.keypair)
-                
-                # Simuler la transaction
-                logger.debug("🔍 Simulation de la transaction...")
-                simulation_result = await solana.simulate_transaction(transaction)
-                if not simulation_result:
-                    logger.error("❌ Échec de la simulation de la transaction")
-                    logger.debug(f"Résultat de la simulation : {simulation_result}")
-                    return None
-                
-                logger.debug("✅ Simulation de la transaction réussie")
-                logger.debug(f"Résultat de la simulation : {simulation_result}")
-                
-                # Envoyer la transaction
-                logger.debug(f"📡 Envoi de la transaction à Solana {self.config.network_name}...")
-                tx_signature = await solana.send_transaction(transaction)
-                if not tx_signature:
-                    logger.error("❌ Échec de l'envoi de la transaction")
-                    return None
-                logger.debug(f"Signature de la transaction : {tx_signature}")
-                
-                # Confirmer la transaction
-                logger.debug(f"⏳ Confirmation de la transaction : {tx_signature[:8]}...")
-                confirmation_start = time.time()
-                
-                if await solana.confirm_transaction(tx_signature, self.config.confirmation_timeout):
-                    confirmation_time = time.time() - confirmation_start
-                    logger.debug(f"✅ Transaction confirmée en {confirmation_time:.1f}s")
-                    
-                    # Créer une position
-                    position = Position(
-                        token_address=token_address,
-                        token_symbol=token_symbol,
-                        entry_price=estimated_price,
-                        sol_amount=sol_amount,
-                        token_amount=estimated_tokens,
-                        entry_time=datetime.now(),
-                        entry_tx_signature=tx_signature,
-                        network=self.config.network
-                    )
-                    
-                    # Mettre à jour l'état du trader
-                    self.positions[token_address] = position
-                    self.daily_spent += sol_amount
-                    self.daily_trades += 1
-                    
-                    logger.debug(f"🎉 ACHAT CONFIRMÉ !")
-                    logger.debug(f"   Token : {estimated_tokens:.0f} {token_symbol}")
-                    logger.debug(f"   Coût : {sol_amount:.6f} SOL")
-                    logger.debug(f"   Prix : {estimated_price:.8f} SOL par token")
-                    logger.debug(f"   Réseau : {self.config.network_name}")
-                    logger.debug(f"   TX : {tx_signature}")
-                    logger.debug(f"   Explorer : {position.get_explorer_url()}")
-                    
-                    return position
-                else:
-                    logger.error("❌ Échec ou timeout de la confirmation de la transaction")
-                    explorer_url = f"{self.config.explorer_base_url}/tx/{tx_signature}"
-                    if self.config.network == Network.DEVNET:
-                        explorer_url += "?cluster=devnet"
-                    logger.error(f"   Vérifiez le statut de la transaction : {explorer_url}")
                     return None
                             
         except Exception as e:
@@ -1868,11 +2027,15 @@ class AutoTrader:
         logger.debug("🛑 Stopping position monitoring...")
 
     def get_stats(self) -> Dict[str, Any]:
-        """Retourne les statistiques du trader"""
+        """Retourne les statistiques du trader enrichies avec les données de la base"""
         self.reset_daily_stats_if_needed()
+        
+        # Calculs basiques depuis les positions en mémoire
         total_positions_value = sum(p.current_value for p in self.positions.values())
         total_pnl = sum(p.current_value - p.sol_amount for p in self.positions.values())
-        return {
+        
+        # Stats de base
+        stats = {
             "is_running": self.is_running,
             "network": self.config.network.value,
             "network_name": self.config.network_name,
@@ -1902,6 +2065,149 @@ class AutoTrader:
                 for p in self.positions.values()
             ]
         }
+        
+        # 🆕 ENRICHISSEMENT AVEC LES DONNÉES DE LA BASE
+        if PORTFOLIO_DB_AVAILABLE:
+            try:
+                # Déterminer le chemin de la base selon la structure du projet
+                db_paths = [
+                    "app/data/autotrader.db",      # Si lancé depuis la racine
+                    "data/autotrader.db",          # Si lancé depuis app/
+                    "../data/autotrader.db"        # Si lancé depuis un sous-dossier
+                ]
+                
+                db_path = None
+                for path in db_paths:
+                    if Path(path).exists():
+                        db_path = path
+                        break
+                
+                if db_path:
+                    db = get_portfolio_db(db_path)
+                    
+                    # Récupérer le résumé du portfolio depuis la base
+                    db_summary = db.get_portfolio_summary(self.config.network.value)
+                    
+                    # Récupérer les stats quotidiennes
+                    daily_stats = db.get_daily_stats(network=self.config.network.value)
+                    
+                    # Récupérer les positions détaillées
+                    db_positions = db.get_all_positions(self.config.network.value)
+                    
+                    # Ajouter les stats de la base
+                    stats.update({
+                        # Portfolio global depuis la base
+                        "db_total_value_sol": db_summary.get('total_value_sol', 0),
+                        "db_total_invested_sol": db_summary.get('total_invested_sol', 0),
+                        "db_total_fees_sol": db_summary.get('total_fees_sol', 0),
+                        "db_unrealized_pnl_sol": db_summary.get('unrealized_pnl_sol', 0),
+                        "db_unrealized_pnl_percent": db_summary.get('unrealized_pnl_percent', 0),
+                        "db_active_positions": db_summary.get('active_positions', 0),
+                        "db_total_transactions": db_summary.get('total_transactions', 0),
+                        
+                        # Stats quotidiennes depuis la base
+                        "db_daily_trades": daily_stats.get('total_trades', 0),
+                        "db_daily_buy_trades": daily_stats.get('buy_trades', 0),
+                        "db_daily_sell_trades": daily_stats.get('sell_trades', 0),
+                        "db_daily_spent": daily_stats.get('total_spent', 0),
+                        "db_daily_received": daily_stats.get('total_received', 0),
+                        "db_daily_fees": daily_stats.get('total_fees', 0),
+                        "db_avg_confirmation_time": daily_stats.get('avg_confirmation_time', 0),
+                        "db_daily_success_rate": daily_stats.get('success_rate', 100),
+                        
+                        # Positions détaillées depuis la base
+                        "db_positions": [
+                            {
+                                "token": pos.token_symbol,
+                                "address": pos.token_address[:8] + "...",
+                                "full_address": pos.token_address,
+                                "network": pos.network,
+                                "tokens_held": pos.total_tokens_held,
+                                "avg_entry_price": pos.average_entry_price_sol,
+                                "total_invested": pos.total_sol_invested,
+                                "current_price": pos.current_price_sol or 0,
+                                "current_value": pos.current_value_sol or 0,
+                                "unrealized_pnl_sol": pos.unrealized_pnl_sol or 0,
+                                "unrealized_pnl_percent": pos.unrealized_pnl_percent or 0,
+                                "total_transactions": pos.total_transactions,
+                                "total_fees_paid": pos.total_fees_paid_sol,
+                                "first_purchase": pos.first_purchase_timestamp.isoformat(),
+                                "last_transaction": pos.last_transaction_timestamp.isoformat(),
+                                "roi_percent": ((pos.current_value_sol or 0) - pos.total_sol_invested - pos.total_fees_paid_sol) / (pos.total_sol_invested + pos.total_fees_paid_sol) * 100 if (pos.total_sol_invested + pos.total_fees_paid_sol) > 0 else 0
+                            }
+                            for pos in db_positions
+                        ],
+                        
+                        # Méta-informations
+                        "portfolio_db_available": True,
+                        "portfolio_db_path": db_path,
+                        "data_source": "database",
+                        "last_db_update": datetime.now().isoformat()
+                    })
+                    
+                    # Identifier les meilleurs/pires performers
+                    if db_positions:
+                        best_performer = max(db_positions, key=lambda p: p.unrealized_pnl_percent or -999)
+                        worst_performer = min(db_positions, key=lambda p: p.unrealized_pnl_percent or 999)
+                        
+                        stats.update({
+                            "best_performer": {
+                                "token": best_performer.token_symbol,
+                                "pnl_percent": best_performer.unrealized_pnl_percent or 0,
+                                "pnl_sol": best_performer.unrealized_pnl_sol or 0
+                            },
+                            "worst_performer": {
+                                "token": worst_performer.token_symbol,
+                                "pnl_percent": worst_performer.unrealized_pnl_percent or 0,
+                                "pnl_sol": worst_performer.unrealized_pnl_sol or 0
+                            }
+                        })
+                    
+                    # Récupérer les transactions récentes
+                    try:
+                        recent_transactions = db.get_transaction_history(limit=10, network=self.config.network.value)
+                        stats["recent_transactions"] = [
+                            {
+                                "timestamp": tx.get('timestamp', ''),
+                                "operation": tx.get('operation_type', ''),
+                                "token": tx.get('token_symbol', 'UNKNOWN'),
+                                "amount_sol": tx.get('sol_amount_spent', 0) if tx.get('operation_type') == 'BUY' else tx.get('sol_amount_received', 0),
+                                "token_amount": tx.get('token_amount', 0),
+                                "signature": tx.get('transaction_signature', '')[:8] + "...",
+                                "status": tx.get('status', 'UNKNOWN')
+                            }
+                            for tx in recent_transactions[:5]  # Limiter à 5 pour les stats
+                        ]
+                    except Exception as e:
+                        logger.debug(f"Could not get recent transactions: {e}")
+                        stats["recent_transactions"] = []
+                    
+                    logger.debug("✅ Stats enrichies avec les données de la base")
+                    
+                else:
+                    logger.debug("❌ Base de données introuvable pour enrichir les stats")
+                    stats.update({
+                        "portfolio_db_available": False,
+                        "data_source": "memory_only",
+                        "db_error": "Database file not found"
+                    })
+                    
+            except Exception as e:
+                logger.error(f"❌ Erreur lors de l'enrichissement des stats: {e}")
+                stats.update({
+                    "portfolio_db_available": False,
+                    "data_source": "memory_only",
+                    "db_error": str(e)
+                })
+        else:
+            logger.debug("⚠️ Portfolio DB non disponible")
+            stats.update({
+                "portfolio_db_available": False,
+                "data_source": "memory_only",
+                "db_error": "Portfolio DB module not imported"
+            })
+        
+        return stats
 
 def calculate_opportunity_score(token_data: Dict) -> tuple[float, float]:
     """Calcule le score d'opportunité d'un token"""
@@ -1931,39 +2237,19 @@ def calculate_opportunity_score(token_data: Dict) -> tuple[float, float]:
 def create_network_config(network_name: str = None) -> TradeConfig:
     """Crée une configuration depuis le fichier YAML"""
     # Charger depuis YAML
-    config_data = load_trading_config()
+    config = TradeConfig()
 
-    # Déterminer le réseau
-    if network_name is None:
-        # Utiliser celui du fichier YAML
-        network = Network.MAINNET if config_data['network'] == 'mainnet' else Network.DEVNET
-    elif network_name.lower() in ['mainnet', 'main']:
-        network = Network.MAINNET
-    elif network_name.lower() in ['devnet', 'dev']:
-        network = Network.DEVNET
-    else:
-        # Fallback au fichier YAML si valeur invalide
-        network = Network.MAINNET if config_data['network'] == 'mainnet' else Network.DEVNET
+    # Override du réseau si spécifié
+    if network_name is not None:
+        if network_name.lower() in ['mainnet', 'main']:
+            config.network = Network.MAINNET
+        elif network_name.lower() in ['devnet', 'dev']:
+            config.network = Network.DEVNET
+        
+        # Recharger la config avec le nouveau réseau
+        config._load_from_yaml()
     
-    return TradeConfig(
-        max_sol_per_trade=config_data['max_sol_per_trade'],
-        max_daily_budget=config_data['max_daily_budget'],
-        max_simultaneous_positions=config_data['max_simultaneous_positions'],
-        min_score_to_buy=config_data['min_score_to_buy'],
-        min_confidence_level=config_data['min_confidence_level'],
-        stop_loss_percentage=config_data['stop_loss_percentage'],
-        take_profit_levels=config_data['take_profit_levels'],
-        take_profit_portions=config_data['take_profit_portions'],
-        max_token_age_minutes=config_data['max_token_age_minutes'],
-        slippage_bps=config_data['slippage_bps'],
-        priority_fee_lamports=config_data['priority_fee_lamports'],
-        network=network,
-        confirmation_timeout=config_data['confirmation_timeout'],
-        require_manual_confirmation=config_data['require_manual_confirmation'],
-        confirmation_strategy=config_data['confirmation_strategy'],
-        price_check_interval_seconds=30,  # Valeur par défaut
-        accept_finalized_after_timeout=True  # Valeur par défaut
-    )
+    return config
 
 async def test_autotrader(network: str = "devnet"):
     """Fonction de test pour l'autotrader avec vraies transactions"""
@@ -2008,13 +2294,13 @@ async def test_autotrader(network: str = "devnet"):
     try:
         test_tokens = [
             {
-                # USDC devnet - token plus standard
-                "address": "Dtznpvk7EBXHhTNvz1YjWCTByfPVFsDqMgafKA3ppump",
-                "symbol": "xxx",
-                "name": "xxx Coin Devnet",
+                # brick coin mainnet - token plus standard
+                "address": "Fv73EXJBRfctJzLVC3P7uQP6er6JU8b4KtDr4LQFpump",
+                "symbol": "brick",
+                "name": "brick",
                 "usd_market_cap": 50000,
                 "created_at": datetime.now().isoformat(),
-                "description": "xxx token on devnet for testing"
+                "description": "brick token"
             }
         ]
         
@@ -2059,12 +2345,12 @@ async def test_autotrader(network: str = "devnet"):
                 else:
                     print("❌ Failed to open position")
                 
-                print("\n⏳ Waiting 10 seconds before next token...")
-                await asyncio.sleep(10)
+                # print("\n⏳ Waiting 10 seconds before next token...")
+                # await asyncio.sleep(10)
         
         if trader.positions:
-            print(f"\n⏳ Running monitoring for 60 seconds...")
-            await asyncio.sleep(60)
+            print(f"\n⏳ Running monitoring for 30 seconds...")
+            await asyncio.sleep(30)
         else:
             print("\n📊 No positions opened, running brief monitoring...")
             await asyncio.sleep(10)
@@ -2144,7 +2430,7 @@ if __name__ == "__main__":
     else:
         network = None  # Utiliser la config du fichier YAML
         
-    
+    #asyncio.run(test_jupiter_quote_simple())
     print("AutoTrader REAL Trading Test System")
     print("=" * 60)
     

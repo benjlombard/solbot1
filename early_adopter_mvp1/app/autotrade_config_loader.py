@@ -23,6 +23,21 @@ class SimpleConfigLoader:
         self.config: Dict[str, Any] = {}
         self.load_config()
     
+    
+    def get_log_level(self) -> str:
+            """Récupère le niveau de logging configuré"""
+            return self.get("logging.level", "INFO")
+        
+    def get_logging_config(self) -> Dict[str, Any]:
+        """Récupère toute la configuration de logging"""
+        return {
+            "level": self.get("logging.level", "INFO"),
+            "format": self.get("logging.format", "text"),
+            "file_rotation_enabled": self.get("logging.file_rotation.enabled", True),
+            "max_size_mb": self.get("logging.file_rotation.max_size_mb", 50),
+            "backup_count": self.get("logging.file_rotation.backup_count", 5)
+        }
+
     def load_config(self):
         """Charge la configuration depuis le fichier"""
         if not self.config_file.exists():
