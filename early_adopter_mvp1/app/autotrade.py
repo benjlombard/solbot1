@@ -234,7 +234,7 @@ class SolanaClient:
                 private_key_bytes = base58.b58decode(private_key)
                 self.keypair = Keypair.from_bytes(private_key_bytes)
                 self.public_key = self.keypair.pubkey()
-                logger.info(f"🔑 Wallet loaded: {str(self.public_key)[:8]}...{str(self.public_key)[-8:]} ({network.value})")
+                logger.debug(f"🔑 Wallet loaded: {str(self.public_key)[:8]}...{str(self.public_key)[-8:]} ({network.value})")
                 logger.debug(f"Clé publique complète : {self.public_key}")
             else:
                 logger.error("Solana libraries not available")
@@ -355,16 +355,16 @@ class SolanaClient:
                 return None
             
             lamports = int(sol_amount * 1e9)
-            logger.info(f"🪂 Requesting {sol_amount} SOL airdrop on devnet...")
+            logger.debug(f"🪂 Requesting {sol_amount} SOL airdrop on devnet...")
             
             response = await self.client.request_airdrop(self.public_key, lamports)
             if response.value:
                 tx_signature = str(response.value)
-                logger.info(f"✅ Airdrop requested: {tx_signature}")
+                logger.debug(f"✅ Airdrop requested: {tx_signature}")
                 
                 # Attendre la confirmation
                 if await self.confirm_transaction(tx_signature):
-                    logger.info(f"✅ Airdrop confirmed: {sol_amount} SOL added to wallet")
+                    logger.debug(f"✅ Airdrop confirmed: {sol_amount} SOL added to wallet")
                     return tx_signature
                 else:
                     logger.error("❌ Airdrop confirmation failed")
@@ -387,10 +387,10 @@ class SolanaClient:
             # Check cache first
             if token_mint in self.known_atas:
                 ata_address = self.known_atas[token_mint]
-                logger.info(f"✅ Found cached token account for mint {token_mint[:8]}...")
-                logger.info(f"==================== FULL ATA ADDRESS ====================")
-                logger.info(f"ATA: {ata_address}")
-                logger.info(f"========================================================")
+                logger.debug(f"✅ Found cached token account for mint {token_mint[:8]}...")
+                logger.debug(f"==================== FULL ATA ADDRESS ====================")
+                logger.debug(f"ATA: {ata_address}")
+                logger.debug(f"========================================================")
                 return Pubkey.from_string(ata_address)
 
             for attempt in range(2):  # Reduced to 2 retries
@@ -409,10 +409,10 @@ class SolanaClient:
                                 logger.debug(f"Found account with mint: {account_data.mint}, pubkey: {account.pubkey}")
                                 if str(account_data.mint) == str(mint_pubkey):
                                     ata_address = str(account.pubkey)
-                                    logger.info(f"✅ Token account found for mint {token_mint[:8]}...")
-                                    logger.info(f"==================== FULL ATA ADDRESS ====================")
-                                    logger.info(f"ATA: {ata_address}")
-                                    logger.info(f"========================================================")
+                                    logger.debug(f"✅ Token account found for mint {token_mint[:8]}...")
+                                    logger.debug(f"==================== FULL ATA ADDRESS ====================")
+                                    logger.debug(f"ATA: {ata_address}")
+                                    logger.debug(f"========================================================")
                                     self.known_atas[token_mint] = ata_address  # Cache the ATA
                                     return account.pubkey
                             except Exception as e:
@@ -444,10 +444,10 @@ class SolanaClient:
                 if str(account_data.mint) != str(mint_pubkey):
                     logger.error(f"Token account mint {account_data.mint} does not match requested mint {token_mint}")
                     return None
-                logger.info(f"✅ Manually entered token account for mint {token_mint[:8]}...")
-                logger.info(f"==================== FULL ATA ADDRESS ====================")
-                logger.info(f"ATA: {manual_input}")
-                logger.info(f"========================================================")
+                logger.debug(f"✅ Manually entered token account for mint {token_mint[:8]}...")
+                logger.debug(f"==================== FULL ATA ADDRESS ====================")
+                logger.debug(f"ATA: {manual_input}")
+                logger.debug(f"========================================================")
                 self.known_atas[token_mint] = manual_input  # Cache the manual ATA
                 return manual_account_pubkey
             except Exception as e:
@@ -499,24 +499,24 @@ class SolanaClient:
                 logger.error("Keypair Solana non disponible")
                 return None
                 
-            logger.info(f"📡 Envoi de la transaction à Solana {self.network.value}...")
+            logger.debug(f"📡 Envoi de la transaction à Solana {self.network.value}...")
             
             # Loguer des détails sur la transaction
             serialized_tx = base64.b64encode(bytes(transaction)).decode()
-            logger.info(f"📊 Transaction Details:")
-            logger.info(f"   Size: {len(serialized_tx)} chars (base64)")
-            logger.info(f"   Signatures: {len(transaction.signatures)}")
-            logger.info(f"   Instructions: {len(transaction.message.instructions)}")
-            logger.info(f"   Account keys: {len(transaction.message.account_keys)}")
-            logger.info(f"   Blockhash: {transaction.message.recent_blockhash}")
-            logger.info(f"   ATL lookups: {len(transaction.message.address_table_lookups)}")
+            logger.debug(f"📊 Transaction Details:")
+            logger.debug(f"   Size: {len(serialized_tx)} chars (base64)")
+            logger.debug(f"   Signatures: {len(transaction.signatures)}")
+            logger.debug(f"   Instructions: {len(transaction.message.instructions)}")
+            logger.debug(f"   Account keys: {len(transaction.message.account_keys)}")
+            logger.debug(f"   Blockhash: {transaction.message.recent_blockhash}")
+            logger.debug(f"   ATL lookups: {len(transaction.message.address_table_lookups)}")
             
             # Vérifier que la transaction est bien signée
             if not transaction.signatures or all(str(sig) == "1111111111111111111111111111111111111111111111111111111111111111" for sig in transaction.signatures):
                 logger.error("❌ Transaction not properly signed")
                 return None
             
-            logger.info(f"   First signature: {str(transaction.signatures[0])[:16]}...")
+            logger.debug(f"   First signature: {str(transaction.signatures[0])[:16]}...")
             
             opts = TxOpts(
                 skip_preflight=False,
@@ -531,13 +531,13 @@ class SolanaClient:
             response = await self.client.send_transaction(transaction, opts=opts)
             send_time = time.time() - send_start
             
-            logger.info(f"📨 Send completed in {send_time:.1f}s")
+            logger.debug(f"📨 Send completed in {send_time:.1f}s")
             logger.debug(f"📋 RPC Response: {response}")
             
             if response.value:
                 tx_signature = str(response.value)
-                logger.info(f"✅ Transaction sent successfully: {tx_signature}")
-                logger.info(f"🔗 Explorer URL: {NETWORK_CONFIGS[self.network]['explorer_base']}/tx/{tx_signature}{'?cluster=devnet' if self.network == Network.DEVNET else ''}")
+                logger.debug(f"✅ Transaction sent successfully: {tx_signature}")
+                logger.debug(f"🔗 Explorer URL: {NETWORK_CONFIGS[self.network]['explorer_base']}/tx/{tx_signature}{'?cluster=devnet' if self.network == Network.DEVNET else ''}")
                 
                 # Vérifier que la signature correspond à celle de la transaction
                 if str(transaction.signatures[0]) != tx_signature:
@@ -579,8 +579,8 @@ class SolanaClient:
         """Version corrigée qui détecte correctement les transactions finalisées"""
         try:
             await self.ensure_client_active()
-            logger.info(f"⏳ Waiting for transaction confirmation: {signature[:8]}... ({self.network.value})")
-            logger.info(f"🔗 Explorer URL: {NETWORK_CONFIGS[self.network]['explorer_base']}/tx/{signature}{'?cluster=devnet' if self.network == Network.DEVNET else ''}")
+            logger.debug(f"⏳ Waiting for transaction confirmation: {signature[:8]}... ({self.network.value})")
+            logger.debug(f"🔗 Explorer URL: {NETWORK_CONFIGS[self.network]['explorer_base']}/tx/{signature}{'?cluster=devnet' if self.network == Network.DEVNET else ''}")
             
             start_time = time.time()
             check_count = 0
@@ -601,19 +601,19 @@ class SolanaClient:
                         if status is None:
                             logger.debug(f"🔄 Transaction not yet found on network (check #{check_count})")
                         else:
-                            logger.info(f"📊 Transaction Status Check #{check_count}:")
-                            logger.info(f"   Confirmation Status: {status.confirmation_status}")
-                            logger.info(f"   Confirmations: {status.confirmations}")
-                            logger.info(f"   Slot: {status.slot}")
-                            logger.info(f"   Error: {status.err}")
+                            logger.debug(f"📊 Transaction Status Check #{check_count}:")
+                            logger.debug(f"   Confirmation Status: {status.confirmation_status}")
+                            logger.debug(f"   Confirmations: {status.confirmations}")
+                            logger.debug(f"   Slot: {status.slot}")
+                            logger.debug(f"   Error: {status.err}")
                             
                             # CORRECTION ICI : Inclure "finalized" dans la vérification
                             if status.confirmation_status:
-                                logger.info(f"🔍 DEBUG: Checking status '{status.confirmation_status}' (type: {type(status.confirmation_status)})")
+                                logger.debug(f"🔍 DEBUG: Checking status '{status.confirmation_status}' (type: {type(status.confirmation_status)})")
                                 if str(status.confirmation_status).lower() in ["transactionconfirmationstatus.processed", "transactionconfirmationstatus.confirmed", "transactionconfirmationstatus.finalized"]:
-                                    logger.info(f"✅ Transaction confirmed with status '{status.confirmation_status}': {signature[:8]}... ({self.network.value})")
-                                    logger.info(f"   Final confirmations: {status.confirmations}")
-                                    logger.info(f"   Confirmation time: {elapsed:.1f}s")
+                                    logger.debug(f"✅ Transaction confirmed with status '{status.confirmation_status}': {signature[:8]}... ({self.network.value})")
+                                    logger.debug(f"   Final confirmations: {status.confirmations}")
+                                    logger.debug(f"   Confirmation time: {elapsed:.1f}s")
                                     return True
                             
                             if status.err:
@@ -630,7 +630,7 @@ class SolanaClient:
             logger.warning(f"⏰ Transaction confirmation timeout after {timeout}s")
             
             try:
-                logger.info("🔍 Final attempt with direct transaction lookup...")
+                logger.debug("🔍 Final attempt with direct transaction lookup...")
                 tx_details = await self.client.get_transaction(
                     Signature.from_string(signature),
                     encoding="json",
@@ -638,7 +638,7 @@ class SolanaClient:
                 )
                 
                 if tx_details.value:
-                    logger.info("✅ Transaction found in final direct lookup!")
+                    logger.debug("✅ Transaction found in final direct lookup!")
                     
                     # CORRECTION ICI : Accès correct aux métadonnées
                     if hasattr(tx_details.value, 'transaction') and hasattr(tx_details.value.transaction, 'meta'):
@@ -652,14 +652,14 @@ class SolanaClient:
                     
                     if meta is not None:
                         if meta.err is None:
-                            logger.info(f"✅ Transaction was actually successful: {signature[:8]}...")
+                            logger.debug(f"✅ Transaction was actually successful: {signature[:8]}...")
                             return True
                         else:
                             logger.error(f"❌ Transaction failed: {meta.err}")
                             return False
                     else:
                         # Si on ne peut pas accéder aux métadonnées, considérer comme succès si trouvé
-                        logger.info(f"✅ Transaction found in ledger (assuming success): {signature[:8]}...")
+                        logger.debug(f"✅ Transaction found in ledger (assuming success): {signature[:8]}...")
                         return True
                         
             except Exception as e:
@@ -884,7 +884,7 @@ class AutoTrader:
     #     if self.solana_client:
     #         async with self.solana_client as solana:
     #             try:
-    #                 logger.info(f"🔍 Fetching transaction details for: {signature[:8]}...")
+    #                 logger.debug(f"🔍 Fetching transaction details for: {signature[:8]}...")
                     
     #                 tx_details = await solana.client.get_transaction(
     #                     Signature.from_string(signature),
@@ -893,19 +893,19 @@ class AutoTrader:
     #                 )
                     
     #                 if tx_details.value:
-    #                     logger.info(f"✅ Transaction details retrieved")
+    #                     logger.debug(f"✅ Transaction details retrieved")
                         
     #                     # Extraire des informations utiles
     #                     meta = tx_details.value.meta
     #                     if meta:
-    #                         logger.info(f"📊 Transaction Meta:")
-    #                         logger.info(f"   Error: {meta.err}")
+    #                         logger.debug(f"📊 Transaction Meta:")
+    #                         logger.debug(f"   Error: {meta.err}")
                             
     #                         if meta.err:
     #                             logger.error(f"❌ Transaction failed with error: {meta.err}")
     #                             return {"success": False, "error": meta.err, "meta": meta}
     #                         else:
-    #                             logger.info(f"✅ Transaction executed successfully")
+    #                             logger.debug(f"✅ Transaction executed successfully")
     #                             return {"success": True, "meta": meta}
     #                     else:
     #                         logger.warning(f"⚠️ Transaction found but no meta information")
@@ -927,7 +927,7 @@ class AutoTrader:
                 self.wallet_private_key,
                 self.config.network
             )
-            logger.info(f"🔗 Solana client initialized ({self.config.network_name})")
+            logger.debug(f"🔗 Solana client initialized ({self.config.network_name})")
         else:
             logger.warning("⚠️ Solana client not available - running in simulation mode")
 
@@ -947,7 +947,7 @@ class AutoTrader:
                     return False
                 
                 if balance < min_balance:
-                    logger.info(f"Low devnet balance: {balance:.6f} SOL (need {min_balance:.6f})")
+                    logger.debug(f"Low devnet balance: {balance:.6f} SOL (need {min_balance:.6f})")
                     airdrop_amount = max(2.0, min_balance * 2)  # Demander au moins 2 SOL
                     
                     # Demander confirmation pour l'airdrop
@@ -956,7 +956,7 @@ class AutoTrader:
                         if response in ['yes', 'y']:
                             break
                         elif response in ['no', 'n']:
-                            logger.info("Airdrop declined")
+                            logger.debug("Airdrop declined")
                             return False
                         else:
                             print("Please answer 'yes' or 'no'")
@@ -967,13 +967,13 @@ class AutoTrader:
                         # Vérifier le nouveau solde
                         new_balance = await solana.get_balance()
                         if new_balance and new_balance >= min_balance:
-                            logger.info(f"✅ Devnet balance sufficient: {new_balance:.6f} SOL")
+                            logger.debug(f"✅ Devnet balance sufficient: {new_balance:.6f} SOL")
                             return True
                     
                     logger.error("Failed to get sufficient devnet balance")
                     return False
                 else:
-                    logger.info(f"✅ Devnet balance sufficient: {balance:.6f} SOL")
+                    logger.debug(f"✅ Devnet balance sufficient: {balance:.6f} SOL")
                     return True
                     
         except Exception as e:
@@ -1018,7 +1018,7 @@ class AutoTrader:
             self.daily_spent = 0.0
             self.daily_trades = 0
             self.last_reset_date = current_date
-            logger.info("Daily trading stats reset")
+            logger.debug("Daily trading stats reset")
 
     def can_make_trade(self, sol_amount: float) -> bool:
         """Vérifie si on peut faire un trade selon les limites"""
@@ -1073,46 +1073,46 @@ class AutoTrader:
             return False
 
     def debug_transaction_info(self, transaction: VersionedTransaction, keypair: Keypair):
-        logger.info("🔧 DÉBOGAGE DE LA TRANSACTION :")
-        logger.info(f"  Nombre de signatures : {len(transaction.signatures)}")
+        logger.debug("🔧 DÉBOGAGE DE LA TRANSACTION :")
+        logger.debug(f"  Nombre de signatures : {len(transaction.signatures)}")
         for i, sig in enumerate(transaction.signatures):
-            logger.info(f"  Signature {i+1} : {str(sig)[:8]}...")
-        logger.info(f"  Clé publique du portefeuille : {str(keypair.pubkey())[:8]}...")
-        logger.info(f"  Clé publique dans account_keys : {str(transaction.message.account_keys[0])[:8]}...")
-        logger.info(f"  Portefeuille présent dans account_keys : {str(keypair.pubkey()) in [str(k) for k in transaction.message.account_keys]}")
-        logger.info(f"  Blockhash récent : {transaction.message.recent_blockhash}")
-        logger.info(f"  Nombre d'instructions : {len(transaction.message.instructions)}")
+            logger.debug(f"  Signature {i+1} : {str(sig)[:8]}...")
+        logger.debug(f"  Clé publique du portefeuille : {str(keypair.pubkey())[:8]}...")
+        logger.debug(f"  Clé publique dans account_keys : {str(transaction.message.account_keys[0])[:8]}...")
+        logger.debug(f"  Portefeuille présent dans account_keys : {str(keypair.pubkey()) in [str(k) for k in transaction.message.account_keys]}")
+        logger.debug(f"  Blockhash récent : {transaction.message.recent_blockhash}")
+        logger.debug(f"  Nombre d'instructions : {len(transaction.message.instructions)}")
         for i, instr in enumerate(transaction.message.instructions):
             logger.debug(f"  Instruction {i+1} : program_id_index={instr.program_id_index}, accounts={instr.accounts}, data={instr.data[:16]}...")
-        logger.info(f"  Address Table Lookups : {len(transaction.message.address_table_lookups)}")
+        logger.debug(f"  Address Table Lookups : {len(transaction.message.address_table_lookups)}")
         for i, atl in enumerate(transaction.message.address_table_lookups):
             logger.debug(f"  ATL {i+1} : account_key={atl.account_key}, writable={atl.writable_indexes}, readonly={atl.readonly_indexes}")
 
     async def create_token_account_if_needed(self, solana: SolanaClient, token_mint: str) -> Optional[Pubkey]:
         try:
             mint_pubkey = Pubkey.from_string(token_mint)
-            logger.info(f"Checking token account for mint: {token_mint[:8]}...")
+            logger.debug(f"Checking token account for mint: {token_mint[:8]}...")
             
             # Check cache first
             if token_mint in self.known_atas:
                 ata_address = self.known_atas[token_mint]
-                logger.info(f"✅ Found cached token account for mint {token_mint[:8]}...")
-                logger.info(f"==================== FULL ATA ADDRESS ====================")
-                logger.info(f"ATA: {ata_address}")
-                logger.info(f"========================================================")
+                logger.debug(f"✅ Found cached token account for mint {token_mint[:8]}...")
+                logger.debug(f"==================== FULL ATA ADDRESS ====================")
+                logger.debug(f"ATA: {ata_address}")
+                logger.debug(f"========================================================")
                 return Pubkey.from_string(ata_address)
 
             existing_ata = await solana.has_token_account(token_mint)
             if existing_ata:
                 ata_address = str(existing_ata)
-                logger.info(f"✅ Token account already exists for mint: {token_mint[:8]}...")
-                logger.info(f"==================== FULL ATA ADDRESS ====================")
-                logger.info(f"ATA: {ata_address}")
-                logger.info(f"========================================================")
+                logger.debug(f"✅ Token account already exists for mint: {token_mint[:8]}...")
+                logger.debug(f"==================== FULL ATA ADDRESS ====================")
+                logger.debug(f"ATA: {ata_address}")
+                logger.debug(f"========================================================")
                 self.known_atas[token_mint] = ata_address
                 return existing_ata
 
-            logger.info(f"Creating associated token account for mint: {token_mint[:8]}...")
+            logger.debug(f"Creating associated token account for mint: {token_mint[:8]}...")
             ata = Pubkey.find_program_address(
                 seeds=[
                     bytes(solana.public_key),
@@ -1122,13 +1122,13 @@ class AutoTrader:
                 program_id=TOKEN_PROGRAM_ID
             )[0]
             ata_address = str(ata)
-            logger.info(f"Derived ATA: {ata_address[:8]}...")
-            logger.info(f"==================== FULL ATA ADDRESS ====================")
-            logger.info(f"ATA: {ata_address}")
-            logger.info(f"========================================================")
+            logger.debug(f"Derived ATA: {ata_address[:8]}...")
+            logger.debug(f"==================== FULL ATA ADDRESS ====================")
+            logger.debug(f"ATA: {ata_address}")
+            logger.debug(f"========================================================")
 
             balance = await solana.get_balance()
-            logger.info(f"Current balance: {balance:.6f} SOL")
+            logger.debug(f"Current balance: {balance:.6f} SOL")
             if balance < 0.00203928:
                 logger.error(f"Insufficient balance for ATA creation: need at least 0.00203928 SOL, have {balance:.6f} SOL")
                 return None
@@ -1148,15 +1148,15 @@ class AutoTrader:
             )
             transaction = VersionedTransaction(message, [solana.keypair])
             
-            logger.info("Simulating ATA creation transaction...")
+            logger.debug("Simulating ATA creation transaction...")
             if await solana.simulate_transaction(transaction):
-                logger.info("Simulation successful, sending transaction...")
+                logger.debug("Simulation successful, sending transaction...")
                 tx_signature = await solana.send_transaction(transaction)
                 if tx_signature and await solana.confirm_transaction(tx_signature):
-                    logger.info(f"✅ Created token account for mint {token_mint[:8]}...")
-                    logger.info(f"==================== FULL ATA ADDRESS ====================")
-                    logger.info(f"ATA: {ata_address}")
-                    logger.info(f"========================================================")
+                    logger.debug(f"✅ Created token account for mint {token_mint[:8]}...")
+                    logger.debug(f"==================== FULL ATA ADDRESS ====================")
+                    logger.debug(f"ATA: {ata_address}")
+                    logger.debug(f"========================================================")
                     self.known_atas[token_mint] = ata_address
                     return ata
                 else:
@@ -1177,7 +1177,7 @@ class AutoTrader:
             
         async with self.solana_client as solana:  # ← CORRECTION : utiliser self.solana_client
             try:
-                logger.info(f"🔍 Fetching transaction details for: {signature[:8]}...")
+                logger.debug(f"🔍 Fetching transaction details for: {signature[:8]}...")
                 
                 tx_details = await solana.client.get_transaction(  # ← CORRECTION : solana.client
                     Signature.from_string(signature),
@@ -1186,28 +1186,28 @@ class AutoTrader:
                 )
                 
                 if tx_details.value:
-                    logger.info(f"✅ Transaction details retrieved")
+                    logger.debug(f"✅ Transaction details retrieved")
                     
                     # Extraire des informations utiles
                     meta = tx_details.value.meta
                     if meta:
-                        logger.info(f"📊 Transaction Meta:")
-                        logger.info(f"   Error: {meta.err}")
-                        logger.info(f"   Fee: {meta.fee} lamports")
-                        logger.info(f"   Pre balances: {meta.pre_balances}")
-                        logger.info(f"   Post balances: {meta.post_balances}")
-                        logger.info(f"   Compute units consumed: {meta.compute_units_consumed}")
+                        logger.debug(f"📊 Transaction Meta:")
+                        logger.debug(f"   Error: {meta.err}")
+                        logger.debug(f"   Fee: {meta.fee} lamports")
+                        logger.debug(f"   Pre balances: {meta.pre_balances}")
+                        logger.debug(f"   Post balances: {meta.post_balances}")
+                        logger.debug(f"   Compute units consumed: {meta.compute_units_consumed}")
                         
                         if meta.log_messages:
-                            logger.info(f"📝 Log Messages:")
+                            logger.debug(f"📝 Log Messages:")
                             for i, log in enumerate(meta.log_messages[-10:]):  # Derniers 10 logs
-                                logger.info(f"   [{i}] {log}")
+                                logger.debug(f"   [{i}] {log}")
                         
                         if meta.err:
                             logger.error(f"❌ Transaction failed with error: {meta.err}")
                             return {"success": False, "error": meta.err, "meta": meta}
                         else:
-                            logger.info(f"✅ Transaction executed successfully")
+                            logger.debug(f"✅ Transaction executed successfully")
                             return {"success": True, "meta": meta}
                     else:
                         logger.warning(f"⚠️ Transaction found but no meta information")
@@ -1222,7 +1222,7 @@ class AutoTrader:
 
     async def execute_buy_order(self, token_address: str, token_symbol: str, sol_amount: float) -> Optional[Position]:
         try:
-            logger.info(f"🔥 EXECUTING BUY ORDER: {sol_amount:.3f} SOL → {token_symbol} ({token_address[:8]}...) on {self.config.network_name}")
+            logger.debug(f"🔥 EXECUTING BUY ORDER: {sol_amount:.3f} SOL → {token_symbol} ({token_address[:8]}...) on {self.config.network_name}")
             
             if not self.wallet_private_key or not SOLANA_AVAILABLE:
                 logger.error("Running in simulation mode")
@@ -1243,7 +1243,7 @@ class AutoTrader:
                 if not ata:
                     logger.error("Aucun compte de token disponible et échec de la création")
                     return None
-                logger.info(f"Utilisation de l'ATA : {str(ata)[:8]}... pour le swap")
+                logger.debug(f"Utilisation de l'ATA : {str(ata)[:8]}... pour le swap")
                 logger.debug(f"Adresse ATA complète : {str(ata)}")
 
                 account_creation_cost = 0.0  # ATA déjà existant
@@ -1252,18 +1252,18 @@ class AutoTrader:
                 logger.debug("Vérification du solde du portefeuille...")
                 can_afford, balance_msg, cost_breakdown = await self.can_afford_trade(sol_amount, account_creation_cost, solana)
                 
-                logger.info(f"💰 Analyse du solde ({self.config.network_name}) :")
+                logger.debug(f"💰 Analyse du solde ({self.config.network_name}) :")
                 for key, value in cost_breakdown.items():
                     if isinstance(value, (int, float)):
-                        logger.info(f"  {key} : {value:.6f} SOL")
+                        logger.debug(f"  {key} : {value:.6f} SOL")
                     else:
-                        logger.info(f"  {key} : {value}")
+                        logger.debug(f"  {key} : {value}")
                 
                 if not can_afford:
                     logger.error(f"❌ {balance_msg}")
                     return None
                 
-                logger.info(f"✅ {balance_msg}")
+                logger.debug(f"✅ {balance_msg}")
                 
                 # Paramètres de la transaction
                 sol_lamports = int(sol_amount * 1e9)
@@ -1285,7 +1285,7 @@ class AutoTrader:
                     logger.error("Échec de la récupération du devis depuis Jupiter")
                     return None
                 logger.debug(f"Devis Jupiter reçu : {quote}")
-                logger.info(f"📊 Détails du devis : in_amount={quote.get('inAmount')}, out_amount={quote.get('outAmount')}, price_impact={quote.get('priceImpactPct')}%")
+                logger.debug(f"📊 Détails du devis : in_amount={quote.get('inAmount')}, out_amount={quote.get('outAmount')}, price_impact={quote.get('priceImpactPct')}%")
                 
                 # Calcul des détails de la transaction
                 estimated_tokens_raw = int(quote.get('outAmount', 0))
@@ -1294,11 +1294,11 @@ class AutoTrader:
                 estimated_price = sol_amount / estimated_tokens if estimated_tokens > 0 else 0
                 impact_pct = float(quote.get('priceImpactPct', 0))
                 
-                logger.info(f"📊 Analyse du devis :")
-                logger.info(f"  Entrée : {sol_amount:.6f} SOL")
-                logger.info(f"  Sortie : {estimated_tokens:.0f} {token_symbol}")
-                logger.info(f"  Prix par token : {estimated_price:.8f} SOL")
-                logger.info(f"  Impact sur le prix : {impact_pct:.2f}%")
+                logger.debug(f"📊 Analyse du devis :")
+                logger.debug(f"  Entrée : {sol_amount:.6f} SOL")
+                logger.debug(f"  Sortie : {estimated_tokens:.0f} {token_symbol}")
+                logger.debug(f"  Prix par token : {estimated_price:.8f} SOL")
+                logger.debug(f"  Impact sur le prix : {impact_pct:.2f}%")
                 
                 # Confirmation utilisateur si nécessaire
                 if self.config.require_manual_confirmation:
@@ -1313,7 +1313,7 @@ class AutoTrader:
                         "Solde restant": f"{cost_breakdown.get('available_after', 0):.6f} SOL"
                     }
                     if not ask_user_confirmation("Achat de token", confirmation_details, self.config.network):
-                        logger.info("Transaction annulée par l'utilisateur")
+                        logger.debug("Transaction annulée par l'utilisateur")
                         return None
                 
                 # Obtenir les frais de priorité
@@ -1333,7 +1333,7 @@ class AutoTrader:
                     logger.error("Échec de la récupération de la transaction de swap depuis Jupiter")
                     return None
                 logger.debug(f"Données de la transaction Jupiter : {swap_data}")
-                logger.info(f"📜 Clé 'swapTransaction' présente : {'swapTransaction' in swap_data}")
+                logger.debug(f"📜 Clé 'swapTransaction' présente : {'swapTransaction' in swap_data}")
                 
                 # APPROCHE SIMPLIFIÉE : Signer directement la transaction Jupiter sans modification
                 logger.debug("Parsing et signature directe de la transaction Jupiter...")
@@ -1343,13 +1343,13 @@ class AutoTrader:
                 # Créer la transaction à partir des bytes de Jupiter
                 original_transaction = VersionedTransaction.from_bytes(transaction_bytes)
                 logger.debug(f"Transaction Jupiter parsée : {original_transaction}")
-                logger.info(f"🔍 Détails de la transaction Jupiter :")
-                logger.info(f"  Signatures : {original_transaction.signatures}")
-                logger.info(f"  Blockhash original : {original_transaction.message.recent_blockhash}")
-                logger.info(f"  Compte principal : {original_transaction.message.account_keys[0]}")
+                logger.debug(f"🔍 Détails de la transaction Jupiter :")
+                logger.debug(f"  Signatures : {original_transaction.signatures}")
+                logger.debug(f"  Blockhash original : {original_transaction.message.recent_blockhash}")
+                logger.debug(f"  Compte principal : {original_transaction.message.account_keys[0]}")
                 
                 # Vérification du keypair avant signature
-                logger.info("✍️ Préparation de la signature de la transaction...")
+                logger.debug("✍️ Préparation de la signature de la transaction...")
                 logger.debug(f"Keypair utilisé : pubkey={str(solana.keypair.pubkey())[:8]}...")
                 if str(solana.keypair.pubkey()) != str(original_transaction.message.account_keys[0]):
                     logger.error(f"Erreur : La clé publique du keypair ({solana.keypair.pubkey()}) ne correspond pas au compte principal ({original_transaction.message.account_keys[0]})")
@@ -1359,27 +1359,27 @@ class AutoTrader:
                 # Ceci évite tous les problèmes de reconstruction et d'Address Lookup Tables
                 transaction = VersionedTransaction(original_transaction.message, [solana.keypair])
                 
-                logger.info("✅ Transaction Jupiter signée directement (sans modification)")
-                logger.info(f"  Signature : {str(transaction.signatures[0])[:8]}...")
-                logger.info(f"  Blockhash utilisé : {transaction.message.recent_blockhash}")
+                logger.debug("✅ Transaction Jupiter signée directement (sans modification)")
+                logger.debug(f"  Signature : {str(transaction.signatures[0])[:8]}...")
+                logger.debug(f"  Blockhash utilisé : {transaction.message.recent_blockhash}")
                 
                 # Débogage de la transaction signée
-                logger.info("🔧 DEBUG : Analyse de la transaction signée...")
+                logger.debug("🔧 DEBUG : Analyse de la transaction signée...")
                 self.debug_transaction_info(transaction, solana.keypair)
                 
                 # Simuler la transaction
-                logger.info("🔍 Simulation de la transaction...")
+                logger.debug("🔍 Simulation de la transaction...")
                 simulation_result = await solana.simulate_transaction(transaction)
                 if not simulation_result:
                     logger.error("❌ Échec de la simulation de la transaction")
                     logger.debug(f"Résultat de la simulation : {simulation_result}")
                     return None
                 
-                logger.info("✅ Simulation de la transaction réussie")
+                logger.debug("✅ Simulation de la transaction réussie")
                 logger.debug(f"Résultat de la simulation : {simulation_result}")
                 
                 # Envoyer la transaction
-                logger.info(f"📡 Envoi de la transaction à Solana {self.config.network_name}...")
+                logger.debug(f"📡 Envoi de la transaction à Solana {self.config.network_name}...")
                 tx_signature = await solana.send_transaction(transaction)
                 if not tx_signature:
                     logger.error("❌ Échec de l'envoi de la transaction")
@@ -1387,14 +1387,14 @@ class AutoTrader:
                 logger.debug(f"Signature de la transaction : {tx_signature}")
                 
                 # Confirmer la transaction
-                logger.info(f"⏳ Confirming transaction: {tx_signature[:8]}...")
+                logger.debug(f"⏳ Confirming transaction: {tx_signature[:8]}...")
                 confirmation_start = time.time()
                 
                 confirmed = await solana.confirm_transaction(tx_signature, self.config.confirmation_timeout)
                 confirmation_time = time.time() - confirmation_start
 
                 if confirmed:
-                    logger.info(f"✅ Transaction confirmée en {confirmation_time:.1f}s")
+                    logger.debug(f"✅ Transaction confirmée en {confirmation_time:.1f}s")
                     
                     # Récupérer les frais réels de la transaction
                     try:
@@ -1431,13 +1431,13 @@ class AutoTrader:
                     self.daily_spent += sol_amount
                     self.daily_trades += 1
                     
-                    # logger.info(f"🎉 ACHAT CONFIRMÉ !")
-                    # logger.info(f"   Token : {estimated_tokens:.0f} {token_symbol}")
-                    # logger.info(f"   Coût : {sol_amount:.6f} SOL")
-                    # logger.info(f"   Prix : {estimated_price:.8f} SOL par token")
-                    # logger.info(f"   Réseau : {self.config.network_name}")
-                    # logger.info(f"   TX : {tx_signature}")
-                    # logger.info(f"   Explorer : {position.get_explorer_url()}")
+                    # logger.debug(f"🎉 ACHAT CONFIRMÉ !")
+                    # logger.debug(f"   Token : {estimated_tokens:.0f} {token_symbol}")
+                    # logger.debug(f"   Coût : {sol_amount:.6f} SOL")
+                    # logger.debug(f"   Prix : {estimated_price:.8f} SOL par token")
+                    # logger.debug(f"   Réseau : {self.config.network_name}")
+                    # logger.debug(f"   TX : {tx_signature}")
+                    # logger.debug(f"   Explorer : {position.get_explorer_url()}")
                     await self.log_transaction_summary(position, quote, cost_breakdown, confirmation_time, tx_signature)
 
                     return position
@@ -1445,12 +1445,12 @@ class AutoTrader:
                     logger.error("❌ Transaction confirmation failed or timed out")
             
                     # Essayer de récupérer plus d'informations
-                    logger.info(f"🔍 Attempting to get transaction details...")
+                    logger.debug(f"🔍 Attempting to get transaction details...")
                     tx_details = await self.get_transaction_details(tx_signature)
                     
                     if tx_details:
                         if tx_details.get("success") is True:
-                            logger.info(f"🎉 Transaction was actually successful! Creating position...")
+                            logger.debug(f"🎉 Transaction was actually successful! Creating position...")
                             # Créer la position même si la confirmation a échoué
                             # ... créer la position ...
                         elif tx_details.get("success") is False:
@@ -1469,7 +1469,7 @@ class AutoTrader:
 
     async def execute_buy_order_old(self, token_address: str, token_symbol: str, sol_amount: float) -> Optional[Position]:
         try:
-            logger.info(f"🔥 EXECUTING BUY ORDER: {sol_amount:.3f} SOL → {token_symbol} ({token_address[:8]}...) on {self.config.network_name}")
+            logger.debug(f"🔥 EXECUTING BUY ORDER: {sol_amount:.3f} SOL → {token_symbol} ({token_address[:8]}...) on {self.config.network_name}")
             
             if not self.wallet_private_key or not SOLANA_AVAILABLE:
                 logger.error("Running in simulation mode")
@@ -1490,7 +1490,7 @@ class AutoTrader:
                 if not ata:
                     logger.error("Aucun compte de token disponible et échec de la création")
                     return None
-                logger.info(f"Utilisation de l'ATA : {str(ata)[:8]}... pour le swap")
+                logger.debug(f"Utilisation de l'ATA : {str(ata)[:8]}... pour le swap")
                 logger.debug(f"Adresse ATA complète : {str(ata)}")
 
                 account_creation_cost = 0.0  # ATA déjà existant
@@ -1499,18 +1499,18 @@ class AutoTrader:
                 logger.debug("Vérification du solde du portefeuille...")
                 can_afford, balance_msg, cost_breakdown = await self.can_afford_trade(sol_amount, account_creation_cost, solana)
                 
-                logger.info(f"💰 Analyse du solde ({self.config.network_name}) :")
+                logger.debug(f"💰 Analyse du solde ({self.config.network_name}) :")
                 for key, value in cost_breakdown.items():
                     if isinstance(value, (int, float)):
-                        logger.info(f"  {key} : {value:.6f} SOL")
+                        logger.debug(f"  {key} : {value:.6f} SOL")
                     else:
-                        logger.info(f"  {key} : {value}")
+                        logger.debug(f"  {key} : {value}")
                 
                 if not can_afford:
                     logger.error(f"❌ {balance_msg}")
                     return None
                 
-                logger.info(f"✅ {balance_msg}")
+                logger.debug(f"✅ {balance_msg}")
                 
                 # Paramètres de la transaction
                 sol_lamports = int(sol_amount * 1e9)
@@ -1532,7 +1532,7 @@ class AutoTrader:
                     logger.error("Échec de la récupération du devis depuis Jupiter")
                     return None
                 logger.debug(f"Devis Jupiter reçu : {quote}")
-                logger.info(f"📊 Détails du devis : in_amount={quote.get('inAmount')}, out_amount={quote.get('outAmount')}, price_impact={quote.get('priceImpactPct')}%")
+                logger.debug(f"📊 Détails du devis : in_amount={quote.get('inAmount')}, out_amount={quote.get('outAmount')}, price_impact={quote.get('priceImpactPct')}%")
                 
                 # Calcul des détails de la transaction
                 estimated_tokens_raw = int(quote.get('outAmount', 0))
@@ -1541,11 +1541,11 @@ class AutoTrader:
                 estimated_price = sol_amount / estimated_tokens if estimated_tokens > 0 else 0
                 impact_pct = float(quote.get('priceImpactPct', 0))
                 
-                logger.info(f"📊 Analyse du devis :")
-                logger.info(f"  Entrée : {sol_amount:.6f} SOL")
-                logger.info(f"  Sortie : {estimated_tokens:.0f} {token_symbol}")
-                logger.info(f"  Prix par token : {estimated_price:.8f} SOL")
-                logger.info(f"  Impact sur le prix : {impact_pct:.2f}%")
+                logger.debug(f"📊 Analyse du devis :")
+                logger.debug(f"  Entrée : {sol_amount:.6f} SOL")
+                logger.debug(f"  Sortie : {estimated_tokens:.0f} {token_symbol}")
+                logger.debug(f"  Prix par token : {estimated_price:.8f} SOL")
+                logger.debug(f"  Impact sur le prix : {impact_pct:.2f}%")
                 
                 # Confirmation utilisateur si nécessaire
                 if self.config.require_manual_confirmation:
@@ -1560,7 +1560,7 @@ class AutoTrader:
                         "Solde restant": f"{cost_breakdown.get('available_after', 0):.6f} SOL"
                     }
                     if not ask_user_confirmation("Achat de token", confirmation_details, self.config.network):
-                        logger.info("Transaction annulée par l'utilisateur")
+                        logger.debug("Transaction annulée par l'utilisateur")
                         return None
                 
                 # Obtenir les frais de priorité
@@ -1580,7 +1580,7 @@ class AutoTrader:
                     logger.error("Échec de la récupération de la transaction de swap depuis Jupiter")
                     return None
                 logger.debug(f"Données de la transaction Jupiter : {swap_data}")
-                logger.info(f"📜 Clé 'swapTransaction' présente : {'swapTransaction' in swap_data}")
+                logger.debug(f"📜 Clé 'swapTransaction' présente : {'swapTransaction' in swap_data}")
                 
                 # Parse et préparer la transaction
                 logger.debug("Parsing des octets de la transaction...")
@@ -1588,13 +1588,13 @@ class AutoTrader:
                 logger.debug(f"Octets de la transaction (taille) : {len(transaction_bytes)}")
                 transaction = VersionedTransaction.from_bytes(transaction_bytes)
                 logger.debug(f"Transaction parsée : {transaction}")
-                logger.info(f"🔍 Détails de la transaction avant signature :")
-                logger.info(f"  Signatures : {transaction.signatures}")
-                logger.info(f"  Blockhash : {transaction.message.recent_blockhash}")
-                logger.info(f"  Compte principal : {transaction.message.account_keys[0]}")
+                logger.debug(f"🔍 Détails de la transaction avant signature :")
+                logger.debug(f"  Signatures : {transaction.signatures}")
+                logger.debug(f"  Blockhash : {transaction.message.recent_blockhash}")
+                logger.debug(f"  Compte principal : {transaction.message.account_keys[0]}")
 
                 # Débogage de la transaction
-                logger.info("🔧 DEBUG : Analyse de la transaction avant signature...")
+                logger.debug("🔧 DEBUG : Analyse de la transaction avant signature...")
                 self.debug_transaction_info(transaction, solana.keypair)
 
                 # Rafraîchir le blockhash
@@ -1672,7 +1672,7 @@ class AutoTrader:
                 # logger.debug(f"Nouveau MessageV0 créé avec blockhash : {recent_blockhash}")
 
                  # Vérification du keypair avant signature
-                # logger.info("✍️ Préparation de la signature de la transaction...")
+                # logger.debug("✍️ Préparation de la signature de la transaction...")
                 # logger.debug(f"Keypair utilisé : pubkey={str(solana.keypair.pubkey())[:8]}...")
                 # if str(solana.keypair.pubkey()) != str(new_message.account_keys[0]):
                 #     logger.error(f"Erreur : La clé publique du keypair ({solana.keypair.pubkey()}) ne correspond pas au compte principal ({new_message.account_keys[0]})")
@@ -1680,8 +1680,8 @@ class AutoTrader:
 
                 # # Créer la transaction signée (signing happens in constructor)
                 # transaction = VersionedTransaction(new_message, [solana.keypair])
-                # logger.info("✅ Transaction signée automatiquement lors de la construction")
-                # logger.info(f"  Signature : {str(transaction.signatures[0])[:8]}...")
+                # logger.debug("✅ Transaction signée automatiquement lors de la construction")
+                # logger.debug(f"  Signature : {str(transaction.signatures[0])[:8]}...")
 
                 try:
                     # Méthode simplifiée : ne pas reconstruire toute la transaction
@@ -1704,8 +1704,8 @@ class AutoTrader:
                     
                     # Créer la transaction signée avec le nouveau message
                     transaction = VersionedTransaction(new_message, [solana.keypair])
-                    logger.info("✅ Transaction reconstruite avec nouveau blockhash et signée")
-                    logger.info(f"  Signature : {str(transaction.signatures[0])[:8]}...")
+                    logger.debug("✅ Transaction reconstruite avec nouveau blockhash et signée")
+                    logger.debug(f"  Signature : {str(transaction.signatures[0])[:8]}...")
                     
                 except Exception as reconstruct_error:
                     logger.error(f"Erreur lors de la reconstruction : {reconstruct_error}")
@@ -1714,30 +1714,30 @@ class AutoTrader:
                     # Fallback : utiliser la transaction originale sans modification du blockhash
                     logger.warning("⚠️ Utilisation de la transaction originale sans modification du blockhash")
                     transaction = VersionedTransaction(transaction.message, [solana.keypair])
-                    logger.info("✅ Transaction originale signée")
-                    logger.info(f"  Signature : {str(transaction.signatures[0])[:8]}...")
+                    logger.debug("✅ Transaction originale signée")
+                    logger.debug(f"  Signature : {str(transaction.signatures[0])[:8]}...")
 
                 
 
                
 
                 # Débogage de la transaction signée
-                logger.info("🔧 DEBUG : Analyse de la transaction signée...")
+                logger.debug("🔧 DEBUG : Analyse de la transaction signée...")
                 self.debug_transaction_info(transaction, solana.keypair)
                 
                 # Simuler la transaction
-                logger.info("🔍 Simulation de la transaction...")
+                logger.debug("🔍 Simulation de la transaction...")
                 simulation_result = await solana.simulate_transaction(transaction)
                 if not simulation_result:
                     logger.error("❌ Échec de la simulation de la transaction")
                     logger.debug(f"Résultat de la simulation : {simulation_result}")
                     return None
                 
-                logger.info("✅ Simulation de la transaction réussie")
+                logger.debug("✅ Simulation de la transaction réussie")
                 logger.debug(f"Résultat de la simulation : {simulation_result}")
                 
                 # Envoyer la transaction
-                logger.info(f"📡 Envoi de la transaction à Solana {self.config.network_name}...")
+                logger.debug(f"📡 Envoi de la transaction à Solana {self.config.network_name}...")
                 tx_signature = await solana.send_transaction(transaction)
                 if not tx_signature:
                     logger.error("❌ Échec de l'envoi de la transaction")
@@ -1745,12 +1745,12 @@ class AutoTrader:
                 logger.debug(f"Signature de la transaction : {tx_signature}")
                 
                 # Confirmer la transaction
-                logger.info(f"⏳ Confirmation de la transaction : {tx_signature[:8]}...")
+                logger.debug(f"⏳ Confirmation de la transaction : {tx_signature[:8]}...")
                 confirmation_start = time.time()
                 
                 if await solana.confirm_transaction(tx_signature, self.config.confirmation_timeout):
                     confirmation_time = time.time() - confirmation_start
-                    logger.info(f"✅ Transaction confirmée en {confirmation_time:.1f}s")
+                    logger.debug(f"✅ Transaction confirmée en {confirmation_time:.1f}s")
                     
                     # Créer une position
                     position = Position(
@@ -1769,13 +1769,13 @@ class AutoTrader:
                     self.daily_spent += sol_amount
                     self.daily_trades += 1
                     
-                    logger.info(f"🎉 ACHAT CONFIRMÉ !")
-                    logger.info(f"   Token : {estimated_tokens:.0f} {token_symbol}")
-                    logger.info(f"   Coût : {sol_amount:.6f} SOL")
-                    logger.info(f"   Prix : {estimated_price:.8f} SOL par token")
-                    logger.info(f"   Réseau : {self.config.network_name}")
-                    logger.info(f"   TX : {tx_signature}")
-                    logger.info(f"   Explorer : {position.get_explorer_url()}")
+                    logger.debug(f"🎉 ACHAT CONFIRMÉ !")
+                    logger.debug(f"   Token : {estimated_tokens:.0f} {token_symbol}")
+                    logger.debug(f"   Coût : {sol_amount:.6f} SOL")
+                    logger.debug(f"   Prix : {estimated_price:.8f} SOL par token")
+                    logger.debug(f"   Réseau : {self.config.network_name}")
+                    logger.debug(f"   TX : {tx_signature}")
+                    logger.debug(f"   Explorer : {position.get_explorer_url()}")
                     
                     return position
                 else:
@@ -1793,7 +1793,7 @@ class AutoTrader:
 
     async def _execute_simulated_buy(self, token_address: str, token_symbol: str, sol_amount: float) -> Optional[Position]:
         """Exécute un achat simulé"""
-        logger.info("🎭 Executing simulated buy order...")
+        logger.debug("🎭 Executing simulated buy order...")
         position = Position(
             token_address=token_address,
             token_symbol=token_symbol,
@@ -1807,7 +1807,7 @@ class AutoTrader:
         self.positions[token_address] = position
         self.daily_spent += sol_amount
         self.daily_trades += 1
-        logger.info(f"✅ SIMULATED BUY: {position.token_amount:.0f} {token_symbol} for {sol_amount:.3f} SOL")
+        logger.debug(f"✅ SIMULATED BUY: {position.token_amount:.0f} {token_symbol} for {sol_amount:.3f} SOL")
         return position
 
     async def execute_sell_order(self, position: Position, percentage: float, reason: str) -> bool:
@@ -1815,12 +1815,12 @@ class AutoTrader:
         try:
             tokens_to_sell = position.token_amount * percentage
             estimated_sol = tokens_to_sell * position.current_price
-            logger.info(f"🔴 EXECUTING SELL ORDER: {tokens_to_sell:.0f} {position.token_symbol} → {estimated_sol:.3f} SOL ({reason})")
+            logger.debug(f"🔴 EXECUTING SELL ORDER: {tokens_to_sell:.0f} {position.token_symbol} → {estimated_sol:.3f} SOL ({reason})")
             position.token_amount -= tokens_to_sell
-            logger.info(f"✅ SIMULATED SELL: {tokens_to_sell:.0f} tokens for ~{estimated_sol:.3f} SOL")
+            logger.debug(f"✅ SIMULATED SELL: {tokens_to_sell:.0f} tokens for ~{estimated_sol:.3f} SOL")
             if position.token_amount <= 0:
                 del self.positions[position.token_address]
-                logger.info(f"Position closed for {position.token_symbol}")
+                logger.debug(f"Position closed for {position.token_symbol}")
             return True
         except Exception as e:
             logger.error(f"Error executing sell order: {e}")
@@ -1841,7 +1841,7 @@ class AutoTrader:
             for i, profit_level in enumerate(self.config.take_profit_levels):
                 if not position.take_profits_executed[i] and position.pnl_percentage >= profit_level:
                     portion = self.config.take_profit_portions[i]
-                    logger.info(f"🎯 TAKE-PROFIT {i+1}: {position.token_symbol} at {position.pnl_percentage:+.1f}%")
+                    logger.debug(f"🎯 TAKE-PROFIT {i+1}: {position.token_symbol} at {position.pnl_percentage:+.1f}%")
                     await self.execute_sell_order(position, portion, f"Take-profit {profit_level}%")
                     position.take_profits_executed[i] = True
         except Exception as e:
@@ -1850,7 +1850,7 @@ class AutoTrader:
     async def start_monitoring(self):
         """Démarre la surveillance des positions"""
         self.is_running = True
-        logger.info(f"🚀 Starting position monitoring on {self.config.network_name}...")
+        logger.debug(f"🚀 Starting position monitoring on {self.config.network_name}...")
         while self.is_running:
             try:
                 if self.positions:
@@ -1865,7 +1865,7 @@ class AutoTrader:
     def stop_monitoring(self):
         """Arrête la surveillance"""
         self.is_running = False
-        logger.info("🛑 Stopping position monitoring...")
+        logger.debug("🛑 Stopping position monitoring...")
 
     def get_stats(self) -> Dict[str, Any]:
         """Retourne les statistiques du trader"""
