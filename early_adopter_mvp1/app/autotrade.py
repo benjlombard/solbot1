@@ -19,6 +19,9 @@ from pathlib import Path
 import base64
 import random
 from enum import Enum
+# from autotrade_enhanced_logger import get_logger, log_trade, log_error, log_performance
+# from autotrade_notification_system import notify_trade, notify_error, notify_system
+from .autotrade_config_loader import load_trading_config
 
 # Imports pour Solana
 try:
@@ -780,45 +783,141 @@ class AutoTrader:
         self.solana_client = None
         self.known_atas = {"Dtznpvk7EBXHhTNvz1YjWCTByfPVFsDqMgafKA3ppump": "DX7XJdr7X53FFe1fga4DSJj86E8GHsoAmro4wnAvYTH2"}  # Cache for known ATAs
 
-    async def get_transaction_details(self, signature: str) -> Optional[Dict]:
-        """Récupère les détails d'une transaction via le SolanaClient"""
-        if self.solana_client:
-            async with self.solana_client as solana:
-                try:
-                    logger.info(f"🔍 Fetching transaction details for: {signature[:8]}...")
+
+    async def get_sol_price_usd(self) -> float:
+        """Récupère le prix actuel de SOL en USD"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd") as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return float(data.get('solana', {}).get('usd', 0))
+        except Exception as e:
+            logger.debug(f"Could not fetch SOL price: {e}")
+        return 0.0  # Fallback si l'API échoue
+
+    def format_sol_with_usd(self, sol_amount: float, sol_price_usd: float) -> str:
+        """Formate un montant SOL avec équivalent USD"""
+        if sol_price_usd > 0:
+            usd_amount = sol_amount * sol_price_usd
+            return f"{sol_amount:.8f} SOL (${usd_amount:.4f})"
+        else:
+            return f"{sol_amount:.8f} SOL"
+
+    async def log_transaction_summary(self, position: Position, quote: Dict, cost_breakdown: Dict, 
+                          confirmation_time: float, tx_signature: str):
+        """Log un résumé détaillé de la transaction"""
+        
+        # Récupérer le prix SOL/USD
+        sol_price_usd = await self.get_sol_price_usd()
+        
+        # Calculer le slippage réel
+        expected_tokens = int(quote.get('outAmount', 0)) / (10 ** 6)
+        actual_slippage = abs(expected_tokens - position.token_amount) / expected_tokens * 100 if expected_tokens > 0 else 0
+        
+        # Calculer les frais totaux
+        real_tx_fee = cost_breakdown.get('total_actual_fees', cost_breakdown.get('transaction_fees', 0))
+        priority_fee_sol = cost_breakdown.get('priority_fees', 0)
+        account_creation_fee = cost_breakdown.get('account_creation', 0)
+        total_fees_sol = real_tx_fee + priority_fee_sol + account_creation_fee
+        
+        # Convertir le slippage Jupiter en float
+        jupiter_slippage = quote.get('priceImpactPct', '0')
+        try:
+            jupiter_slippage_float = float(jupiter_slippage) if jupiter_slippage else 0.0
+        except (ValueError, TypeError):
+            jupiter_slippage_float = 0.0
+        
+        # URLs
+        explorer_url = position.get_explorer_url()
+        
+        print("\n" + "="*80)
+        print("📋 TRANSACTION SUMMARY")
+        print("="*80)
+        print(f"🎯 Operation: BUY {position.token_symbol}")
+        print(f"🌐 Network: {self.config.network_name}")
+        print(f"⏰ Timestamp: {position.entry_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        if sol_price_usd > 0:
+            print(f"💵 SOL Price: ${sol_price_usd:.2f}")
+        print("")
+        print("💰 AMOUNTS:")
+        print(f"   SOL Spent: {self.format_sol_with_usd(position.sol_amount, sol_price_usd)}")
+        print(f"   Tokens Received: {position.token_amount:,.0f} {position.token_symbol}")
+        print(f"   Price per Token: {self.format_sol_with_usd(position.entry_price, sol_price_usd)}")
+        print("")
+        print("📊 MARKET IMPACT:")
+        print(f"   Jupiter Quote Slippage: {jupiter_slippage_float:.2f}%")
+        print(f"   Actual Slippage: {actual_slippage:.2f}%")
+        
+        # Route info
+        try:
+            route_label = quote.get('routePlan', [{}])[0].get('swapInfo', {}).get('label', 'Unknown') if quote.get('routePlan') else 'Unknown'
+        except (IndexError, KeyError, TypeError):
+            route_label = 'Unknown'
+        print(f"   Route: {route_label}")
+        
+        print("")
+        print("💸 FEES BREAKDOWN:")
+        print(f"   Transaction Fee: {self.format_sol_with_usd(real_tx_fee, sol_price_usd)}")
+        print(f"   Priority Fee: {self.format_sol_with_usd(priority_fee_sol, sol_price_usd)}")
+        print(f"   Account Creation: {self.format_sol_with_usd(account_creation_fee, sol_price_usd)}")
+        print(f"   Total Fees: {self.format_sol_with_usd(total_fees_sol, sol_price_usd)} ({total_fees_sol/position.sol_amount*100:.2f}% of trade)")
+        print("")
+        print("⚡ EXECUTION:")
+        print(f"   Confirmation Time: {confirmation_time:.1f}s")
+        print(f"   Slippage Tolerance: {self.config.slippage_bps/100:.1f}%")
+        print(f"   Priority Fee Used: {self.config.priority_fee_lamports} lamports")
+        print("")
+        print("🔗 TRANSACTION:")
+        print(f"   TX Signature: {tx_signature}")
+        print(f"   Explorer: {explorer_url}")
+        print("")
+        print("💼 PORTFOLIO UPDATE:")
+        print(f"   Daily Spent: {self.format_sol_with_usd(self.daily_spent, sol_price_usd)} / {self.format_sol_with_usd(self.config.max_daily_budget, sol_price_usd)}")
+        print(f"   Daily Trades: {self.daily_trades}")
+        print(f"   Active Positions: {len(self.positions)} / {self.config.max_simultaneous_positions}")
+        print(f"   Remaining Balance: {self.format_sol_with_usd(cost_breakdown.get('available_after', 0), sol_price_usd)}")
+        print("="*80)
+
+    # async def get_transaction_details(self, signature: str) -> Optional[Dict]:
+    #     """Récupère les détails d'une transaction via le SolanaClient"""
+    #     if self.solana_client:
+    #         async with self.solana_client as solana:
+    #             try:
+    #                 logger.info(f"🔍 Fetching transaction details for: {signature[:8]}...")
                     
-                    tx_details = await solana.client.get_transaction(
-                        Signature.from_string(signature),
-                        encoding="json",
-                        max_supported_transaction_version=0
-                    )
+    #                 tx_details = await solana.client.get_transaction(
+    #                     Signature.from_string(signature),
+    #                     encoding="json",
+    #                     max_supported_transaction_version=0
+    #                 )
                     
-                    if tx_details.value:
-                        logger.info(f"✅ Transaction details retrieved")
+    #                 if tx_details.value:
+    #                     logger.info(f"✅ Transaction details retrieved")
                         
-                        # Extraire des informations utiles
-                        meta = tx_details.value.meta
-                        if meta:
-                            logger.info(f"📊 Transaction Meta:")
-                            logger.info(f"   Error: {meta.err}")
+    #                     # Extraire des informations utiles
+    #                     meta = tx_details.value.meta
+    #                     if meta:
+    #                         logger.info(f"📊 Transaction Meta:")
+    #                         logger.info(f"   Error: {meta.err}")
                             
-                            if meta.err:
-                                logger.error(f"❌ Transaction failed with error: {meta.err}")
-                                return {"success": False, "error": meta.err, "meta": meta}
-                            else:
-                                logger.info(f"✅ Transaction executed successfully")
-                                return {"success": True, "meta": meta}
-                        else:
-                            logger.warning(f"⚠️ Transaction found but no meta information")
-                            return {"success": None, "meta": None}
-                    else:
-                        logger.warning(f"❌ Transaction not found: {signature}")
-                        return None
+    #                         if meta.err:
+    #                             logger.error(f"❌ Transaction failed with error: {meta.err}")
+    #                             return {"success": False, "error": meta.err, "meta": meta}
+    #                         else:
+    #                             logger.info(f"✅ Transaction executed successfully")
+    #                             return {"success": True, "meta": meta}
+    #                     else:
+    #                         logger.warning(f"⚠️ Transaction found but no meta information")
+    #                         return {"success": None, "meta": None}
+    #                 else:
+    #                     logger.warning(f"❌ Transaction not found: {signature}")
+    #                     return None
                         
-                except Exception as e:
-                    logger.error(f"❌ Error fetching transaction details: {e}")
-                    return None
-        return None
+    #             except Exception as e:
+    #                 logger.error(f"❌ Error fetching transaction details: {e}")
+    #                 return None
+    #     return None
 
     async def initialize_solana_client(self):
         """Initialise le client Solana"""
@@ -1073,49 +1172,53 @@ class AutoTrader:
     
     async def get_transaction_details(self, signature: str) -> Optional[Dict]:
         """Récupère les détails complets d'une transaction"""
-        try:
-            logger.info(f"🔍 Fetching transaction details for: {signature[:8]}...")
-            
-            tx_details = await self.client.get_transaction(
-                Signature.from_string(signature),
-                encoding="json",
-                max_supported_transaction_version=0
-            )
-            
-            if tx_details.value:
-                logger.info(f"✅ Transaction details retrieved")
-                
-                # Extraire des informations utiles
-                meta = tx_details.value.meta
-                if meta:
-                    logger.info(f"📊 Transaction Meta:")
-                    logger.info(f"   Error: {meta.err}")
-                    logger.info(f"   Fee: {meta.fee} lamports")
-                    logger.info(f"   Pre balances: {meta.pre_balances}")
-                    logger.info(f"   Post balances: {meta.post_balances}")
-                    logger.info(f"   Compute units consumed: {meta.compute_units_consumed}")
-                    
-                    if meta.log_messages:
-                        logger.info(f"📝 Log Messages:")
-                        for i, log in enumerate(meta.log_messages[-10:]):  # Derniers 10 logs
-                            logger.info(f"   [{i}] {log}")
-                    
-                    if meta.err:
-                        logger.error(f"❌ Transaction failed with error: {meta.err}")
-                        return {"success": False, "error": meta.err, "meta": meta}
-                    else:
-                        logger.info(f"✅ Transaction executed successfully")
-                        return {"success": True, "meta": meta}
-                else:
-                    logger.warning(f"⚠️ Transaction found but no meta information")
-                    return {"success": None, "meta": None}
-            else:
-                logger.warning(f"❌ Transaction not found: {signature}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"❌ Error fetching transaction details: {e}")
+        if not self.solana_client:
             return None
+            
+        async with self.solana_client as solana:  # ← CORRECTION : utiliser self.solana_client
+            try:
+                logger.info(f"🔍 Fetching transaction details for: {signature[:8]}...")
+                
+                tx_details = await solana.client.get_transaction(  # ← CORRECTION : solana.client
+                    Signature.from_string(signature),
+                    encoding="json",
+                    max_supported_transaction_version=0
+                )
+                
+                if tx_details.value:
+                    logger.info(f"✅ Transaction details retrieved")
+                    
+                    # Extraire des informations utiles
+                    meta = tx_details.value.meta
+                    if meta:
+                        logger.info(f"📊 Transaction Meta:")
+                        logger.info(f"   Error: {meta.err}")
+                        logger.info(f"   Fee: {meta.fee} lamports")
+                        logger.info(f"   Pre balances: {meta.pre_balances}")
+                        logger.info(f"   Post balances: {meta.post_balances}")
+                        logger.info(f"   Compute units consumed: {meta.compute_units_consumed}")
+                        
+                        if meta.log_messages:
+                            logger.info(f"📝 Log Messages:")
+                            for i, log in enumerate(meta.log_messages[-10:]):  # Derniers 10 logs
+                                logger.info(f"   [{i}] {log}")
+                        
+                        if meta.err:
+                            logger.error(f"❌ Transaction failed with error: {meta.err}")
+                            return {"success": False, "error": meta.err, "meta": meta}
+                        else:
+                            logger.info(f"✅ Transaction executed successfully")
+                            return {"success": True, "meta": meta}
+                    else:
+                        logger.warning(f"⚠️ Transaction found but no meta information")
+                        return {"success": None, "meta": None}
+                else:
+                    logger.warning(f"❌ Transaction not found: {signature}")
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"❌ Error fetching transaction details: {e}")
+                return None
 
     async def execute_buy_order(self, token_address: str, token_symbol: str, sol_amount: float) -> Optional[Position]:
         try:
@@ -1293,6 +1396,24 @@ class AutoTrader:
                 if confirmed:
                     logger.info(f"✅ Transaction confirmée en {confirmation_time:.1f}s")
                     
+                    # Récupérer les frais réels de la transaction
+                    try:
+                        tx_details = await self.get_transaction_details(tx_signature)
+                        if tx_details and tx_details.get("success") and tx_details.get("meta"):
+                            meta = tx_details["meta"]
+                            real_fee_lamports = getattr(meta, 'fee', 0)
+                            real_transaction_fee = real_fee_lamports / 1e9
+                            
+                            # Mettre à jour cost_breakdown avec les vrais frais
+                            cost_breakdown["transaction_fees"] = real_transaction_fee
+                            cost_breakdown["total_actual_fees"] = real_transaction_fee
+                        else:
+                            # Fallback aux estimations
+                            cost_breakdown["transaction_fees"] = 0.000005  # Estimation plus réaliste
+                    except Exception as e:
+                        logger.debug(f"Could not get real transaction fees: {e}")
+                        cost_breakdown["transaction_fees"] = 0.000005
+
                     # Créer une position
                     position = Position(
                         token_address=token_address,
@@ -1310,14 +1431,15 @@ class AutoTrader:
                     self.daily_spent += sol_amount
                     self.daily_trades += 1
                     
-                    logger.info(f"🎉 ACHAT CONFIRMÉ !")
-                    logger.info(f"   Token : {estimated_tokens:.0f} {token_symbol}")
-                    logger.info(f"   Coût : {sol_amount:.6f} SOL")
-                    logger.info(f"   Prix : {estimated_price:.8f} SOL par token")
-                    logger.info(f"   Réseau : {self.config.network_name}")
-                    logger.info(f"   TX : {tx_signature}")
-                    logger.info(f"   Explorer : {position.get_explorer_url()}")
-                    
+                    # logger.info(f"🎉 ACHAT CONFIRMÉ !")
+                    # logger.info(f"   Token : {estimated_tokens:.0f} {token_symbol}")
+                    # logger.info(f"   Coût : {sol_amount:.6f} SOL")
+                    # logger.info(f"   Prix : {estimated_price:.8f} SOL par token")
+                    # logger.info(f"   Réseau : {self.config.network_name}")
+                    # logger.info(f"   TX : {tx_signature}")
+                    # logger.info(f"   Explorer : {position.get_explorer_url()}")
+                    await self.log_transaction_summary(position, quote, cost_breakdown, confirmation_time, tx_signature)
+
                     return position
                 else:
                     logger.error("❌ Transaction confirmation failed or timed out")
@@ -1806,24 +1928,42 @@ def calculate_opportunity_score(token_data: Dict) -> tuple[float, float]:
         confidence += 5
     return min(score, 100), min(confidence, 100)
 
-def create_network_config(network_name: str) -> TradeConfig:
-    """Crée une configuration selon le réseau choisi"""
-    if network_name.lower() in ['mainnet', 'main']:
-        return TradeConfig(
-            network=Network.MAINNET,
-            max_sol_per_trade=0.0001,  # Montant très faible pour la sécurité
-            max_daily_budget=0.01,
-            require_manual_confirmation=True  # Confirmation obligatoire sur mainnet
-        )
+def create_network_config(network_name: str = None) -> TradeConfig:
+    """Crée une configuration depuis le fichier YAML"""
+    # Charger depuis YAML
+    config_data = load_trading_config()
+
+    # Déterminer le réseau
+    if network_name is None:
+        # Utiliser celui du fichier YAML
+        network = Network.MAINNET if config_data['network'] == 'mainnet' else Network.DEVNET
+    elif network_name.lower() in ['mainnet', 'main']:
+        network = Network.MAINNET
     elif network_name.lower() in ['devnet', 'dev']:
-        return TradeConfig(
-            network=Network.DEVNET,
-            max_sol_per_trade=0.1,     # Montants plus élevés sur devnet
-            max_daily_budget=1.0,
-            require_manual_confirmation=False  # Peut être désactivé sur devnet
-        )
+        network = Network.DEVNET
     else:
-        raise ValueError(f"Network '{network_name}' not supported. Use 'mainnet' or 'devnet'")
+        # Fallback au fichier YAML si valeur invalide
+        network = Network.MAINNET if config_data['network'] == 'mainnet' else Network.DEVNET
+    
+    return TradeConfig(
+        max_sol_per_trade=config_data['max_sol_per_trade'],
+        max_daily_budget=config_data['max_daily_budget'],
+        max_simultaneous_positions=config_data['max_simultaneous_positions'],
+        min_score_to_buy=config_data['min_score_to_buy'],
+        min_confidence_level=config_data['min_confidence_level'],
+        stop_loss_percentage=config_data['stop_loss_percentage'],
+        take_profit_levels=config_data['take_profit_levels'],
+        take_profit_portions=config_data['take_profit_portions'],
+        max_token_age_minutes=config_data['max_token_age_minutes'],
+        slippage_bps=config_data['slippage_bps'],
+        priority_fee_lamports=config_data['priority_fee_lamports'],
+        network=network,
+        confirmation_timeout=config_data['confirmation_timeout'],
+        require_manual_confirmation=config_data['require_manual_confirmation'],
+        confirmation_strategy=config_data['confirmation_strategy'],
+        price_check_interval_seconds=30,  # Valeur par défaut
+        accept_finalized_after_timeout=True  # Valeur par défaut
+    )
 
 async def test_autotrader(network: str = "devnet"):
     """Fonction de test pour l'autotrader avec vraies transactions"""
@@ -2002,32 +2142,16 @@ if __name__ == "__main__":
             sys.exit(0)
         network = sys.argv[1]
     else:
-        # Demander à l'utilisateur de choisir le réseau
-        print("AutoTrader - Choose Network")
-        print("=" * 30)
-        print("1. devnet  - Test with fake SOL (recommended)")
-        print("2. mainnet - Real trading with real SOL (⚠️ RISKY)")
-        print("3. help    - Show detailed help")
-        print("")
+        network = None  # Utiliser la config du fichier YAML
         
-        while True:
-            choice = input("Choose network (1/2/3): ").strip()
-            if choice == '1':
-                network = 'devnet'
-                break
-            elif choice == '2':
-                network = 'mainnet'
-                break
-            elif choice == '3':
-                show_help()
-                sys.exit(0)
-            else:
-                print("Please choose 1, 2, or 3")
     
     print("AutoTrader REAL Trading Test System")
     print("=" * 60)
     
-    if network.lower() == 'mainnet':
+    config = create_network_config(network)
+    actual_network = config.network.value  # 'mainnet' ou 'devnet'
+
+    if actual_network.lower() == 'mainnet':
         print("⚠️  WARNING: MAINNET MODE - REAL MONEY AT RISK")
         print("⚠️  Only use with small amounts you can afford to lose")
         print("⚠️  Trading crypto is extremely risky")
@@ -2055,19 +2179,19 @@ if __name__ == "__main__":
     else:
         print("✅ Wallet private key configured")
     
-    if SOLANA_AVAILABLE and wallet_key and network.lower() == 'mainnet':
+    if SOLANA_AVAILABLE and wallet_key and actual_network .lower() == 'mainnet':
         print(f"\n🚨 FINAL WARNING FOR MAINNET:")
         print(f"   This will use your REAL Solana wallet")
         print(f"   Transactions will be executed on MAINNET")
         print(f"   You may LOSE MONEY")
         print(f"   Maximum trade size: 0.0001 SOL")
         print(f"   Daily budget: 0.01 SOL")
-        final_confirm = input(f"\nType 'I UNDERSTAND THE RISKS' to continue: ")
-        if final_confirm != 'I UNDERSTAND THE RISKS':
-            print("❌ Test cancelled for safety")
-            sys.exit(1)
+        # final_confirm = input(f"\nType 'I UNDERSTAND THE RISKS' to continue: ")
+        # if final_confirm != 'I UNDERSTAND THE RISKS':
+        #     print("❌ Test cancelled for safety")
+        #     sys.exit(1)
         print("✅ Proceeding with mainnet trading test...")
-    elif network.lower() == 'devnet':
+    elif actual_network .lower() == 'devnet':
         print(f"\n✅ DEVNET MODE:")
         print(f"   Using test network with fake SOL")
         print(f"   No real money at risk")

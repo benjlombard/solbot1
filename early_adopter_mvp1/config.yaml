@@ -1,0 +1,86 @@
+alerts:
+  balance_warning_threshold: 0.001
+  consecutive_failures_threshold: 5
+  daily_loss_threshold: -0.005
+  position_pnl_thresholds:
+  - -20
+  - -50
+  - 100
+  - 300
+logging:
+  file_rotation:
+    backup_count: 5
+    enabled: true
+    max_size_mb: 50
+    rotation_interval: daily
+  format: json
+  level: INFO
+  log_files:
+    errors: logs/errors.log
+    main: logs/autotrader.log
+    performance: logs/performance.log
+    trades: logs/trades.log
+monitoring:
+  health_check_interval_seconds: 60
+  position_update_interval_seconds: 10
+  price_check_interval_seconds: 30
+network:
+  explorer_base:
+    devnet: https://solscan.io
+    mainnet: https://solscan.io
+  jupiter_api: https://quote-api.jup.ag/v6
+  rpc_endpoints:
+    devnet:
+      fallback: https://api.devnet.solana.com
+      primary: https://api.devnet.solana.com
+    mainnet:
+      fallback: https://api.mainnet-beta.solana.com
+      primary: https://api.mainnet-beta.solana.com
+  type: devnet
+notifications:
+  discord:
+    channels:
+      errors: true
+      performance: true
+      trades: true
+    enabled: false
+    minimum_alert_level: INFO
+    webhook_url: ''
+  telegram:
+    bot_token: ''
+    channels:
+      errors: true
+      performance: true
+      trades: true
+    chat_id: ''
+    enabled: false
+    minimum_alert_level: WARNING
+trading:
+  confirmation_strategy: smart
+  confirmation_timeout: 60
+  max_daily_budget:
+    devnet: 1.0
+    mainnet: 0.01
+  max_simultaneous_positions: 3
+  max_sol_per_trade:
+    devnet: 0.1
+    mainnet: 0.0001
+  max_token_age_minutes: 15
+  min_confidence_level: 40
+  min_score_to_buy: 60
+  priority_fee_lamports:
+    devnet: 50
+    mainnet: 100
+  require_manual_confirmation:
+    devnet: false
+    mainnet: true
+  slippage_bps: 200
+  stop_loss_percentage: -30
+  take_profit_levels:
+  - 100
+  - 300
+  - 500
+  take_profit_portions:
+  - 0.5
+  - 0.3
+  - 0.2
