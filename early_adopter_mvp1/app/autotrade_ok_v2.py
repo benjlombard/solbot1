@@ -10,7 +10,7 @@ import logging
 import json
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from decimal import Decimal
 import aiohttp
@@ -323,15 +323,11 @@ class Position:
     current_value: float = 0.0
     pnl_percentage: float = 0.0
     stop_loss_triggered: bool = False
-    take_profits_executed: Dict[str, bool] = None 
+    take_profits_executed: Dict[int, bool] = None
 
     def __post_init__(self):
         if self.take_profits_executed is None:
-            self.take_profits_executed = {
-                # Anciens (compatibilité)
-                0: False, 1: False, 2: False,
-                # Nouveaux seront ajoutés dynamiquement (ex: "tp_50", "tp_100", etc.)
-            }
+            self.take_profits_executed = {i: False for i in range(3)}
 
     def update_price(self, new_price: float):
         """Met à jour le prix et calcule le PnL"""
@@ -890,6 +886,9 @@ class JupiterClient:
                 if len(input_mint) < 32 or len(input_mint) > 44:
                     logger.error(f"❌ Invalid input_mint length: {len(input_mint)} (should be 44)")
                     return None
+                if len(output_mint) != 44:
+                    logger.error(f"❌ Invalid output_mint length: {len(output_mint)} (should be 44)")
+                    return None
             except Exception as e:
                 logger.error(f"❌ Error validating mint addresses: {e}")
                 return None
@@ -1059,199 +1058,6 @@ class AutoTrader:
         #self.known_atas = {"Fv73EXJBRfctJzLVC3P7uQP6er6JU8b4KtDr4LQFpump": "CX8AWFkLfVM1DWmSNv7T8WDzXTd2R3J3n3pMnN3gXy7J"}  # Cache for known ATAs
         self.known_atas = {"Fv73EXJBRfctJzLVC3P7uQP6er6JU8b4KtDr4LQFpump": "CX8AWFkLfVM1DWmSNv7T8WDzXTd2R3J3n3pMnN3gXy7J"}
 
-        # Nouvelles propriétés pour la vente automatique
-        self.auto_sell_config = None
-        self.position_highs = {}  # Pour le trailing stop
-        self.last_auto_sell_check = 0
-        self._load_auto_sell_config()
-
-
-    
-
-    def _load_auto_sell_config(self):
-        """Charge la configuration de vente automatique"""
-        try:
-            from .autotrade_config_loader import get_config
-            config_loader = get_config()
-            self.auto_sell_config = config_loader.get_auto_sell_config()
-            
-            if self.auto_sell_config.get("enabled", False):
-                logger.info("✅ Auto-sell enabled with conditions:")
-                for condition_type, condition_config in self.auto_sell_config.get("conditions", {}).items():
-                    if condition_config.get("enabled", False):
-                        logger.info(f"   - {condition_type}: {condition_config}")
-            else:
-                logger.info("⚠️ Auto-sell disabled")
-                
-        except Exception as e:
-            logger.error(f"❌ Could not load auto-sell config: {e}")
-            self.auto_sell_config = {"enabled": False}
-
-    async def check_auto_sell_conditions(self, position: Position) -> Optional[Tuple[str, float]]:
-        """
-        Vérifie les conditions de vente automatique pour une position
-        Returns: (reason, sell_portion) si vente nécessaire, None sinon
-        """
-        if not self.auto_sell_config or not self.auto_sell_config.get("enabled", False):
-            return None
-        
-        conditions = self.auto_sell_config.get("conditions", {})
-        
-        # Trier les conditions par priorité
-        sorted_conditions = sorted(
-            [(name, config) for name, config in conditions.items() if config.get("enabled", False)],
-            key=lambda x: x[1].get("priority", 999)
-        )
-        
-        for condition_name, condition_config in sorted_conditions:
-            result = await self._check_single_condition(position, condition_name, condition_config)
-            if result:
-                return result
-        
-        return None
-
-    async def _check_single_condition(self, position: Position, condition_name: str, 
-                                    condition_config: Dict) -> Optional[Tuple[str, float]]:
-        """Vérifie une condition de vente spécifique"""
-        
-        if condition_name == "stop_loss":
-            return self._check_stop_loss(position, condition_config)
-        
-        elif condition_name == "take_profit":
-            return self._check_take_profit(position, condition_config)
-        
-        elif condition_name == "trailing_stop":
-            return self._check_trailing_stop(position, condition_config)
-        
-        elif condition_name == "time_based":
-            return self._check_time_based(position, condition_config)
-        
-        elif condition_name == "price_stability":
-            return await self._check_price_stability(position, condition_config)
-        
-        elif condition_name == "volume_drop":
-            return await self._check_volume_drop(position, condition_config)
-        
-        return None
-
-    def _check_stop_loss(self, position: Position, config: Dict) -> Optional[Tuple[str, float]]:
-        """Vérifie la condition de stop-loss"""
-        threshold = config.get("percentage", -15)
-        
-        if position.pnl_percentage <= threshold:
-            logger.warning(f"🛑 Stop-loss triggered for {position.token_symbol}: {position.pnl_percentage:.1f}% <= {threshold}%")
-            return (f"Stop-loss {position.pnl_percentage:.1f}%", 1.0)
-        
-        return None
-
-    def _check_take_profit(self, position: Position, config: Dict) -> Optional[Tuple[str, float]]:
-        """Vérifie les conditions de take-profit"""
-        levels = config.get("levels", [])
-        
-        for level in levels:
-            target_percent = level.get("percentage", 0)
-            sell_portion = level.get("sell_portion", 1.0)
-            
-            # Vérifier si ce niveau n'a pas déjà été exécuté
-            level_key = f"tp_{target_percent}"
-            if position.take_profits_executed.get(level_key, False):
-                continue
-            
-            if position.pnl_percentage >= target_percent:
-                logger.info(f"🎯 Take-profit triggered for {position.token_symbol}: {position.pnl_percentage:.1f}% >= {target_percent}%")
-                position.take_profits_executed[level_key] = True
-                return (f"Take-profit {target_percent}%", sell_portion)
-        
-        return None
-
-    def _check_trailing_stop(self, position: Position, config: Dict) -> Optional[Tuple[str, float]]:
-        """Vérifie la condition de trailing stop"""
-        initial_threshold = config.get("initial_percentage", -10)
-        trail_distance = config.get("trail_distance", 5)
-        
-        # Mettre à jour le plus haut
-        if position.token_address not in self.position_highs:
-            self.position_highs[position.token_address] = position.current_price
-        else:
-            self.position_highs[position.token_address] = max(
-                self.position_highs[position.token_address], 
-                position.current_price
-            )
-        
-        # Calculer la perte depuis le plus haut
-        high_price = self.position_highs[position.token_address]
-        current_loss_from_high = ((position.current_price - high_price) / high_price) * 100
-        
-        # Déclencher si perte initiale ou trailing stop
-        if (position.pnl_percentage <= initial_threshold or 
-            current_loss_from_high <= -trail_distance):
-            
-            logger.warning(f"📉 Trailing stop triggered for {position.token_symbol}: {current_loss_from_high:.1f}% from high")
-            return (f"Trailing stop {current_loss_from_high:.1f}%", 1.0)
-        
-        return None
-
-    def _check_time_based(self, position: Position, config: Dict) -> Optional[Tuple[str, float]]:
-        """Vérifie la condition de vente basée sur le temps"""
-        max_hold_minutes = config.get("max_hold_time_minutes", 180)
-        sell_portion = config.get("force_sell_portion", 0.5)
-        
-        age_minutes = (datetime.now() - position.entry_time).total_seconds() / 60
-        
-        if age_minutes >= max_hold_minutes:
-            logger.info(f"⏰ Time-based sell triggered for {position.token_symbol}: {age_minutes:.0f}min >= {max_hold_minutes}min")
-            return (f"Time-based {age_minutes:.0f}min", sell_portion)
-        
-        return None
-
-    async def _check_price_stability(self, position: Position, config: Dict) -> Optional[Tuple[str, float]]:
-        """Vérifie la condition de stabilité des prix"""
-        # Cette fonction nécessiterait un historique des prix
-        # Pour l'instant, retourner None (à implémenter avec price_history)
-        return None
-
-    async def _check_volume_drop(self, position: Position, config: Dict) -> Optional[Tuple[str, float]]:
-        """Vérifie la condition de chute de volume"""
-        # Cette fonction nécessiterait des données de volume
-        # Pour l'instant, retourner None (à implémenter avec API externe)
-        return None
-
-    async def execute_auto_sell_order(self, position: Position, reason: str, sell_portion: float) -> bool:
-        """Exécute un ordre de vente automatique"""
-        try:
-            logger.info(f"🔴 Executing auto-sell: {position.token_symbol} - {reason} (portion: {sell_portion:.1%})")
-            
-            # Utiliser la méthode de vente existante
-            success = await self.execute_real_sell_order(position, sell_portion, f"Auto-sell: {reason}")
-            
-            if success:
-                logger.info(f"✅ Auto-sell completed: {position.token_symbol}")
-                
-                # Enregistrer en base si disponible
-                if PORTFOLIO_DB_AVAILABLE:
-                    try:
-                        record_trade_transaction(
-                            signature=f"auto_sell_{int(time.time())}",
-                            network=position.network.value,
-                            token_address=position.token_address,
-                            token_symbol=position.token_symbol,
-                            operation_type="SELL",
-                            sol_amount=position.current_value * sell_portion,
-                            token_amount=position.token_amount * sell_portion,
-                            price_per_token=position.current_price,
-                            fees={"transaction": 0, "priority": 0, "account_creation": 0},
-                            jupiter_data={"auto_sell_reason": reason},
-                            confirmation_time=0,
-                            status="CONFIRMED"
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to record auto-sell: {e}")
-            
-            return success
-            
-        except Exception as e:
-            logger.error(f"❌ Auto-sell failed for {position.token_symbol}: {e}")
-            return False
 
     async def get_sol_price_usd(self) -> float:
         """Récupère le prix actuel de SOL en USD"""
@@ -1810,115 +1616,6 @@ class AutoTrader:
             logger.error(f"Error in get_real_transaction_fee_sync: {e}")
             return 0.000005
 
-    async def execute_real_sell_order(self, position: Position, percentage: float, reason: str) -> bool:
-        """Exécute un ordre de vente réel sur Solana"""
-        try:
-            if not self.wallet_private_key or not SOLANA_AVAILABLE:
-                logger.warning("Running in simulation mode - using simulated sell")
-                return await self.execute_sell_order(position, percentage, reason)
-            
-            tokens_to_sell = int(position.token_amount * percentage)
-            if tokens_to_sell <= 0:
-                logger.warning("No tokens to sell")
-                return False
-            
-            logger.info(f"🔴 EXECUTING REAL SELL ORDER: {tokens_to_sell} {position.token_symbol} ({percentage:.1%}) - {reason}")
-            
-            async with JupiterClient(self.config.jupiter_api_url) as jupiter, self.solana_client as solana:
-                # Obtenir un quote de vente (token → SOL)
-                quote = await jupiter.get_quote(
-                    input_mint=position.token_address,  # Token à vendre
-                    output_mint=self.SOL_MINT,          # Recevoir SOL
-                    amount=tokens_to_sell * (10 ** 6),  # Ajuster selon les décimales
-                    slippage_bps=self.config.slippage_bps
-                )
-                
-                if not quote:
-                    logger.error("Failed to get sell quote from Jupiter")
-                    return False
-                
-                # Obtenir la transaction de vente
-                priority_fee = await solana.get_dynamic_priority_fee()
-                swap_data = await jupiter.get_swap_transaction(
-                    quote,
-                    str(solana.public_key),
-                    priority_fee
-                )
-                
-                if not swap_data:
-                    logger.error("Failed to get sell transaction from Jupiter")
-                    return False
-                
-                # Confirmation utilisateur si nécessaire
-                estimated_sol = int(quote.get('outAmount', 0)) / 1e9
-                if self.config.require_manual_confirmation:
-                    confirmation_details = {
-                        "Opération": "VENTE",
-                        "Token": f"{position.token_symbol} ({position.token_address[:8]}...)",
-                        "Tokens vendus": f"{tokens_to_sell} {position.token_symbol}",
-                        "SOL attendu": f"{estimated_sol:.6f} SOL",
-                        "Raison": reason
-                    }
-                    if not ask_user_confirmation("Vente de token", confirmation_details, self.config.network):
-                        logger.info("Sell transaction cancelled by user")
-                        return False
-                
-                # Signer et envoyer la transaction
-                transaction_bytes = base64.b64decode(swap_data.get('swapTransaction'))
-                original_transaction = VersionedTransaction.from_bytes(transaction_bytes)
-                transaction = VersionedTransaction(original_transaction.message, [solana.keypair])
-                
-                # Simuler d'abord
-                if not await solana.simulate_transaction(transaction):
-                    logger.error("Sell transaction simulation failed")
-                    return False
-                
-                # Envoyer la transaction
-                tx_signature = await solana.send_transaction(transaction)
-                if not tx_signature:
-                    logger.error("Failed to send sell transaction")
-                    return False
-                
-                # Confirmer la transaction
-                confirmation_start = time.time()
-                confirmed = await solana.confirm_transaction(tx_signature, self.config.confirmation_timeout)
-                confirmation_time = time.time() - confirmation_start
-                
-                if confirmed:
-                    logger.info(f"✅ REAL SELL COMPLETED: {tx_signature}")
-                    
-                    # Mettre à jour la position
-                    position.token_amount -= tokens_to_sell
-                    if position.token_amount <= 0:
-                        del self.positions[position.token_address]
-                        logger.info(f"Position closed for {position.token_symbol}")
-                    
-                    # Enregistrer en base de données
-                    if PORTFOLIO_DB_AVAILABLE:
-                        record_trade_transaction(
-                            signature=tx_signature,
-                            network=position.network.value,
-                            token_address=position.token_address,
-                            token_symbol=position.token_symbol,
-                            operation_type="SELL",
-                            sol_amount=estimated_sol,
-                            token_amount=tokens_to_sell,
-                            price_per_token=estimated_sol / tokens_to_sell,
-                            fees={"transaction": 0.000005, "priority": 0, "account_creation": 0},
-                            jupiter_data=quote,
-                            confirmation_time=confirmation_time,
-                            status="CONFIRMED"
-                        )
-                    
-                    return True
-                else:
-                    logger.error("Sell transaction confirmation failed")
-                    return False
-                    
-        except Exception as e:
-            logger.error(f"Error executing real sell order: {e}")
-            return False
-
     async def execute_buy_order(self, token_address: str, token_symbol: str, sol_amount: float) -> Optional[Position]:
         try:
             logger.debug(f"🔥 EXECUTING BUY ORDER: {sol_amount:.3f} SOL → {token_symbol} ({token_address[:8]}...) on {self.config.network_name}")
@@ -2295,21 +1992,6 @@ class AutoTrader:
             new_price = position.entry_price * (1 + price_change)
             position.update_price(new_price)
             logger.debug(f"📊 {position.token_symbol}: {position.pnl_percentage:+.1f}% | Price: {position.current_price:.6f}")
-
-            # NOUVEAU: Vérifier les conditions de vente automatique
-            current_time = time.time()
-            check_interval = self.auto_sell_config.get("check_interval_seconds", 15) if self.auto_sell_config else 30
-            
-            if current_time - self.last_auto_sell_check >= check_interval:
-                auto_sell_result = await self.check_auto_sell_conditions(position)
-                
-                if auto_sell_result:
-                    reason, sell_portion = auto_sell_result
-                    await self.execute_auto_sell_order(position, reason, sell_portion)
-                    return  # Sortir après une vente automatique
-                
-                self.last_auto_sell_check = current_time
-
             if not position.stop_loss_triggered and position.pnl_percentage <= self.config.stop_loss_percentage:
                 logger.warning(f"🛑 STOP-LOSS TRIGGERED: {position.token_symbol} at {position.pnl_percentage:+.1f}%")
                 await self.execute_sell_order(position, 1.0, f"Stop-loss {position.pnl_percentage:+.1f}%")
@@ -2736,65 +2418,6 @@ def show_help():
     print("  - Mainnet: Manual confirmation required, low limits")
     print("  - All networks: Simulation mode if wallet not configured")
 
-
-def test_auto_sell_config():
-        """Teste et affiche la configuration de vente automatique"""
-        try:
-            from .autotrade_config_loader import get_config
-            config_loader = get_config()
-            auto_sell_config = config_loader.get_auto_sell_config()
-            
-            print("🧪 Testing Auto-Sell Configuration")
-            print("=" * 50)
-            
-            if not auto_sell_config.get("enabled", False):
-                print("❌ Auto-sell is DISABLED")
-                return
-            
-            print("✅ Auto-sell is ENABLED")
-            print(f"📊 Check interval: {auto_sell_config.get('check_interval_seconds', 15)}s")
-            print("\n🔍 Active Conditions:")
-            
-            conditions = auto_sell_config.get("conditions", {})
-            active_conditions = [(name, config) for name, config in conditions.items() 
-                            if config.get("enabled", False)]
-            
-            if not active_conditions:
-                print("⚠️ No active conditions found")
-                return
-            
-            # Trier par priorité
-            active_conditions.sort(key=lambda x: x[1].get("priority", 999))
-            
-            for name, config in active_conditions:
-                priority = config.get("priority", "N/A")
-                print(f"\n  {priority}. {name.upper()}:")
-                
-                if name == "stop_loss":
-                    print(f"     📉 Trigger at: {config.get('percentage', -15)}% loss")
-                    
-                elif name == "take_profit":
-                    levels = config.get("levels", [])
-                    for i, level in enumerate(levels):
-                        pct = level.get("percentage", 0)
-                        portion = level.get("sell_portion", 1.0)
-                        print(f"     📈 Level {i+1}: {pct}% → sell {portion:.1%}")
-                        
-                elif name == "trailing_stop":
-                    initial = config.get("initial_percentage", -10)
-                    trail = config.get("trail_distance", 5)
-                    print(f"     📉 Initial: {initial}%, Trail: {trail}%")
-                    
-                elif name == "time_based":
-                    max_time = config.get("max_hold_time_minutes", 180)
-                    portion = config.get("force_sell_portion", 0.5)
-                    print(f"     ⏰ Max hold: {max_time}min → sell {portion:.1%}")
-            
-            print(f"\n✅ Configuration loaded successfully")
-            
-        except Exception as e:
-            print(f"❌ Error loading auto-sell config: {e}")
-
 if __name__ == "__main__":
     import sys
     
@@ -2813,9 +2436,6 @@ if __name__ == "__main__":
     
     config = create_network_config(network)
     actual_network = config.network.value  # 'mainnet' ou 'devnet'
-
-    test_auto_sell_config()
-    print("=" * 60)
 
     if actual_network.lower() == 'mainnet':
         print("⚠️  WARNING: MAINNET MODE - REAL MONEY AT RISK")

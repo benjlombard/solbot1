@@ -38,6 +38,44 @@ class SimpleConfigLoader:
             "backup_count": self.get("logging.file_rotation.backup_count", 5)
         }
 
+    def get_auto_sell_config(self) -> Dict[str, Any]:
+        """Récupère la configuration de vente automatique"""
+        network = self.get_network_type()
+        base_config = self.get("auto_sell", {})
+        
+        if not base_config.get("enabled", False):
+            return {"enabled": False}
+        
+        # Appliquer les overrides du réseau si ils existent
+        network_overrides = self.get(f"auto_sell.network_overrides.{network}", {})
+        
+        # Merger la config de base avec les overrides
+        config = base_config.copy()
+        if network_overrides:
+            self._merge_config(config.get("conditions", {}), network_overrides)
+        
+        return config
+
+    def _merge_config(self, base: Dict, override: Dict):
+        """Merge récursif des configurations"""
+        for key, value in override.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                self._merge_config(base[key], value)
+            else:
+                base[key] = value
+
+    def get_auto_sell_condition(self, condition_type: str) -> Dict[str, Any]:
+        """Récupère une condition de vente spécifique"""
+        auto_sell_config = self.get_auto_sell_config()
+        if not auto_sell_config.get("enabled", False):
+            return {"enabled": False}
+        
+        return auto_sell_config.get("conditions", {}).get(condition_type, {"enabled": False})
+
+    def is_auto_sell_enabled(self) -> bool:
+        """Vérifie si la vente automatique est activée"""
+        return self.get("auto_sell.enabled", False)
+
     def load_config(self):
         """Charge la configuration depuis le fichier"""
         if not self.config_file.exists():

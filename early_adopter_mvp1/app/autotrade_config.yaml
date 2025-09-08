@@ -127,4 +127,71 @@ alerts:
   consecutive_failures_threshold: 5  # Alerte après 5 échecs consécutifs
 
 
+auto_sell:
+  enabled: true
+  check_interval_seconds: 15  # Fréquence de vérification des conditions
+  
+  # Conditions de vente (ordre de priorité)
+  conditions:
+    stop_loss:
+      enabled: true
+      priority: 1
+      percentage: -1  # Vendre si perte >= 15%
+      
+    take_profit:
+      enabled: true
+      priority: 2
+      levels:
+        - percentage: 50   # Premier niveau: +50%
+          sell_portion: 0.3  # Vendre 30% de la position
+        - percentage: 100  # Deuxième niveau: +100%
+          sell_portion: 0.5  # Vendre 50% du reste
+        - percentage: 200  # Troisième niveau: +200%
+          sell_portion: 1.0  # Vendre tout le reste
+    
+    trailing_stop:
+      enabled: false
+      priority: 3
+      initial_percentage: -10    # Déclenche le trailing à -10%
+      trail_distance: 5         # Distance de suivi en %
+      
+    time_based:
+      enabled: true
+      priority: 4
+      max_hold_time_minutes: 1  # Vendre après 3h maximum
+      force_sell_portion: 0.5     # Vendre 50% après ce délai
+      
+    price_stability:
+      enabled: false
+      priority: 5
+      stable_duration_minutes: 30  # Prix stable pendant 30min
+      max_variation_percent: 2     # Variation max de 2%
+      sell_portion: 0.3           # Vendre 30% si stable
+      
+    volume_drop:
+      enabled: false
+      priority: 6
+      volume_drop_threshold: 70   # Chute de volume de 70%
+      sell_portion: 0.4           # Vendre 40% si volume chute
+
+# Conditions spécifiques par réseau
+  network_overrides:
+    mainnet:
+      stop_loss:
+        percentage: -1  # Plus strict sur mainnet
+      take_profit:
+        levels:
+          - percentage: 1
+            sell_portion: 1
+          - percentage: 80
+            sell_portion: 0.4
+          - percentage: 150
+            sell_portion: 1.0
+    devnet:
+      stop_loss:
+        percentage: -20  # Plus tolérant sur devnet
+      time_based:
+        max_hold_time_minutes: 60  # Vendre plus vite sur devnet
+
+
   
